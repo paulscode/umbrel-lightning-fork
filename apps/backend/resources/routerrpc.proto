@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package routerrpc;
+
+import "rpc.proto";
+
+// Minimal Router service definition used by the Lightning Node UI. Field
+// numbers match lnd v0.21.1-beta's lnrpc/routerrpc/router.proto.
+service Router {
+    rpc SendPaymentV2 (SendPaymentRequest) returns (stream lnrpc.Payment);
+}
+
+message SendPaymentRequest {
+    // Number of satoshis to send for a zero-amount invoice.
+    int64 amt = 2;
+
+    // The BOLT 11 payment request.
+    string payment_request = 5;
+
+    // Maximum routing fee in satoshis.
+    int64 fee_limit_sat = 7;
+
+    // Only stream the terminal payment update.
+    bool no_inflight_updates = 18;
+}

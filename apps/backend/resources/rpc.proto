@@ -2337,6 +2337,16 @@ message InvoiceSubscription {
 }
 
 
+enum PaymentFailureReason {
+    FAILURE_REASON_NONE = 0;
+    FAILURE_REASON_TIMEOUT = 1;
+    FAILURE_REASON_NO_ROUTE = 2;
+    FAILURE_REASON_ERROR = 3;
+    FAILURE_REASON_INCORRECT_PAYMENT_DETAILS = 4;
+    FAILURE_REASON_INSUFFICIENT_BALANCE = 5;
+    FAILURE_REASON_CANCELED = 6;
+}
+
 message Payment {
     /// The payment hash
     string payment_hash = 1 [json_name = "payment_hash"];
@@ -2370,6 +2380,7 @@ message Payment {
         IN_FLIGHT = 1;
         SUCCEEDED = 2;
         FAILED = 3;
+        INITIATED = 4;
     }
 
     // The status of the payment.
@@ -2380,6 +2391,8 @@ message Payment {
 
     ///  The fee paid for this payment in milli-satoshis
     int64 fee_msat = 12 [json_name = "fee_msat"];
+
+    PaymentFailureReason failure_reason = 16 [json_name = "failure_reason"];
 }
 
 message ListPaymentsRequest {

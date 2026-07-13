@@ -806,7 +806,9 @@ async function payInvoice(paymentRequest, amt) {
     );
   }
 
-  return await lndService.sendPaymentSync(paymentRequest, amt);
+  const paymentAmount = Number(invoice.numSatoshis) || Number(amt);
+
+  return await lndService.sendPayment(paymentRequest, amt, paymentAmount);
 }
 
 // Removes a managed channel.

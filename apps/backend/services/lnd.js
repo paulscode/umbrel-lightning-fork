@@ -8,6 +8,8 @@ const LndError = require("models/errors.js").LndError;
 const LND_HOST = process.env.LND_HOST || "127.0.0.1";
 const TLS_FILE = process.env.TLS_FILE || "/lnd/tls.cert";
 const PROTO_FILE = process.env.PROTO_FILE || "./resources/rpc.proto";
+const ROUTERRPC_PROTO_FILE =
+  process.env.ROUTERRPC_PROTO_FILE || "./resources/routerrpc.proto";
 const WATCHTOWERRPC_PROTO_FILE = process.env.WATCHTOWERRPC_PROTO_FILE || "./resources/watchtowerrpc.proto";
 const WTCLIENTRPC_PROTO_FILE = process.env.WTCLIENTRPC_PROTO_FILE || "./resources/wtclientrpc.proto";
 const LND_PORT = process.env.LND_PORT || 10009; // eslint-disable-line no-magic-numbers
@@ -29,6 +31,9 @@ if (process.env.MACAROON_DIR) {
 const lnrpcDescriptor = grpc.load(PROTO_FILE);
 const lnrpc = lnrpcDescriptor.lnrpc;
 
+const lnrpcRouterDescriptor = grpc.load(ROUTERRPC_PROTO_FILE);
+const lnrpcRouter = lnrpcRouterDescriptor.routerrpc;
+
 const lnrpcWatchtowerDescriptor = grpc.load(WATCHTOWERRPC_PROTO_FILE);
 const lnrpcWatchtower = lnrpcWatchtowerDescriptor.watchtowerrpc;
 
@@ -36,6 +41,18 @@ const lnrpcWtclientDescriptor = grpc.load(WTCLIENTRPC_PROTO_FILE);
 const lnrpcWtclient = lnrpcWtclientDescriptor.wtclientrpc;
 
 const DEFAULT_RECOVERY_WINDOW = 250;
+const SMALL_PAYMENT_THRESHOLD = 1000;
+const DEFAULT_ROUTING_FEE_PERCENT = 5;
+
+const PAYMENT_FAILURE_MESSAGES = {
+  FAILURE_REASON_TIMEOUT: "payment timed out",
+  FAILURE_REASON_NO_ROUTE: "no route found",
+  FAILURE_REASON_ERROR: "payment failed",
+  FAILURE_REASON_INCORRECT_PAYMENT_DETAILS: "incorrect payment details",
+  FAILURE_REASON_INSUFFICIENT_BALANCE: "insufficient balance",
+  FAILURE_REASON_CANCELED: "payment canceled",
+};
+
 const GRPC_PARAMS = {
   "grpc.max_receive_message_length": -1,
   "grpc.max_send_message_length": -1,
@@ -87,6 +104,11 @@ async function initializeRPCClient() {
         walletUnlocker: new lnrpc.WalletUnlocker(
           LND_HOST + ":" + LND_PORT,
           credentials
+        ),
+        router: new lnrpcRouter.Router(
+          LND_HOST + ":" + LND_PORT,
+          credentials,
+          GRPC_PARAMS
         ),
         watchtower: new lnrpcWatchtower.Watchtower(
           LND_HOST + ":" + LND_PORT,
@@ -509,31 +531,83 @@ function sendCoins(addr, amt, satPerByte, sendAll) {
   );
 }
 
-function sendPaymentSync(paymentRequest, amt) {
+function defaultRoutingFeeLimit(amount) {
+  // Match the amount-based default previously applied by SendPaymentSync.
+  if (amount <= SMALL_PAYMENT_THRESHOLD) {
+    return amount;
+  }
+
+  return Math.floor((amount * DEFAULT_ROUTING_FEE_PERCENT) / 100);
+}
+
+function sendPayment(paymentRequest, amt, paymentAmount) {
   const rpcPayload = {
     payment_request: paymentRequest,
-    amt: amt, // eslint-disable-line object-shorthand
+    fee_limit_sat: defaultRoutingFeeLimit(paymentAmount),
+    no_inflight_updates: true,
   };
 
-  return initializeRPCClient()
-    .then(({ lightning }) =>
-      promiseify(
-        lightning,
-        lightning.SendPaymentSync,
-        rpcPayload,
-        "send lightning payment"
-      )
-    )
-    .then((response) => {
-      // sometimes the error comes in on the response...
-      if (response.paymentError) {
-        throw new LndError(
-          `Unable to send lightning payment: ${response.paymentError}`
-        );
-      }
+  if (amt) {
+    rpcPayload.amt = amt;
+  }
 
-      return response;
-    });
+  return initializeRPCClient().then(
+    ({ router }) =>
+      new Promise((resolve, reject) => {
+        let settled = false;
+
+        const succeed = response => {
+          if (settled) {
+            return;
+          }
+
+          settled = true;
+          resolve(response);
+        };
+
+        const fail = error => {
+          if (settled) {
+            return;
+          }
+
+          settled = true;
+          reject(error);
+        };
+
+        try {
+          const call = router.SendPaymentV2(rpcPayload);
+
+          call.on("data", response => {
+            const payment = camelizeKeys(response, "_");
+
+            if (payment.status === "SUCCEEDED") {
+              succeed(payment);
+            } else if (payment.status === "FAILED") {
+              const reason =
+                PAYMENT_FAILURE_MESSAGES[payment.failureReason] ||
+                "unknown reason";
+              fail(
+                new LndError(`Unable to send lightning payment: ${reason}`)
+              );
+            }
+          });
+
+          call.on("error", error => {
+            fail(new LndError("Unable to send lightning payment", error));
+          });
+
+          call.on("end", () => {
+            fail(
+              new LndError(
+                "Unable to send lightning payment: no final payment status"
+              )
+            );
+          });
+        } catch (error) {
+          fail(error);
+        }
+      })
+  );
 }
 
 function unlockWallet(password) {
@@ -688,7 +762,7 @@ module.exports = {
   listUnspent,
   openChannel,
   sendCoins,
-  sendPaymentSync,
+  sendPayment,
   unlockWallet,
   updateChannelPolicy,
   recoverBackup,
