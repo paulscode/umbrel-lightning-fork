@@ -92,6 +92,9 @@
             <b-dropdown-item v-if="!isStartOS" href="#" @click.stop.prevent="downloadChannelBackup"
               >Download channel backup file</b-dropdown-item
             >
+            <b-dropdown-item v-if="passwordEnabled" href="#" @click.stop.prevent="signOut"
+              >Sign out</b-dropdown-item
+            >
             <b-dropdown-group>
               <div class="dropdown-group" @click.stop>
                 <div
@@ -480,6 +483,7 @@ export default {
       unit: state => state.system.unit,
       theme: state => state.system.theme,
       platform: state => state.system.platform,
+      passwordEnabled: state => state.system.auth.passwordEnabled,
       currency: state => state.system.currency,
       supportedFiatCurrencies: state => state.system.supportedFiatCurrencies,
       backupStatus: state => state.system.backupStatus,
@@ -536,6 +540,9 @@ export default {
       } finally {
         this.isChangingAutomaticBackups = false;
       }
+    },
+    signOut() {
+      this.$store.dispatch("system/logout");
     },
     toggleTheme(isDark) {
       this.$store.dispatch("system/changeTheme", isDark ? "dark" : "light");

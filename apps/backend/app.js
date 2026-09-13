@@ -3,7 +3,6 @@ require("module-alias").addPath(".");
 require("dotenv").config({ path: require("find-config")(".env") });
 
 const express = require("express");
-const fs = require("fs");
 const path = require("path");
 const morgan = require("morgan");
 const bodyParser = require("body-parser");
@@ -18,7 +17,8 @@ const requestCorrelationMiddleware = require("middlewares/requestCorrelationId.j
 const camelCaseReqMiddleware = require("middlewares/camelCaseRequest.js")
   .camelCaseRequest;
 const errorHandleMiddleware = require("middlewares/errorHandling.js");
-const basicAuth = require("middlewares/basicAuth.js");
+const sessionAuth = require("middlewares/sessionAuth.js");
+const auth = require("logic/auth.js");
 const LndError = require("models/errors.js").LndError;
 
 const logger = require("utils/logger.js");
@@ -27,6 +27,7 @@ const address = require("routes/v1/lnd/address.js");
 const channel = require("routes/v1/lnd/channel.js");
 const conf = require("routes/v1/lnd/conf.js");
 const info = require("routes/v1/lnd/info.js");
+const authRoutes = require("routes/v1/auth.js");
 const lightning = require("routes/v1/lnd/lightning.js");
 const bitcoin = require("routes/v1/bitcoind/info.js");
 const transaction = require("routes/v1/lnd/transaction.js");
@@ -41,28 +42,6 @@ const external = require("routes/v1/external.js");
 const ping = require("routes/ping.js");
 const app = express();
 
-// The password check comes first, ahead of the static files, whenever a
-// password source is configured; StartOS mode insists on one (bin/www),
-// because StartOS puts nothing in front of the dashboard. The platform flag
-// alone never decides whether the door is locked: a dropped variable must
-// not open it. Umbrel's app proxy signs users in before a request reaches
-// this process, and configures no password here.
-const authConfigured = Boolean(constants.DASHBOARD_PASSWORD || constants.DASHBOARD_PASSWORD_FILE);
-if (constants.IS_STARTOS || authConfigured) {
-  const readPassword = () => {
-    if (constants.DASHBOARD_PASSWORD_FILE) {
-      try {
-        const {password} = JSON.parse(fs.readFileSync(constants.DASHBOARD_PASSWORD_FILE, "utf8"));
-        return typeof password === "string" ? password : "";
-      } catch (error) {
-        return "";
-      }
-    }
-    return constants.DASHBOARD_PASSWORD || "";
-  };
-  app.use(basicAuth(readPassword));
-}
-
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, "public")));
@@ -71,9 +50,21 @@ app.use(requestCorrelationMiddleware);
 app.use(camelCaseReqMiddleware);
 app.use(morgan(logger.morganConfiguration));
 
+// The sign-in gate, whenever a password source is configured (StartOS mode
+// insists on one, see bin/www): StartOS puts nothing in front of the
+// dashboard. The platform flag alone never decides whether the door is
+// locked, so a dropped variable cannot open it. Umbrel's app proxy signs
+// users in before a request reaches this process and configures no password.
+// The static frontend stays public so the sign-in screen can render; the
+// gate covers the API (middlewares/sessionAuth.js).
+if (constants.IS_STARTOS || auth.passwordConfigured()) {
+  app.use(sessionAuth);
+}
+
 // serve frontend
 app.use("/", express.static("../frontend/dist"));
 
+app.use("/v1/auth", authRoutes);
 app.use("/v1/lnd/address", address);
 app.use("/v1/lnd/channel", channel);
 app.use("/v1/lnd/info", info);

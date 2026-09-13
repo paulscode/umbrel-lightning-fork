@@ -22,6 +22,16 @@ const state = () => ({
   // StartOS provides wallet setup, LND configuration, backups and connection
   // strings itself, so the dashboard hides its own versions of those there.
   platform: "umbrel",
+  // The sign-in gate (StartOS): whether a password is configured, whether
+  // this browser holds a session, and the session's CSRF token for writes.
+  // With no password configured (Umbrel signs users in at its proxy) the
+  // dashboard counts as signed in.
+  auth: {
+    known: false,
+    passwordEnabled: false,
+    authed: true,
+    csrf: null
+  },
   api: {
     operational: false,
     version: ""
@@ -41,6 +51,12 @@ const mutations = {
   },
   setPlatform(state, platform) {
     state.platform = platform;
+  },
+  setAuth(state, { passwordEnabled, authed, csrf }) {
+    state.auth = { known: true, passwordEnabled, authed, csrf };
+  },
+  setAuthed(state, authed) {
+    state.auth = { ...state.auth, authed, csrf: authed ? state.auth.csrf : null };
   },
   setCurrency(state, currency) {
     state.currency = currency;
@@ -110,6 +126,55 @@ const actions = {
       window.localStorage.setItem("currency", currency);
       commit("setCurrency", currency);
     }
+  },
+  async getAuthState({ commit }) {
+    const state = await API.get(
+      `${process.env.VUE_APP_API_BASE_URL}/v1/auth/state`
+    );
+    if (state && typeof state.authed === "boolean") {
+      commit("setAuth", {
+        passwordEnabled: Boolean(state.password_enabled),
+        authed: state.authed,
+        csrf: state.csrf || null
+      });
+      return true;
+    }
+    return false;
+  },
+  // Resolves to "" on success, or a message for the sign-in screen.
+  async login({ commit }, password) {
+    try {
+      const response = await API.post(
+        `${process.env.VUE_APP_API_BASE_URL}/v1/auth/login`,
+        { password }
+      );
+      commit("setAuth", {
+        passwordEnabled: true,
+        authed: true,
+        csrf: response.data.csrf || null
+      });
+      return "";
+    } catch (error) {
+      const status = error.response && error.response.status;
+      if (status === 429) {
+        const wait = Number(error.response.data && error.response.data.retry_after) || 0;
+        return wait > 0
+          ? `Too many attempts. Try again in ${wait} second${wait === 1 ? "" : "s"}.`
+          : "Too many attempts. Wait a moment and try again.";
+      }
+      if (status === 401) {
+        return "Wrong password.";
+      }
+      return "Could not sign in. Is the node running?";
+    }
+  },
+  async logout({ commit }) {
+    try {
+      await API.post(`${process.env.VUE_APP_API_BASE_URL}/v1/auth/logout`);
+    } catch (error) {
+      // The session is gone either way.
+    }
+    commit("setAuthed", false);
   },
   async getPlatform({ commit }) {
     const data = await API.get(

@@ -14,6 +14,7 @@
           </span>
         </div>
       </div>
+      <login v-else-if="showLogin" @signed-in="onSignedIn"></login>
       <loading v-else-if="loading" :progress="loadingProgress">
         <small v-if="loadingMessage" class="text-muted text-center mt-2 w-75">{{
           loadingMessage
@@ -32,6 +33,7 @@
 <script>
 import { mapState } from "vuex";
 import Loading from "@/components/Loading";
+import Login from "@/components/Login";
 
 export default {
   name: "App",
@@ -49,8 +51,12 @@ export default {
       isApiOperational: state => state.system.api.operational,
       isLightningOperational: state => state.lightning.operational,
       theme: state => state.system.theme,
-      platform: state => state.system.platform
+      platform: state => state.system.platform,
+      auth: state => state.system.auth
     }),
+    showLogin() {
+      return this.auth.known && this.auth.passwordEnabled && !this.auth.authed;
+    },
     isStartOS() {
       return this.platform === "startos";
     },
@@ -75,6 +81,13 @@ export default {
         `${window.innerHeight}px`
       );
     },
+    onSignedIn() {
+      // Start the checks over: the API and node were unreachable to this
+      // browser until now.
+      this.loadingProgress = 0;
+      this.loading = true;
+      this.getLoadingStatus();
+    },
     async getLoadingStatus() {
       // Skip if previous poll in progress
       if (this.loadingPollInProgress) {
@@ -91,6 +104,14 @@ export default {
         // a StartOS page dressed as Umbrel's.
         if (!this.platformKnown) {
           this.platformKnown = await this.$store.dispatch("system/getPlatform");
+        }
+        // Then whether this browser may see anything: the sign-in screen
+        // takes over until it does, and the poll waits with it.
+        await this.$store.dispatch("system/getAuthState");
+        if (this.showLogin) {
+          this.loading = true;
+          this.loadingPollInProgress = false;
+          return;
         }
         await Promise.all([
           this.$store.dispatch("system/getApi"),
@@ -159,6 +180,12 @@ export default {
       },
       immediate: true
     },
+    showLogin: function(needed) {
+      if (needed) {
+        this.loading = true;
+        this.loadingProgress = 0;
+      }
+    },
   },
   beforeDestroy() {
     window.removeEventListener("resize", this.updateViewPortHeightCSS);
@@ -166,6 +193,7 @@ export default {
   },
   components: {
     Loading,
+    Login,
   },
 };
 </script>

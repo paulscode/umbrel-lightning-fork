@@ -40,11 +40,11 @@ axios.interceptors.response.use(
       return Promise.reject(error);
     }
 
-    // Any other 401 is the dashboard's own password check (StartOS): the
-    // password changed while this page was open. A reload brings the
-    // browser's prompt back; nothing else here can.
+    // Any other 401 is the dashboard's own sign-in gate (StartOS): the
+    // session ended, or the password changed under an open page. Back to
+    // the sign-in screen; the app stops polling once it is off the page.
     if (error.response.data !== "Invalid JWT") {
-      window.location.reload();
+      store.commit("system/setAuthed", false);
       return Promise.reject(error);
     }
 
@@ -74,6 +74,13 @@ axios.interceptors.response.use(
     }
   }
 );
+
+// The session's CSRF token, on every request that is not a GET; the
+// sign-in gate refuses writes without it (StartOS).
+function csrfHeaders() {
+  const csrf = store.state.system.auth.csrf;
+  return csrf ? { "X-CSRF-Token": csrf } : {};
+}
 
 // Helper methods for making API requests
 const API = {
@@ -122,11 +129,12 @@ const API = {
     const requestOptions = {
       method: "post",
       url,
-      data
+      data,
+      headers: csrfHeaders()
     };
 
     if (auth && store.state.user.jwt) {
-      requestOptions.headers = { Authorization: `JWT ${store.state.user.jwt}` };
+      requestOptions.headers.Authorization = `JWT ${store.state.user.jwt}`;
     }
 
     return axios(requestOptions);
@@ -137,11 +145,12 @@ const API = {
     const requestOptions = {
       method: "delete",
       url,
-      data
+      data,
+      headers: csrfHeaders()
     };
 
     if (auth && store.state.user.jwt) {
-      requestOptions.headers = { Authorization: `JWT ${store.state.user.jwt}` };
+      requestOptions.headers.Authorization = `JWT ${store.state.user.jwt}`;
     }
 
     return axios(requestOptions);

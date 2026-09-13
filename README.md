@@ -38,16 +38,23 @@ itself or what Umbrel provided:
   package owns `lnd.conf`. The wallet-unlock loop is off for the same reason.
 - No Umbrel backup server, Tor backup toggles, secret words, Connect
   wallet or home-screen widgets; their API routes answer 404.
-- HTTP Basic authentication on every path but `/ping`, because StartOS puts
-  nothing in front of a UI interface. The password comes from
+- A sign-in screen, because StartOS puts nothing in front of a UI
+  interface. One password, no username, after the pattern Pickhash uses:
+  `POST /v1/auth/login` opens a server-side session held in an HttpOnly
+  cookie with a per-session CSRF token that every non-GET request must carry
+  (`X-CSRF-Token`); sessions last twelve hours and end at `/v1/auth/logout`;
+  a global lockout, persisted in the JSON store, backs off from the third
+  wrong attempt (429 with `retry_after`). The password comes from
   `DASHBOARD_PASSWORD`, or from the JSON file named by
-  `DASHBOARD_PASSWORD_FILE` (`{"password": "..."}`), read on every request
-  so the platform can change it without a restart. Any username is accepted.
-  The backend refuses to start with neither set, and the check is on
-  whenever either is set, whatever the platform. `GET /ping` stays open and
-  reports `auth` as `configured`, `missing` or `off`, so a platform health
-  check can tell a dashboard without a password (every other request a 503)
-  from a healthy one.
+  `DASHBOARD_PASSWORD_FILE` (`{"password": "..."}`), read on every attempt
+  so the platform can change it without a restart. The backend refuses to
+  start with neither set, and the gate is on whenever either is set,
+  whatever the platform. The static frontend stays public so the sign-in
+  screen can render; `GET /v1/auth/state` tells the page whether to show
+  it. `GET /ping` stays open and reports `auth` as `configured`, `missing`
+  or `off`, so a platform health check can tell a dashboard nobody can sign
+  in to from a healthy one. Set `COOKIE_SECURE=1` to mark the cookie Secure
+  where the dashboard is only ever reached over TLS.
 - Bitcoin RPC credentials from the node's cookie file (`RPC_COOKIE_FILE`),
   re-read on every call, instead of `RPC_USER` and `RPC_PASSWORD`.
 
