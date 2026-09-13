@@ -11,6 +11,7 @@
 // reads the state file the agent maintains. Secrets never leave this module
 // unmasked: the API sees whether a secret is stored, not what it is.
 const {spawn, execFile} = require("child_process");
+const crypto = require("crypto");
 const fs = require("fs");
 const https = require("https");
 const os = require("os");
@@ -69,8 +70,12 @@ function readConfig() {
 }
 
 function writeConfig(cfg) {
+  const bad = validateConfig(cfg);
+  if (bad.length) {
+    throw new InputError(`These settings would be refused by the backup agent, which would then copy nothing at all: ${bad.join(", ")}. Nothing was saved.`);
+  }
   const file = configPath();
-  const tmp = `${file}.tmp.${process.pid}`;
+  const tmp = `${file}.tmp.${crypto.randomBytes(6).toString("hex")}`;
   fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2) + "\n", {mode: 0o600});
   fs.renameSync(tmp, file);
 }
@@ -134,6 +139,63 @@ function line(value, label, max = MAX_LINE) {
   }
   return v;
 }
+
+// A target on this same server dies with it, and a Tor target needs a proxy
+// the agent has no route to; both are the StartOS action's rules.
+function hostOf(addr) {
+  const s = String(addr || "");
+  if (/^[a-z]+:\/\//i.test(s)) {
+    try {
+      return new URL(s).hostname.replace(/^\[|\]$/g, "").toLowerCase();
+    } catch (error) {
+      return "";
+    }
+  }
+  return s.replace(/^\[|\]$/g, "").toLowerCase();
+}
+
+function rejectLocalOrOnion(addr, label) {
+  const host = hostOf(addr);
+  if (host.endsWith(".onion")) {
+    throw new InputError(`${label}: Tor .onion targets are not supported. Use a clearnet address.`);
+  }
+  if (host === "localhost" || host === "::1" || host === "::" || host === "0.0.0.0" || host.startsWith("127.") || host.startsWith("::ffff:127.") || /^::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}$/.test(host)) {
+    throw new InputError(`${label}: that address points at this Umbrel. Point it at a different machine.`);
+  }
+}
+
+// The agent's own validate_config, in JavaScript: it refuses the whole file
+// when any target breaks a rule, and every target would stop being copied,
+// so nothing is written that it would refuse.
+function validateConfig(cfg) {
+  const lineOk = (v, n) => typeof v === "string" && v.length <= n && !CONTROL.test(v);
+  const maybeLine = (v, n) => v === null || lineOk(v, n);
+  const pathOk = v => lineOk(v, MAX_LINE) && !v.startsWith("/") && !v.startsWith("\\") && !v.split(/[\\/]/).includes("..");
+  const oauthOk = t => t === null || (typeof t === "object" && typeof t.enabled === "boolean" && lineOk(t.clientId, MAX_LINE) && lineOk(t.clientSecret, MAX_SECRET) && maybeLine(t.token, 65536) && (t.token === null || (() => { try { const o = JSON.parse(t.token); return o !== null && typeof o === "object" && !Array.isArray(o); } catch (error) { return false; } })()) && pathOk(t.path));
+  const nextcloudOk = t => t === null || (typeof t === "object" && typeof t.enabled === "boolean" && lineOk(t.url, MAX_LINE) && (t.url === "" || /^https:\/\//i.test(t.url)) && lineOk(t.user, MAX_LINE) && maybeLine(t.pass, MAX_SECRET) && typeof t.insecureTls === "boolean" && pathOk(t.path));
+  const keyOk = v => v === null || (lineOk(v, MAX_KEY) && /^-----BEGIN OPENSSH PRIVATE KEY-----\\n([A-Za-z0-9+/=]{1,70}\\n)+-----END OPENSSH PRIVATE KEY-----$/.test(v));
+  const knownHostsOk = v => v === null || (typeof v === "string" && v.length <= 65536 && v.split("\n").every(l => /^\S+ (ssh-(rsa|ed25519|dss)|ecdsa-sha2-nistp(256|384|521)|sk-\S+) [A-Za-z0-9+/]+={0,2}$/.test(l)));
+  const sftpOk = t => t === null || (typeof t === "object" && typeof t.enabled === "boolean" && lineOk(t.host, MAX_LINE) && !t.host.startsWith("-") && lineOk(t.user, MAX_LINE) && typeof t.port === "string" && /^[0-9]{1,5}$/.test(t.port) && Number(t.port) >= 1 && Number(t.port) <= 65535 && (t.authType === "password" || t.authType === "key") && maybeLine(t.pass, MAX_SECRET) && keyOk(t.keyPem) && knownHostsOk(t.knownHosts) && typeof t.hostKeyFingerprints === "string" && t.hostKeyFingerprints.length <= 16384 && typeof t.hostKeyVerified === "boolean" && pathOk(t.path));
+  const bad = [];
+  if (!oauthOk(cfg.gdrive)) bad.push("Google Drive");
+  if (!oauthOk(cfg.dropbox)) bad.push("Dropbox");
+  if (!nextcloudOk(cfg.nextcloud)) bad.push("Nextcloud");
+  if (!sftpOk(cfg.sftp)) bad.push("SFTP");
+  return bad;
+}
+
+// One thing at a time: a save is a read-modify-write across slow network
+// steps, and the agent's one-off runs share a lock the watcher holds too.
+function serial() {
+  let queue = Promise.resolve();
+  return fn => {
+    const result = queue.then(fn, fn);
+    queue = result.then(() => undefined, () => undefined);
+    return result;
+  };
+}
+const saving = serial();
+const running = serial();
 
 function folder(value) {
   const v = line(value, "Folder") || DEFAULT_FOLDER;
@@ -262,9 +324,7 @@ function run(cmd, args, {input, timeout} = {}) {
     const child = execFile(cmd, args, {timeout: timeout || 30000, maxBuffer: 1024 * 1024}, (error, stdout, stderr) => {
       resolve({exitCode: error ? (typeof error.code === "number" ? error.code : 1) : 0, stdout: String(stdout), stderr: String(stderr)});
     });
-    if (input !== undefined) {
-      child.stdin.end(input);
-    }
+    child.stdin.end(input === undefined ? "" : input);
   });
 }
 
@@ -305,12 +365,14 @@ async function normalizeKeyPem(raw) {
 }
 
 async function scanHostKeys(host, prt) {
-  const scan = await run("ssh-keyscan", ["-T", "10", "-p", prt, host], {timeout: KEYSCAN_TIMEOUT_MS});
+  const scan = await run("ssh-keyscan", ["-T", "10", "-p", prt, "--", host], {timeout: KEYSCAN_TIMEOUT_MS});
   const lines = scan.stdout.split("\n").filter(l => l && !l.startsWith("#"));
   if (!lines.length) {
     throw new InputError(`SFTP: ${host}:${prt} did not answer with a host key. Check the address and port, and that the server is reachable from your Umbrel.`);
   }
-  const wellFormed = lines.every(l => /^\S+ (ssh-(rsa|ed25519|dss)|ecdsa-sha2-nistp(256|384|521)|sk-\S+) [A-Za-z0-9+/]+={0,2}$/.test(l));
+  // Only whole key lines from a scan that finished: a cut-off run leaves a
+  // pin narrower than the server, which rclone then fails against.
+  const wellFormed = scan.exitCode === 0 && lines.every(l => /^\S+ (ssh-(rsa|ed25519|dss)|ecdsa-sha2-nistp(256|384|521)|sk-\S+) [A-Za-z0-9+/]+={0,2}$/.test(l));
   if (!wellFormed) {
     throw new InputError(`SFTP: the host key ${host}:${prt} presented could not be read. Try saving again.`);
   }
@@ -327,7 +389,11 @@ async function scanHostKeys(host, prt) {
 
 // `input` is what the form sends; blank secrets keep the stored ones and
 // `forget` drops them. Returns {config, message, needsHostKeyConfirmation}.
-async function saveProvider(provider, input = {}) {
+function saveProvider(provider, input = {}) {
+  return saving(() => saveProviderNow(provider, input));
+}
+
+async function saveProviderNow(provider, input) {
   if (!PROVIDERS.includes(provider)) {
     throw new InputError("Unknown provider");
   }
@@ -335,18 +401,31 @@ async function saveProvider(provider, input = {}) {
   const prev = cfg[provider];
   const enabled = Boolean(input.enabled);
   const forget = Boolean(input.forget);
+  const label = {sftp: "SFTP", nextcloud: "Nextcloud", dropbox: "Dropbox", gdrive: "Google Drive"}[provider];
+  if (forget && enabled) {
+    throw new InputError(`${label}: turn it off before forgetting its credentials.`);
+  }
   let next;
   let needsHostKeyConfirmation = false;
   let fingerprints = "";
 
   if (provider === "sftp") {
     const host = line(input.host, "SFTP host");
+    if (host.startsWith("-")) {
+      throw new InputError("SFTP: the host cannot start with '-'");
+    }
+    if (host) {
+      rejectLocalOrOnion(host, "SFTP");
+    }
     const user = line(input.user, "SFTP user");
     const prt = port(input.port);
     const authType = input.authType === "key" ? "key" : "password";
     const pass = forget ? null : line(input.pass, "SFTP password", MAX_SECRET) || (prev && prev.pass) || null;
     const keyPem = forget ? null : (input.keyPem ? await normalizeKeyPem(input.keyPem) : (prev && prev.keyPem) || null);
-    const same = prev && prev.host === host && prev.port === prt && prev.knownHosts;
+    // The pin is kept while host and port stay the same; a server that
+    // changed its key is re-scanned only on request (rescanHostKey), and
+    // then confirmed again.
+    const same = prev && prev.host === host && prev.port === prt && prev.knownHosts && !input.rescanHostKey;
     let knownHosts = same ? prev.knownHosts : null;
     fingerprints = same ? prev.hostKeyFingerprints || "" : "";
     let scanned = false;
@@ -361,8 +440,13 @@ async function saveProvider(provider, input = {}) {
     needsHostKeyConfirmation = enabled && !hostKeyVerified && Boolean(knownHosts);
   } else if (provider === "nextcloud") {
     const url = line(input.url, "WebDAV URL");
-    if (enabled && !/^https?:\/\//i.test(url)) {
-      throw new InputError("Nextcloud: the WebDAV URL must start with http:// or https://");
+    // https whenever set, enabled or not: the app password would otherwise
+    // travel in clear text, and the agent refuses the whole file anyway.
+    if (url && !/^https:\/\//i.test(url)) {
+      throw new InputError("Nextcloud: the WebDAV URL must start with https://");
+    }
+    if (url) {
+      rejectLocalOrOnion(url, "Nextcloud");
     }
     next = {
       ...emptyNextcloud(), enabled, url, user: line(input.user, "Nextcloud user"),
@@ -373,7 +457,9 @@ async function saveProvider(provider, input = {}) {
     const google = provider === "gdrive";
     const clientId = line(input.clientId, "Client ID");
     const clientSecret = forget ? "" : line(input.clientSecret, "Client secret", MAX_SECRET) || (prev && prev.clientSecret) || "";
-    let token = forget ? null : (prev && prev.token) || null;
+    // A token belongs to the client that issued it.
+    const clientChanged = !prev || clientId !== (prev.clientId || "") || clientSecret !== (prev.clientSecret || "");
+    let token = forget || clientChanged ? null : (prev && prev.token) || null;
     const code = extractAuthCode(input.authCode);
     const refresh = line(input.refreshToken, "Refresh token", MAX_SECRET);
     if (code) {
@@ -384,10 +470,21 @@ async function saveProvider(provider, input = {}) {
     next = {...emptyOauth(), enabled, clientId, clientSecret, token, path: folder(input.path)};
   }
 
+  // An enabled target the agent cannot use fails every run and marks the
+  // whole backup as failing; the one allowed exception is SFTP waiting for
+  // its host key to be confirmed, which the status names as such.
+  if (enabled && !ready(provider, next) && !needsHostKeyConfirmation) {
+    const missing = provider === "sftp"
+      ? "host, user and a password or key"
+      : provider === "nextcloud"
+        ? "URL, user and password"
+        : "client ID, client secret and an authorization";
+    throw new InputError(`${label}: to turn it on, provide ${missing}.`);
+  }
+
   cfg[provider] = next;
   writeConfig(cfg);
 
-  const label = {sftp: "SFTP", nextcloud: "Nextcloud", dropbox: "Dropbox", gdrive: "Google Drive"}[provider];
   let message;
   if (needsHostKeyConfirmation) {
     message = `The SFTP server identified itself as:\n${fingerprints}\nCompare this with your server, then save again with "Host key verified" turned on. Nothing is sent to it until then.`;
@@ -403,11 +500,22 @@ async function saveProvider(provider, input = {}) {
 
 // ---------- the agent
 
+// Only what the agent needs: the rest of this process's environment holds
+// the wallet password and RPC credentials, which a shell script that runs a
+// large third-party binary has no business seeing.
 function agentEnv() {
-  return {...process.env, LND_DIR: lndDir()};
+  const env = {PATH: process.env.PATH || "/usr/local/bin:/usr/bin:/bin", HOME: process.env.HOME || "/root", LND_DIR: lndDir()};
+  if (constants.CHANNEL_BACKUP_FILE) {
+    env.CHANNEL_BACKUP_FILE = constants.CHANNEL_BACKUP_FILE;
+  }
+  return env;
 }
 
 function runAgent(args, timeoutMs) {
+  return running(() => runAgentNow(args, timeoutMs));
+}
+
+function runAgentNow(args, timeoutMs) {
   return new Promise(resolve => {
     const child = spawn("sh", [constants.BACKUP_AGENT, ...args], {env: agentEnv(), stdio: ["ignore", "pipe", "pipe"]});
     let stdout = "";
@@ -492,7 +600,7 @@ async function pull() {
   if (!parsed) {
     return {retrieved: [], unreachable: [], message: r.exitCode === 124 ? "The targets did not answer in time." : "The backup targets could not be consulted."};
   }
-  const retrieved = parsed.retrieved.map(p => {
+  const retrieved = (Array.isArray(parsed.retrieved) ? parsed.retrieved : []).filter(p => PROVIDERS.includes(p)).map(p => {
     let size = 0;
     let mtime = null;
     try {
@@ -504,14 +612,18 @@ async function pull() {
     }
     return {provider: p, size, mtime};
   });
-  return {retrieved, unreachable: parsed.unreachable || [], message: null};
+  return {retrieved, unreachable: Array.isArray(parsed.unreachable) ? parsed.unreachable : [], message: null};
 }
 
 function pulledBackup(provider) {
   if (!PROVIDERS.includes(provider)) {
     throw new InputError("Unknown provider");
   }
-  return fs.readFileSync(path.join(restoreDir(), provider));
+  try {
+    return fs.readFileSync(path.join(restoreDir(), provider));
+  } catch (error) {
+    throw new InputError("That copy is no longer here. Ask the backup targets again.");
+  }
 }
 
 // The watcher: copies channel.backup whenever it or the settings change.
@@ -535,21 +647,20 @@ function startWatcher(log = m => console.log(`[channel-backup] ${m}`)) {
     watcher.on("error", error => log(`watcher could not start: ${error.message}`));
   };
   launch();
-  const stop = () => {
-    watcherWanted = false;
-    if (watcher) {
-      watcher.kill("SIGTERM");
-    }
-  };
-  process.once("SIGTERM", stop);
-  process.once("SIGINT", stop);
-  return stop;
+  return stopWatcher;
+}
+
+function stopWatcher() {
+  watcherWanted = false;
+  if (watcher) {
+    watcher.kill("SIGTERM");
+  }
 }
 
 module.exports = {
   PROVIDERS, DEFAULT_FOLDER, InputError,
   readConfig, publicConfig, ready, saveProvider, authUrl, exchangeCode, extractAuthCode, tokenFromRefresh,
-  status, readState, backupNow, pull, pulledBackup, startWatcher,
+  status, readState, backupNow, pull, pulledBackup, startWatcher, stopWatcher,
   // for tests
-  folder, port, line, normalizeKeyPem, scanHostKeys,
+  folder, port, line, normalizeKeyPem, scanHostKeys, validateConfig, rejectLocalOrOnion, hostOf,
 };

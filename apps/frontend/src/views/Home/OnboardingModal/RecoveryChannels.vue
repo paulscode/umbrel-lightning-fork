@@ -106,14 +106,32 @@ export default {
       return this.changeStep('recovery-select-backup');
     },
 
+    // Restoring force-closes every channel in the backup; it is asked for
+    // in as many words, and again if the node still has channels open.
     async restoreBackup({ provider, backupFile }) {
+      const what = backupFile
+        ? `the file ${backupFile.name}`
+        : `the copy held by ${{ sftp: "SFTP", nextcloud: "Nextcloud", dropbox: "Dropbox", gdrive: "Google Drive" }[provider] || provider}`;
+      if (!window.confirm(`Recover your channels from ${what}? Every channel in that backup will be force-closed and its funds returned on-chain over the following days. This cannot be undone.`)) {
+        return;
+      }
       this.isRestoringBackup = true;
+      const body = backupFile
+        ? { backup: await toBase64(backupFile), confirm: true }
+        : { provider, confirm: true };
       try {
-        if (backupFile) {
-          const backupFileBase64 = await toBase64(backupFile);
-          await API.post(`${process.env.VUE_APP_API_BASE_URL}/v1/channel-backup/restore`, { backup: backupFileBase64 });
-        } else {
-          await API.post(`${process.env.VUE_APP_API_BASE_URL}/v1/channel-backup/restore`, { provider });
+        try {
+          await API.post(`${process.env.VUE_APP_API_BASE_URL}/v1/channel-backup/restore`, body);
+        } catch (first) {
+          const open = first.response && first.response.status === 409 && first.response.data && first.response.data.openChannels;
+          if (!open) {
+            throw first;
+          }
+          if (!window.confirm(`This node still has ${open} open channel${open === 1 ? "" : "s"}. Recovering a backup now would force-close them too. Continue anyway?`)) {
+            this.isRestoringBackup = false;
+            return;
+          }
+          await API.post(`${process.env.VUE_APP_API_BASE_URL}/v1/channel-backup/restore`, { ...body, force: true });
         }
       } catch (err) {
         this.$bvToast.toast(

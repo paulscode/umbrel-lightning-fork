@@ -36,8 +36,11 @@ module.exports = {
   },
   CHANNEL_BACKUP_FILE: process.env.CHANNEL_BACKUP_FILE,
   // The node's data directory as this container sees it, where the channel
-  // backup agent keeps its settings and state (Umbrel mounts it at /data/.lnd).
-  LND_DIR: process.env.LND_DIR || "/data/.lnd",
+  // backup agent keeps its settings and state: LND_DIR, or four levels above
+  // channel.backup (<dir>/data/chain/bitcoin/<network>/channel.backup), or
+  // where the Umbrel app mounts it.
+  LND_DIR: process.env.LND_DIR
+    || (process.env.CHANNEL_BACKUP_FILE ? require("path").resolve(process.env.CHANNEL_BACKUP_FILE, "../../../../..") : "/data/.lnd"),
   BACKUP_AGENT: process.env.BACKUP_AGENT || "/usr/local/bin/backup-agent.sh",
   LND_REST_HIDDEN_SERVICE:
     process.env.LND_REST_HIDDEN_SERVICE || "unset.onion",
@@ -54,9 +57,6 @@ module.exports = {
   TOR_PROXY_PORT: process.env.TOR_PROXY_PORT,
   TOR_PROXY_CONTROL_PORT: process.env.TOR_PROXY_CONTROL_PORT,
   TOR_PROXY_CONTROL_PASSWORD: process.env.TOR_PROXY_CONTROL_PASSWORD,
-
-  BACKUP_STATUS_FILE:
-    process.env.BACKUP_STATUS_FILE || "/data/backup-status.json",
 
   TERMS_ACKNOWLEDGE_FILE:
     process.env.TERMS_ACKNOWLEDGE_FILE || "/statuses/terms-acknowledge.json",

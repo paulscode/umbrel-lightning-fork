@@ -46,6 +46,22 @@ if (constants.IS_STARTOS) {
 }
 
 /**
+ * Stop the channel backup agent and the listener on a signal, then leave:
+ * a listener that stays would make the process wait out docker's grace
+ * period and end in a kill.
+ */
+const channelBackup = require("logic/channelBackup");
+for (const signal of ["SIGTERM", "SIGINT"]) {
+  process.once(signal, () => {
+    channelBackup.stopWatcher();
+    if (typeof server !== "undefined") {
+      server.close();
+    }
+    setTimeout(() => process.exit(0), 500).unref();
+  });
+}
+
+/**
  * Get port from environment and store in Express.
  */
 

@@ -5,7 +5,6 @@ const systemLogic = require("logic/system");
 const diskLogic = require('logic/disk');
 const safeHandler = require("utils/safeHandler");
 const constants = require("utils/const.js");
-const validator = require("utils/validator.js");
 const umbrelOnly = require("middlewares/umbrelOnly.js");
 
 // Which platform hosts the dashboard, so the frontend can hide what the

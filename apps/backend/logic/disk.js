@@ -1,10 +1,6 @@
 const constants = require("utils/const");
 const diskService = require("services/disk");
 
-function readBackupStatusFile() {
-  return diskService.readJsonFile(constants.BACKUP_STATUS_FILE);
-}
-
 function readBackupFile() {
   return diskService.readFile(constants.CHANNEL_BACKUP_FILE);
 }
@@ -64,9 +60,6 @@ async function getJsonStore() {
   const defaultProperties = {
     onboarding: true,
     seed: [],
-    automaticBackups: true,
-    backupOverTor: true, // by default we backup over Tor
-    mostRecentBackupSuccess: true, // default to true to prevent warning modal rendering before first backup is attempted
   };
   try {
     const jsonStore = await diskService.readJsonFile(constants.JSON_STORE_FILE);
@@ -88,7 +81,6 @@ async function updateJsonStore(newProps) {
 module.exports = {
   getJsonStore,
   updateJsonStore,
-  readBackupStatusFile,
   readTermsAcknowledgeFile,
   readManagedChannelsFile,
   writeManagedChannelsFile,

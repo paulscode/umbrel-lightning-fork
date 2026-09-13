@@ -129,7 +129,7 @@
                 </div>
               </div>
             </b-dropdown-group>
-            <b-dropdown-group v-if="!isStartOS">
+            <b-dropdown-group v-if="!isStartOS && channelBackupSummary">
               <div class="dropdown-group">
                 <small class="d-block" style="opacity: 0.6">{{ channelBackupSummary }}</small>
               </div>
@@ -578,6 +578,7 @@ export default {
     }
 
     // A failing target is worth a word once per visit; the menu keeps saying so.
+    await this.$store.dispatch("system/getChannelBackupStatus");
     const status = this.channelBackupStatus;
     if (!this.onboarding && status && status.targets.length && status.state.failures.length) {
       this.$bvToast.toast(this.channelBackupSummary, {

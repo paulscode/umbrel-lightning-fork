@@ -74,6 +74,9 @@
             <b-form-checkbox v-model="form.hostKeyVerified" class="mt-2">
               Host key verified: I compared this with my server
             </b-form-checkbox>
+            <b-form-checkbox v-model="form.rescanHostKey" class="mt-1">
+              The server's host key changed: scan it again on save
+            </b-form-checkbox>
           </div>
         </template>
 
@@ -138,7 +141,7 @@ import API from "@/helpers/api";
 const LABELS = { sftp: "SFTP", nextcloud: "Nextcloud", dropbox: "Dropbox", gdrive: "Google Drive" };
 
 const blank = {
-  sftp: () => ({ enabled: false, host: "", port: "22", user: "", authType: "password", pass: "", keyPem: "", path: "lnd-channel-backups", hostKeyVerified: false, forget: false }),
+  sftp: () => ({ enabled: false, host: "", port: "22", user: "", authType: "password", pass: "", keyPem: "", path: "lnd-channel-backups", hostKeyVerified: false, rescanHostKey: false, forget: false }),
   nextcloud: () => ({ enabled: false, url: "", user: "", pass: "", insecureTls: false, path: "lnd-channel-backups", forget: false }),
   dropbox: () => ({ enabled: false, clientId: "", clientSecret: "", authCode: "", refreshToken: "", path: "lnd-channel-backups", forget: false }),
   gdrive: () => ({ enabled: false, clientId: "", clientSecret: "", authCode: "", refreshToken: "", path: "lnd-channel-backups", forget: false })
@@ -221,7 +224,7 @@ export default {
       const form = blank[this.provider]();
       if (t) {
         for (const key of Object.keys(form)) {
-          if (key in t && !["pass", "keyPem", "clientSecret", "authCode", "refreshToken", "forget"].includes(key)) {
+          if (key in t && !["pass", "keyPem", "clientSecret", "authCode", "refreshToken", "forget", "rescanHostKey"].includes(key)) {
             form[key] = t[key];
           }
         }
@@ -277,8 +280,14 @@ export default {
     }
   },
   async mounted() {
-    await this.refresh();
+    // Shown first: a failed fetch must not leave the menu item dead.
     this.$bvModal.show("channel-backup-modal");
+    try {
+      await this.refresh();
+    } catch (error) {
+      this.result = "The backup settings could not be loaded. Close and try again.";
+      this.resultVariant = "danger";
+    }
   }
 };
 </script>

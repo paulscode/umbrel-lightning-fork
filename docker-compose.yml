@@ -22,7 +22,7 @@ services:
       TLS_FILE: "/lnd/.lnd/tls.cert"
       MACAROON_DIR: /lnd/.lnd/data/chain/bitcoin/regtest/
       CHANNEL_BACKUP_FILE: /lnd/.lnd/data/chain/bitcoin/regtest/channel.backup
-      BACKUP_STATUS_FILE: /data/backup-status.json
+      LND_DIR: /lnd/.lnd
       LND_REST_HIDDEN_SERVICE: rest.onion
       LND_GRPC_HIDDEN_SERVICE: grpc.onion
       JSON_STORE_FILE: /data/state.json

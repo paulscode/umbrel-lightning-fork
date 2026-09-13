@@ -44,8 +44,18 @@ router.get("/oauth/url", safeHandler(async (req, res) => {
 // the user uploads.
 router.post("/pull", safeHandler(async (req, res) => res.json(await channelBackup.pull())));
 
+// Restoring a backup tells LND to force-close every channel in it: the
+// caller must say so in as many words, and a node that still has channels
+// open is refused unless the caller insists.
 router.post("/restore", safeHandler(async (req, res) => {
-  const {provider, backup} = req.body || {};
+  const {provider, backup, confirm, force} = req.body || {};
+  if (confirm !== true) {
+    return res.status(400).json({error: "Restoring a backup force-closes every channel it holds; send confirm: true to proceed."}); // eslint-disable-line no-magic-numbers
+  }
+  const open = (await lnd.getOpenChannels()).channels || [];
+  if (open.length && force !== true) {
+    return res.status(409).json({error: `This node has ${open.length} open channel${open.length === 1 ? "" : "s"}. Restoring a backup would force-close them all.`, openChannels: open.length}); // eslint-disable-line no-magic-numbers
+  }
   let bytes;
   try {
     bytes = backup ? Buffer.from(String(backup), "base64") : channelBackup.pulledBackup(String(provider || ""));

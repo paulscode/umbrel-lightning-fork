@@ -90,9 +90,10 @@ test("an OAuth target takes a refresh token straight, and stays not ready withou
   assert.equal(JSON.parse(onDisk.dropbox.token).refresh_token, "rt");
   assert.equal(onDisk.dropbox.path, cb.DEFAULT_FOLDER);
   assert.equal(cb.publicConfig().dropbox.ready, true);
-  await cb.saveProvider("gdrive", { enabled: true, clientId: "id", clientSecret: "s" });
+  await assert.rejects(cb.saveProvider("gdrive", { enabled: true, clientId: "id", clientSecret: "s" }), /authorization/, "cannot be turned on without a token");
+  await cb.saveProvider("gdrive", { enabled: false, clientId: "id", clientSecret: "s" });
   assert.equal(cb.publicConfig().gdrive.ready, false);
-  assert.equal(cb.status().targets.map(t => `${t.provider}:${t.ready}`).join(","), "dropbox:true,gdrive:false");
+  assert.equal(cb.status().targets.map(t => `${t.provider}:${t.ready}`).join(","), "dropbox:true");
 });
 
 test("status reads the agent's state file and notices the backup file", () => {
@@ -113,5 +114,50 @@ test("a pulled copy is read back by provider name only", () => {
   fs.writeFileSync(path.join(dir, ".channel-backup-restore", "sftp"), "scb-bytes");
   assert.equal(cb.pulledBackup("sftp").toString(), "scb-bytes");
   assert.throws(() => cb.pulledBackup("../channel-backup.json"), cb.InputError);
-  assert.throws(() => cb.pulledBackup("nextcloud"), /ENOENT/);
+  assert.throws(() => cb.pulledBackup("nextcloud"), cb.InputError, "a missing copy is a user-facing message, not a path in a 500");
+});
+
+test("a save that the agent would refuse is refused first, whole-file rules included", async () => {
+  await assert.rejects(cb.saveProvider("nextcloud", { enabled: false, url: "http://nas.local/dav", user: "u" }), /https:\/\//, "an http URL, even on a disabled target");
+  await assert.rejects(cb.saveProvider("nextcloud", { enabled: false, url: "cloud.example.com", user: "u" }), /https:\/\//);
+  await assert.rejects(cb.saveProvider("sftp", { enabled: false, host: "-x", user: "u" }), /cannot start with '-'/);
+  await assert.rejects(cb.saveProvider("sftp", { enabled: true, host: "127.0.0.1", user: "u", pass: "p" }), /this Umbrel/);
+  await assert.rejects(cb.saveProvider("nextcloud", { enabled: true, url: "https://localhost/dav", user: "u", pass: "p" }), /this Umbrel/);
+  await assert.rejects(cb.saveProvider("sftp", { enabled: true, host: "abc.onion", user: "u", pass: "p" }), /onion/);
+  assert.equal(cb.validateConfig({ gdrive: null, dropbox: null, nextcloud: { enabled: false, url: "http://x", user: "", pass: null, insecureTls: false, path: "p" }, sftp: null }).join(), "Nextcloud");
+  assert.equal(cb.validateConfig({ gdrive: null, dropbox: null, nextcloud: null, sftp: null }).length, 0);
+});
+
+test("a target must be off to be forgotten, and complete to be on", async () => {
+  await assert.rejects(cb.saveProvider("nextcloud", { enabled: true, forget: true, url: "https://cloud.example/", user: "u", pass: "p" }), /turn it off/);
+  await assert.rejects(cb.saveProvider("nextcloud", { enabled: true, url: "https://cloud.example/", user: "u" }), /provide URL, user and password/);
+  await assert.rejects(cb.saveProvider("dropbox", { enabled: true, clientId: "k", clientSecret: "s" }), /authorization/);
+});
+
+test("a new OAuth client drops the token the old one issued", async () => {
+  await cb.saveProvider("gdrive", { enabled: true, clientId: "id-1", clientSecret: "s-1", refreshToken: "rt" });
+  assert.equal(cb.publicConfig().gdrive.hasToken, true);
+  await cb.saveProvider("gdrive", { enabled: false, clientId: "id-2", clientSecret: "" });
+  assert.equal(cb.publicConfig().gdrive.hasToken, false, "the token belonged to id-1");
+  await cb.saveProvider("gdrive", { enabled: false, clientId: "id-2", clientSecret: "s-2", refreshToken: "rt2" });
+  await cb.saveProvider("gdrive", { enabled: false, clientId: "id-2", clientSecret: "" });
+  assert.equal(cb.publicConfig().gdrive.hasToken, true, "same client, blank secret keeps both");
+});
+
+test("saves run one at a time, so a slow one cannot overwrite a fast one", async () => {
+  const results = await Promise.all([
+    cb.saveProvider("nextcloud", { enabled: false, url: "https://one.example/", user: "a" }),
+    cb.saveProvider("dropbox", { enabled: false, clientId: "k9", clientSecret: "s9" }),
+  ]);
+  assert.equal(results.length, 2);
+  const onDisk = JSON.parse(fs.readFileSync(path.join(dir, "channel-backup.json"), "utf8"));
+  assert.equal(onDisk.nextcloud.url, "https://one.example/");
+  assert.equal(onDisk.dropbox.clientId, "k9");
+});
+
+test("host addresses are read the same way from a URL and a bare host", () => {
+  assert.equal(cb.hostOf("https://[::1]:8443/dav"), "::1");
+  assert.equal(cb.hostOf("HOST.Example"), "host.example");
+  assert.throws(() => cb.rejectLocalOrOnion("https://127.0.0.1/", "X"), /this Umbrel/);
+  assert.doesNotThrow(() => cb.rejectLocalOrOnion("https://cloud.example/", "X"));
 });
