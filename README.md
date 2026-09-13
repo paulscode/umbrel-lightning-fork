@@ -17,9 +17,13 @@ What differs from upstream:
   note and the node URI shortening say so.
 - Transaction links open mempool.guide, an explorer for the BLAKE2b chain,
   instead of mempool.space, which would show the transaction as missing.
-- No fiat amounts. The only price feeds quote the SHA256d chain's coin, and
-  a BLAKE2b balance priced by them would mislead; where upstream showed a
-  fiat value, this shows the amount in the other unit (sats or BTC).
+- Fiat amounts priced for this chain. Upstream asked mempool.space for the
+  BTC price, which is the SHA256d coin's. This asks neoxa.exchange, where
+  BTCB2 trades (its BTCB2/USDC market), and converts dollars to other
+  currencies with the ratio of two of Coingecko's fiat quotes, the way
+  Sparrow BLAKE2b does it. While neoxa.exchange is unreachable the hints
+  show the amount in the other unit (sats or BTC) instead; while Coingecko
+  is unreachable only USD is offered. Both feeds are cached in the backend.
 
 ## StartOS mode
 

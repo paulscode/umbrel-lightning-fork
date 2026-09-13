@@ -14,6 +14,10 @@ const state = () => ({
   loading: true,
   unit: "sats", //sats or btc
   theme: "dark",
+  currency: "USD",
+  // What the price feed can quote right now: dollars always, the rest while
+  // Coingecko's conversion table is reachable (backend logic/price.js).
+  supportedFiatCurrencies: ["USD"],
   // "umbrel" or "startos": what hosts the dashboard, from /v1/system/platform.
   // StartOS provides wallet setup, LND configuration, backups and connection
   // strings itself, so the dashboard hides its own versions of those there.
@@ -37,6 +41,12 @@ const mutations = {
   },
   setPlatform(state, platform) {
     state.platform = platform;
+  },
+  setCurrency(state, currency) {
+    state.currency = currency;
+  },
+  setSupportedFiatCurrencies(state, currencies) {
+    state.supportedFiatCurrencies = currencies;
   },
   setTheme(state, theme) {
     state.theme = theme;
@@ -75,6 +85,32 @@ const mutations = {
 
 // Functions to get data from the API
 const actions = {
+  async getCurrencies({ commit }) {
+    const currencies = await API.get(
+      `${process.env.VUE_APP_API_BASE_URL}/v1/external/currencies`
+    );
+    if (Array.isArray(currencies) && currencies.length) {
+      commit("setSupportedFiatCurrencies", currencies);
+    }
+  },
+  async getCurrency({ commit }) {
+    if (window.localStorage && window.localStorage.getItem("currency")) {
+      const currency = window.localStorage.getItem("currency").toUpperCase();
+      // Any well-formed code: the list of convertible ones changes with the
+      // conversion table's availability, and a saved choice should outlive
+      // an outage.
+      if (/^[A-Z]{3}$/.test(currency)) {
+        commit("setCurrency", currency);
+      }
+    }
+  },
+  changeCurrency({ commit }, currency) {
+    currency = String(currency).toUpperCase();
+    if (/^[A-Z]{3}$/.test(currency)) {
+      window.localStorage.setItem("currency", currency);
+      commit("setCurrency", currency);
+    }
+  },
   async getPlatform({ commit }) {
     const data = await API.get(
       `${process.env.VUE_APP_API_BASE_URL}/v1/system/platform`

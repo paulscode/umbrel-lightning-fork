@@ -43,7 +43,7 @@
                 ((parseInt(fee.fast.total, 10) /
                   parseInt(fee.fast.perByte, 10)) *
                   value)
-                  | satsToOtherUnit
+                  | satsToFiat
               }}</small
             >
           </div>
@@ -83,7 +83,7 @@
               >{{ fee[value].perByte }} sat/vB
             </span>
             <small class="text-muted d-sm-inline d-block"
-              >≈ {{ fee[value].total | satsToOtherUnit }}</small
+              >≈ {{ fee[value].total | satsToFiat }}</small
             >
           </div>
         </template>

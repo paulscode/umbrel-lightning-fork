@@ -39,13 +39,26 @@ Vue.filter("formatUnit", (unit, value) => {
   }
 });
 
-// Shows an amount in the unit the user is not looking at. Where the Umbrel
-// dashboard showed a fiat value here, this fork shows nothing of the kind:
-// the only price feeds are for the SHA256d chain's coin, and quoting them
-// against BLAKE2b-chain balances would mislead.
-Vue.filter("satsToOtherUnit", (value) => {
+// An amount in the selected fiat currency while the price feed has a quote
+// for it, and in the other unit (BTC or sats) while it does not. The feed is
+// neoxa.exchange, where BTCB2 trades, with Coingecko for the conversion to
+// currencies other than dollars (backend logic/price.js); either can be down,
+// and a stale or missing quote must never be dressed up as a figure.
+Vue.filter("satsToFiat", (value) => {
   if (isNaN(parseInt(value))) {
     return value;
+  }
+  const price = store.state.bitcoin.price;
+  const currency = store.state.system.currency;
+  if (price > 0 && currency) {
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency
+      }).format(satsToBtc(value) * price);
+    } catch (error) {
+      // A code this browser cannot format: fall through to the other unit.
+    }
   }
   if (store.state.system.unit === "btc") {
     return `${Number(value).toLocaleString()} sats`;

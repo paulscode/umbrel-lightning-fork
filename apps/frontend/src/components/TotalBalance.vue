@@ -7,7 +7,7 @@
     <template v-slot:title>
       <div
         v-b-tooltip.hover.right
-        :title="totalBalanceInSats | satsToOtherUnit"
+        :title="totalBalanceInSats | satsToFiat"
         v-if="totalBalance !== -1"
       >
         <CountUp

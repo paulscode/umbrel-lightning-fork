@@ -93,6 +93,25 @@
               >Download channel backup file</b-dropdown-item
             >
             <b-dropdown-group>
+              <div class="dropdown-group" @click.stop>
+                <div
+                  class="d-flex w-100 justify-content-between align-items-center"
+                >
+                  <span class="d-block mr-3 text-nowrap">Fiat currency</span>
+                  <b-form-select
+                    size="sm"
+                    class="currency-select"
+                    :value="currency"
+                    :options="currencyOptions"
+                    @change="changeCurrency"
+                  ></b-form-select>
+                </div>
+                <small class="d-block mt-2" style="opacity: 0.4">
+                  BTCB2 priced at neoxa.exchange
+                </small>
+              </div>
+            </b-dropdown-group>
+            <b-dropdown-group>
               <div class="dropdown-group">
                 <div class="d-flex w-100 justify-content-between align-items-center">
                   <span class="d-block">Dark mode</span>
@@ -438,7 +457,8 @@ export default {
       selectedChannel: {},
       showRecoverChannelsModal: false,
       showAdvancedSettingsModal: false,
-      isChangingAutomaticBackups: false
+      isChangingAutomaticBackups: false,
+      currencyChangeId: 0
     };
   },
   computed: {
@@ -457,6 +477,8 @@ export default {
       unit: state => state.system.unit,
       theme: state => state.system.theme,
       platform: state => state.system.platform,
+      currency: state => state.system.currency,
+      supportedFiatCurrencies: state => state.system.supportedFiatCurrencies,
       backupStatus: state => state.system.backupStatus,
       lastBackupDate: state => state.lightning.lastBackupDate,
       automaticBackups: state => state.system.automaticBackups,
@@ -466,6 +488,21 @@ export default {
     }),
     isStartOS() {
       return this.platform === "startos";
+    },
+    currencyOptions() {
+      const options = this.supportedFiatCurrencies.map(currency => ({
+        text: currency,
+        value: currency
+      }));
+      if (!this.supportedFiatCurrencies.includes(this.currency)) {
+        // The saved choice is not convertible right now (the conversion
+        // table is unreachable); keep it selectable so it survives the outage.
+        options.push({
+          text: `${this.currency} (unavailable)`,
+          value: this.currency
+        });
+      }
+      return options;
     }
   },
   methods: {
@@ -499,6 +536,18 @@ export default {
     },
     toggleTheme(isDark) {
       this.$store.dispatch("system/changeTheme", isDark ? "dark" : "light");
+    },
+    async changeCurrency(currency) {
+      const currencyChangeId = this.currencyChangeId + 1;
+      this.currencyChangeId = currencyChangeId;
+
+      const didUpdatePrice = await this.$store.dispatch(
+        "bitcoin/getPrice",
+        currency
+      );
+      if (didUpdatePrice && currencyChangeId === this.currencyChangeId) {
+        this.$store.dispatch("system/changeCurrency", currency);
+      }
     },
     async downloadChannelBackup() {
       await API.download(
@@ -560,6 +609,7 @@ export default {
     },
     fetchData() {
       this.$store.dispatch("system/getUnit");
+      this.$store.dispatch("bitcoin/getPrice");
       this.$store.dispatch("bitcoin/getSync");
       this.$store.dispatch("bitcoin/getBalance");
       this.$store.dispatch("bitcoin/getTransactions");
@@ -574,6 +624,14 @@ export default {
     }
   },
   async created() {
+    await this.$store.dispatch("system/getCurrency");
+    this.$store.dispatch("system/getCurrencies");
+    // The backend caches the feeds, so this is one cheap request a minute.
+    this.priceInterval = window.setInterval(
+      () => this.$store.dispatch("bitcoin/getPrice"),
+      60000
+    );
+
     if (this.isStartOS) {
       // Wallet setup, LND configuration and backups are StartOS's, so the
       // page needs none of the state behind them.
@@ -599,6 +657,7 @@ export default {
   },
   beforeDestroy() {
     window.clearInterval(this.dataInterval);
+    window.clearInterval(this.priceInterval);
   },
   watch: {
     onboarding: function(newVal, oldVal) {

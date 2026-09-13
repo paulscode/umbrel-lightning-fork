@@ -37,6 +37,7 @@ const watchtower = require("routes/v1/lnd/watchtower.js");
 const pages = require("routes/v1/pages.js");
 const system = require("routes/v1/system/index.js");
 const widgets = require("routes/v1/lnd/widgets.js");
+const external = require("routes/v1/external.js");
 const ping = require("routes/ping.js");
 const app = express();
 
@@ -80,6 +81,7 @@ app.use("/v1/lnd/watchtower", watchtower);
 app.use("/v1/lnd/util", util);
 app.use("/v1/pages", pages);
 app.use("/v1/system", system);
+app.use("/v1/external", external);
 app.use("/ping", ping);
 
 // Umbrel only. StartOS owns lnd.conf and restarts LND itself, keeps its own

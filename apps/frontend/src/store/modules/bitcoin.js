@@ -24,6 +24,8 @@ const state = () => ({
     inbound: 0,
     outbound: 0,
   },
+  // BTCB2 in the selected currency; 0 while no quote can be had.
+  price: 0,
   balance: {
     total: -1, //loading
     confirmed: -1,
@@ -76,6 +78,9 @@ const state = () => ({
 
 // Functions to update the state directly
 const mutations = {
+  price(state, price) {
+    state.price = price;
+  },
   peers(state, peers) {
     state.peers.total = peers.total || 0;
     state.peers.inbound = peers.inbound || 0;
@@ -174,6 +179,31 @@ const actions = {
     commit("transactions", transactions);
   },
 
+
+  // True when a quote was had. `requestedCurrency` is a trial for the picker:
+  // it does not touch the price shown, so a failed switch changes nothing.
+  async getPrice({ commit, rootState }, requestedCurrency) {
+    const currency = requestedCurrency
+      ? String(requestedCurrency).toUpperCase()
+      : rootState.system.currency;
+    const price = await API.get(
+      `${process.env.VUE_APP_API_BASE_URL}/v1/external/price?currency=${encodeURIComponent(
+        currency
+      )}`
+    );
+
+    if (price && price[currency] !== undefined) {
+      commit("price", price[currency]);
+      return true;
+    }
+
+    if (!requestedCurrency) {
+      // No quote right now: the hints fall back to the other unit rather
+      // than keep showing a figure from before the feed went away.
+      commit("price", 0);
+    }
+    return false;
+  },
 
   async getDepositAddress({ commit }) {
     const { address } = await API.get(
