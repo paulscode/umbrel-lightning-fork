@@ -40,6 +40,14 @@ axios.interceptors.response.use(
       return Promise.reject(error);
     }
 
+    // Any other 401 is the dashboard's own password check (StartOS): the
+    // password changed while this page was open. A reload brings the
+    // browser's prompt back; nothing else here can.
+    if (error.response.data !== "Invalid JWT") {
+      window.location.reload();
+      return Promise.reject(error);
+    }
+
     // Try request again with new token if error is due to invalid JWT
 
     if (error.response.data === "Invalid JWT") {

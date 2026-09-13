@@ -41,10 +41,14 @@ const external = require("routes/v1/external.js");
 const ping = require("routes/ping.js");
 const app = express();
 
-// StartOS puts nothing in front of the dashboard, so the password check comes
-// first, ahead of the static files. Umbrel's app proxy signs users in before
-// a request reaches this process.
-if (constants.IS_STARTOS) {
+// The password check comes first, ahead of the static files, whenever a
+// password source is configured; StartOS mode insists on one (bin/www),
+// because StartOS puts nothing in front of the dashboard. The platform flag
+// alone never decides whether the door is locked: a dropped variable must
+// not open it. Umbrel's app proxy signs users in before a request reaches
+// this process, and configures no password here.
+const authConfigured = Boolean(constants.DASHBOARD_PASSWORD || constants.DASHBOARD_PASSWORD_FILE);
+if (constants.IS_STARTOS || authConfigured) {
   const readPassword = () => {
     if (constants.DASHBOARD_PASSWORD_FILE) {
       try {

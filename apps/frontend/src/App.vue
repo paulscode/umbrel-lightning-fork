@@ -87,9 +87,10 @@ export default {
       if (this.loadingProgress <= 40) {
         this.loadingProgress = 40;
         // Which platform first: it decides which of the rest to ask for.
+        // Asked again until it answers, so one failed request cannot leave
+        // a StartOS page dressed as Umbrel's.
         if (!this.platformKnown) {
-          await this.$store.dispatch("system/getPlatform");
-          this.platformKnown = true;
+          this.platformKnown = await this.$store.dispatch("system/getPlatform");
         }
         await Promise.all([
           this.$store.dispatch("system/getApi"),

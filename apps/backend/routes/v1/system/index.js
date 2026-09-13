@@ -115,6 +115,7 @@ router.get(
 
 router.post(
   "/onboarding",
+  umbrelOnly,
   safeHandler(async (req, res) => {
     await diskLogic.updateJsonStore({onboarding: false});
 

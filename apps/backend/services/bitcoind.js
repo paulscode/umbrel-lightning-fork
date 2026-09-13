@@ -18,6 +18,11 @@ function credentials() {
     try {
       const cookie = fs.readFileSync(constants.RPC_COOKIE_FILE, "utf8").trim();
       const colon = cookie.indexOf(":");
+      if (colon === -1) {
+        // Truncated or half-written: fail the call rather than try a
+        // plausible-looking username against the node.
+        return { user: "", pass: "" };
+      }
       return { user: cookie.slice(0, colon), pass: cookie.slice(colon + 1) };
     } catch (error) {
       // The node is down or not yet started; the call fails as it should.

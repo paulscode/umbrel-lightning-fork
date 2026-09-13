@@ -117,7 +117,9 @@ const actions = {
     );
     if (data && data.platform) {
       commit("setPlatform", data.platform);
+      return true;
     }
+    return false;
   },
   async getVersion({ commit }) {
     const data = await API.get(

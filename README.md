@@ -43,7 +43,11 @@ itself or what Umbrel provided:
   `DASHBOARD_PASSWORD`, or from the JSON file named by
   `DASHBOARD_PASSWORD_FILE` (`{"password": "..."}`), read on every request
   so the platform can change it without a restart. Any username is accepted.
-  The backend refuses to start with neither set.
+  The backend refuses to start with neither set, and the check is on
+  whenever either is set, whatever the platform. `GET /ping` stays open and
+  reports `auth` as `configured`, `missing` or `off`, so a platform health
+  check can tell a dashboard without a password (every other request a 503)
+  from a healthy one.
 - Bitcoin RPC credentials from the node's cookie file (`RPC_COOKIE_FILE`),
   re-read on every call, instead of `RPC_USER` and `RPC_PASSWORD`.
 

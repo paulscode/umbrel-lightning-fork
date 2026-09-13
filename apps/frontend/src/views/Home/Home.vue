@@ -89,7 +89,7 @@
             <b-dropdown-item v-if="!isStartOS" href="#" @click.stop.prevent="recoverChannels"
               >Recover channels</b-dropdown-item
             >
-            <b-dropdown-item href="#" @click.stop.prevent="downloadChannelBackup"
+            <b-dropdown-item v-if="!isStartOS" href="#" @click.stop.prevent="downloadChannelBackup"
               >Download channel backup file</b-dropdown-item
             >
             <b-dropdown-group>

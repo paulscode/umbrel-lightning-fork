@@ -19,6 +19,11 @@ const constants = require("utils/const");
  * stand between the network and the wallet.
  */
 
+const platform = process.env.DASHBOARD_PLATFORM;
+if (platform !== undefined && platform !== "umbrel" && platform !== "startos") {
+  console.error(`DASHBOARD_PLATFORM=${platform} is not a platform this dashboard knows; refusing to guess.`);
+  process.exit(1);
+}
 if (constants.IS_STARTOS) {
   if (!constants.DASHBOARD_PASSWORD && !constants.DASHBOARD_PASSWORD_FILE) {
     console.error("DASHBOARD_PLATFORM=startos needs DASHBOARD_PASSWORD or DASHBOARD_PASSWORD_FILE; refusing to serve the wallet without one.");

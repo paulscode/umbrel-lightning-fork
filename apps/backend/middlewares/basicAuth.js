@@ -32,7 +32,7 @@ module.exports = function basicAuth(getPassword) {
       return res.status(503).send("Dashboard password not configured"); // eslint-disable-line no-magic-numbers
     }
     const [scheme, encoded] = String(req.headers.authorization || "").split(" ");
-    if (scheme === "Basic" && encoded) {
+    if (scheme && scheme.toLowerCase() === "basic" && encoded) {
       const decoded = Buffer.from(encoded, "base64").toString("utf8");
       const colon = decoded.indexOf(":");
       const supplied = colon === -1 ? "" : decoded.slice(colon + 1);
