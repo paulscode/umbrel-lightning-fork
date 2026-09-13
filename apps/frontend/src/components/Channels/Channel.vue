@@ -43,13 +43,13 @@
             <span
               class="text-primary font-bold"
               v-b-tooltip.hover.right
-              :title="channel.localBalance | satsToUSD"
+              :title="channel.localBalance | satsToOtherUnit"
               >{{ channel.localBalance | unit | localize }}
               {{ unit | formatUnit }}</span
             >
             <span
               v-b-tooltip.hover.left
-              :title="channel.remoteBalance | satsToUSD"
+              :title="channel.remoteBalance | satsToOtherUnit"
               class="text-success text-right font-bold"
               >{{ channel.remoteBalance | unit | localize }}
               {{ unit | formatUnit }}</span

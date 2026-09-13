@@ -1,11 +1,13 @@
-# Lightning Fork dashboard for Umbrel
+# Lightning Fork dashboard
 
 A fork of [Umbrel's Lightning Node dashboard](https://github.com/getumbrel/umbrel-lightning)
 for [Lightning Fork](https://github.com/paulscode/lightning-fork), the LND fork
 that follows the Bitcoin BLAKE2b chain. It is the `app` container of the
-`paulscode-lightning-fork` app in the PaulsCode Umbrel store.
+`paulscode-lightning-fork` app in the PaulsCode Umbrel store, and the
+`dashboard` image of the
+[Lightning Fork StartOS package](https://github.com/paulscode/lightning-fork-startos).
 
-What differs from upstream, all in `apps/frontend`:
+What differs from upstream:
 
 - Named Lightning Fork, with the chain named beside it and the daemon's
   version (`0.21.3-beta-blake2b.N`) shown where LND's was.
@@ -15,11 +17,36 @@ What differs from upstream, all in `apps/frontend`:
   note and the node URI shortening say so.
 - Transaction links open mempool.guide, an explorer for the BLAKE2b chain,
   instead of mempool.space, which would show the transaction as missing.
+- No fiat amounts. The only price feeds quote the SHA256d chain's coin, and
+  a BLAKE2b balance priced by them would mislead; where upstream showed a
+  fiat value, this shows the amount in the other unit (sats or BTC).
 
-The backend is upstream's, unchanged: Lightning Fork speaks LND's RPC.
+## StartOS mode
+
+With `DASHBOARD_PLATFORM=startos` the same image runs inside the StartOS
+package, keeping the parts that interface with the node (wallets, send and
+receive, channels, history, status and sync) and dropping what StartOS does
+itself or what Umbrel provided:
+
+- No onboarding: the package creates and unlocks the wallet. While the
+  wallet is locked (Cold Storage Mode) the loading screen says so.
+- No `umbrel-lnd.conf` writing, no LND restarts, no Advanced Settings: the
+  package owns `lnd.conf`. The wallet-unlock loop is off for the same reason.
+- No Umbrel backup server, Tor backup toggles, secret words, Connect
+  wallet or home-screen widgets; their API routes answer 404.
+- HTTP Basic authentication on every path but `/ping`, because StartOS puts
+  nothing in front of a UI interface. The password comes from
+  `DASHBOARD_PASSWORD`, or from the JSON file named by
+  `DASHBOARD_PASSWORD_FILE` (`{"password": "..."}`), read on every request
+  so the platform can change it without a restart. Any username is accepted.
+  The backend refuses to start with neither set.
+- Bitcoin RPC credentials from the node's cookie file (`RPC_COOKIE_FILE`),
+  re-read on every call, instead of `RPC_USER` and `RPC_PASSWORD`.
+
+The frontend learns the platform from `GET /v1/system/platform`.
 
 Image: `paulscode/umbrel-lightning-fork`, built from this repository's
-`Dockerfile` for amd64 and arm64 and pinned by digest in the store.
+`Dockerfile` for amd64 and arm64 and pinned by digest on both platforms.
 
 ---
 

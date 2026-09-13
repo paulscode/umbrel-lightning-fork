@@ -12,7 +12,7 @@
     <template v-slot:title>
       <div
         v-b-tooltip.hover.right
-        :title="walletBalanceInSats | satsToUSD"
+        :title="walletBalanceInSats | satsToOtherUnit"
         v-if="walletBalance !== -1"
       >
         <CountUp
@@ -197,7 +197,7 @@
                     <span
                       class="font-weight-bold d-block"
                       v-b-tooltip.hover.left
-                      :title="tx.amount | satsToUSD"
+                      :title="tx.amount | satsToOtherUnit"
                     >
                       <!-- Positive or negative prefix with amount -->
                       <span v-if="tx.type === 'incoming'">+</span>
@@ -274,7 +274,7 @@
                 <small
                   class="text-muted mt-1 d-block text-right mb-0"
                   :style="{ opacity: withdraw.amount > 0 ? 1 : 0 }"
-                  >~ {{ withdraw.amount | satsToUSD }}</small
+                  >~ {{ withdraw.amount | satsToOtherUnit }}</small
                 >
               </div>
             </div>
@@ -336,7 +336,7 @@
                 {{ unit | formatUnit }}
               </span>
               <small class="text-muted d-block mb-3"
-                >~ {{ withdraw.amount | satsToUSD }}</small
+                >~ {{ withdraw.amount | satsToOtherUnit }}</small
               >
 
               <svg
@@ -371,7 +371,7 @@
                     ((parseInt(fees.fast.total, 10) /
                       parseInt(fees.fast.perByte, 10)) *
                       parseInt(withdraw.selectedFee.satPerByte, 10))
-                      | satsToUSD
+                      | satsToOtherUnit
                   }}
                   Transaction fee
                 </small>
@@ -394,7 +394,7 @@
                 <br />
                 <small>
                   ~
-                  {{ fees[withdraw.selectedFee.type]["total"] | satsToUSD }}
+                  {{ fees[withdraw.selectedFee.type]["total"] | satsToOtherUnit }}
                   Transaction fee
                 </small>
               </span>
@@ -870,8 +870,6 @@ export default {
   async created() {
     this.$store.dispatch("bitcoin/getBalance");
     this.$store.dispatch("bitcoin/getTransactions");
-    await this.$store.dispatch("system/getCurrency");
-    this.$store.dispatch("bitcoin/getPrice");
     this.$store.dispatch("system/getLocalExplorerUrl");
   },
   mounted() {

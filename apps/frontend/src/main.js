@@ -39,19 +39,18 @@ Vue.filter("formatUnit", (unit, value) => {
   }
 });
 
-//transforms sats to the selected fiat currency
-Vue.filter("satsToUSD", (value) => {
+// Shows an amount in the unit the user is not looking at. Where the Umbrel
+// dashboard showed a fiat value here, this fork shows nothing of the kind:
+// the only price feeds are for the SHA256d chain's coin, and quoting them
+// against BLAKE2b-chain balances would mislead.
+Vue.filter("satsToOtherUnit", (value) => {
   if (isNaN(parseInt(value))) {
     return value;
-  } else {
-    const currency = store.state.system.currency;
-    const amount = satsToBtc(value) * store.state.bitcoin.price;
-
-    return new Intl.NumberFormat(undefined, {
-      style: "currency",
-      currency
-    }).format(amount);
   }
+  if (store.state.system.unit === "btc") {
+    return `${Number(value).toLocaleString()} sats`;
+  }
+  return `${satsToBtc(value).toFixed(8)} BTC`;
 });
 
 //Localized number (comma, seperator, spaces, etc)

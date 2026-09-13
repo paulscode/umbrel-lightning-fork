@@ -1,25 +1,50 @@
+const fs = require("fs");
 const RpcClient = require("bitcoind-rpc");
 const camelizeKeys = require("camelize-keys");
 
 const BitcoindError = require("models/errors.js").BitcoindError;
+const constants = require("utils/const.js");
 
 const BITCOIND_RPC_PORT = process.env.RPC_PORT || 8332; // eslint-disable-line no-magic-numbers, max-len
 const BITCOIND_HOST = process.env.BITCOIN_HOST || "127.0.0.1";
 const BITCOIND_RPC_USER = process.env.RPC_USER;
 const BITCOIND_RPC_PASSWORD = process.env.RPC_PASSWORD;
 
-const rpcClient = new RpcClient({
-  protocol: "http",
-  user: BITCOIND_RPC_USER, // eslint-disable-line object-shorthand
-  pass: BITCOIND_RPC_PASSWORD, // eslint-disable-line object-shorthand
-  host: BITCOIND_HOST,
-  port: BITCOIND_RPC_PORT,
-});
+// The library bakes the credentials into the client when it is built, so a
+// client is built per call: StartOS hands over the node's cookie file, which
+// the node rewrites at every start, rather than a fixed username and password.
+function credentials() {
+  if (constants.RPC_COOKIE_FILE) {
+    try {
+      const cookie = fs.readFileSync(constants.RPC_COOKIE_FILE, "utf8").trim();
+      const colon = cookie.indexOf(":");
+      return { user: cookie.slice(0, colon), pass: cookie.slice(colon + 1) };
+    } catch (error) {
+      // The node is down or not yet started; the call fails as it should.
+      return { user: "", pass: "" };
+    }
+  }
+  return { user: BITCOIND_RPC_USER, pass: BITCOIND_RPC_PASSWORD };
+}
+
+function client() {
+  const { user, pass } = credentials();
+  return new RpcClient({
+    protocol: "http",
+    user, // eslint-disable-line object-shorthand
+    pass, // eslint-disable-line object-shorthand
+    host: BITCOIND_HOST,
+    port: BITCOIND_RPC_PORT,
+  });
+}
+
+// Method lookup only; every call runs against a client built for it.
+const rpcClient = RpcClient.prototype;
 
 function promiseify(rpcObj, rpcFn, what) {
   return new Promise((resolve, reject) => {
     try {
-      rpcFn.call(rpcObj, (err, info) => {
+      rpcFn.call(client(), (err, info) => {
         if (err) {
           reject(new BitcoindError(`Unable to obtain ${what}`, err));
         } else {
@@ -35,7 +60,7 @@ function promiseify(rpcObj, rpcFn, what) {
 function promiseifyParam(rpcObj, rpcFn, param, what) {
   return new Promise((resolve, reject) => {
     try {
-      rpcFn.call(rpcObj, param, (err, info) => {
+      rpcFn.call(client(), param, (err, info) => {
         if (err) {
           reject(new BitcoindError(`Unable to obtain ${what}`, err));
         } else {
@@ -51,7 +76,7 @@ function promiseifyParam(rpcObj, rpcFn, param, what) {
 function promiseifyParamTwo(rpcObj, rpcFn, param1, param2, what) {
   return new Promise((resolve, reject) => {
     try {
-      rpcFn.call(rpcObj, param1, param2, (err, info) => {
+      rpcFn.call(client(), param1, param2, (err, info) => {
         if (err) {
           reject(new BitcoindError(`Unable to obtain ${what}`, err));
         } else {

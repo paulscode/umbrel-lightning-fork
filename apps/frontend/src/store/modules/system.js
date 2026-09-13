@@ -1,16 +1,5 @@
 import API from "@/helpers/api";
 
-// Keep this list aligned with the currencies returned by mempool.space /api/v1/prices.
-const SUPPORTED_FIAT_CURRENCIES = [
-  "USD",
-  "EUR",
-  "GBP",
-  "CAD",
-  "CHF",
-  "AUD",
-  "JPY"
-];
-
 // Initial state
 const state = () => ({
   version: "",
@@ -25,8 +14,10 @@ const state = () => ({
   loading: true,
   unit: "sats", //sats or btc
   theme: "dark",
-  currency: "USD",
-  supportedFiatCurrencies: SUPPORTED_FIAT_CURRENCIES,
+  // "umbrel" or "startos": what hosts the dashboard, from /v1/system/platform.
+  // StartOS provides wallet setup, LND configuration, backups and connection
+  // strings itself, so the dashboard hides its own versions of those there.
+  platform: "umbrel",
   api: {
     operational: false,
     version: ""
@@ -44,8 +35,8 @@ const mutations = {
   setUnit(state, unit) {
     state.unit = unit;
   },
-  setCurrency(state, currency) {
-    state.currency = currency;
+  setPlatform(state, platform) {
+    state.platform = platform;
   },
   setTheme(state, theme) {
     state.theme = theme;
@@ -84,6 +75,14 @@ const mutations = {
 
 // Functions to get data from the API
 const actions = {
+  async getPlatform({ commit }) {
+    const data = await API.get(
+      `${process.env.VUE_APP_API_BASE_URL}/v1/system/platform`
+    );
+    if (data && data.platform) {
+      commit("setPlatform", data.platform);
+    }
+  },
   async getVersion({ commit }) {
     const data = await API.get(
       `${process.env.VUE_APP_API_BASE_URL}/v1/system/info`
@@ -105,21 +104,6 @@ const actions = {
     if (unit === "sats" || unit === "btc") {
       window.localStorage.setItem("unit", unit);
       commit("setUnit", unit);
-    }
-  },
-  async getCurrency({ commit }) {
-    if (window.localStorage && window.localStorage.getItem("currency")) {
-      const currency = window.localStorage.getItem("currency").toUpperCase();
-      if (SUPPORTED_FIAT_CURRENCIES.includes(currency)) {
-        commit("setCurrency", currency);
-      }
-    }
-  },
-  changeCurrency({ commit }, currency) {
-    currency = String(currency).toUpperCase();
-    if (SUPPORTED_FIAT_CURRENCIES.includes(currency)) {
-      window.localStorage.setItem("currency", currency);
-      commit("setCurrency", currency);
     }
   },
   async getTheme({ commit }) {
@@ -225,7 +209,8 @@ const actions = {
   },
 };
 
-const getters = {};
+const getters = {
+  isStartOS: state => state.platform === "startos",};
 
 export default {
   namespaced: true,

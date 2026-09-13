@@ -6,6 +6,19 @@ module.exports = {
     UNKNOWN: 2
   },
   DEVICE_DOMAIN_NAME: process.env.DEVICE_DOMAIN_NAME,
+  // Which platform hosts the dashboard. Umbrel is the original. StartOS runs
+  // the same image with DASHBOARD_PLATFORM=startos, which switches off the
+  // pieces Umbrel provides or that StartOS provides itself (see app.js), and
+  // puts a password on the door because nothing else does.
+  PLATFORM: process.env.DASHBOARD_PLATFORM === "startos" ? "startos" : "umbrel",
+  IS_STARTOS: process.env.DASHBOARD_PLATFORM === "startos",
+  DASHBOARD_PASSWORD: process.env.DASHBOARD_PASSWORD,
+  // A JSON file holding {"password": "..."}; read on every request, so the
+  // platform can change the password without restarting the dashboard.
+  DASHBOARD_PASSWORD_FILE: process.env.DASHBOARD_PASSWORD_FILE,
+  // A bitcoind cookie file to read RPC credentials from, instead of RPC_USER
+  // and RPC_PASSWORD. Re-read on every call: the node rewrites it at each start.
+  RPC_COOKIE_FILE: process.env.RPC_COOKIE_FILE,
   USER_FILE: process.env.USER_FILE || "/db/user.json",
   JSON_STORE_FILE: process.env.JSON_STORE_FILE || "/data/state.json",
   JSON_SETTINGS_FILE: process.env.JSON_SETTINGS_FILE || "/data/settings.json",

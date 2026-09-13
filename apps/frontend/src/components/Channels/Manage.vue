@@ -5,14 +5,14 @@
         <h4
           class="text-primary font-bold"
           v-b-tooltip.hover.right
-          :title="channel.localBalance | satsToUSD"
+          :title="channel.localBalance | satsToOtherUnit"
         >
           {{ channel.localBalance | unit | localize }} {{ unit | formatUnit }}
         </h4>
         <h4
           class="text-success font-bold text-right"
           v-b-tooltip.hover.left
-          :title="channel.remoteBalance | satsToUSD"
+          :title="channel.remoteBalance | satsToOtherUnit"
         >
           {{ channel.remoteBalance | unit | localize }} {{ unit | formatUnit }}
         </h4>
@@ -68,7 +68,7 @@
           <span class="text-muted">Local Balance</span>
           <span
             v-b-tooltip.hover.left
-            :title="channel.localBalance | satsToUSD"
+            :title="channel.localBalance | satsToOtherUnit"
             class="text-capitalize font-bold"
           >
             {{ channel.localBalance | unit | localize }}
@@ -80,7 +80,7 @@
           <span class="text-muted">Remote Balance</span>
           <span
             v-b-tooltip.hover.left
-            :title="channel.remoteBalance | satsToUSD"
+            :title="channel.remoteBalance | satsToOtherUnit"
             class="text-capitalize font-bold"
           >
             {{ channel.remoteBalance | unit | localize }}
@@ -92,7 +92,7 @@
           <span class="text-muted">Channel Capacity</span>
           <span
             v-b-tooltip.hover.left
-            :title="channel.capacity | satsToUSD"
+            :title="channel.capacity | satsToOtherUnit"
             class="text-capitalize font-bold"
           >
             {{ channel.capacity | unit | localize }}

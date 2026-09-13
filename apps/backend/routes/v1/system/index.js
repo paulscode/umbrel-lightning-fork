@@ -6,10 +6,21 @@ const diskLogic = require('logic/disk');
 const safeHandler = require("utils/safeHandler");
 const constants = require("utils/const.js");
 const validator = require("utils/validator.js");
+const umbrelOnly = require("middlewares/umbrelOnly.js");
+
+// Which platform hosts the dashboard, so the frontend can hide what the
+// platform provides itself. Answered before any other state is read.
+router.get(
+  "/platform",
+  safeHandler(async (req, res) => res.json({
+    platform: constants.PLATFORM,
+  }))
+);
 
 
 router.get(
   "/lndconnect-urls",
+  umbrelOnly,
   safeHandler(async (req, res) => {
     const urls = await systemLogic.getLndConnectUrls();
 
@@ -19,6 +30,7 @@ router.get(
 
 router.get(
   "/backup-status",
+  umbrelOnly,
   safeHandler(async (req, res) => {
     const backup = await systemLogic.getBackupStatus();
 
@@ -29,6 +41,7 @@ router.get(
 // backupOverTor is a boolean that determines whether channel backup files should be uploaded/downloaded over Tor or clearnet
 router.get(
   "/backup-over-tor",
+  umbrelOnly,
   safeHandler(async (req, res) => {
     const {backupOverTor} = await diskLogic.getJsonStore();
 
@@ -38,6 +51,7 @@ router.get(
 
 router.post(
   "/backup-over-tor",
+  umbrelOnly,
   safeHandler(async (req, res) => {
     const {backupOverTor} = req.body;
 
@@ -52,6 +66,7 @@ router.post(
 // automaticBackups determines whether channel backup files should be uploaded automatically.
 router.get(
   "/automatic-backups",
+  umbrelOnly,
   safeHandler(async (req, res) => {
     const {automaticBackups} = await diskLogic.getJsonStore();
 
@@ -61,6 +76,7 @@ router.get(
 
 router.post(
   "/automatic-backups",
+  umbrelOnly,
   safeHandler(async (req, res) => {
     const {automaticBackups} = req.body;
 
@@ -75,6 +91,7 @@ router.post(
 // retrieves whether the latest backup attempt was successfully uploaded
 router.get(
   "/recent-backup-success",
+  umbrelOnly,
   safeHandler(async (req, res) => {
     const {mostRecentBackupSuccess} = await diskLogic.getJsonStore();
 
@@ -85,6 +102,11 @@ router.get(
 router.get(
   "/onboarding",
   safeHandler(async (req, res) => {
+    // The StartOS package creates and unlocks the wallet, so there is nothing
+    // to onboard.
+    if (constants.IS_STARTOS) {
+      return res.json(false);
+    }
     const {onboarding} = await diskLogic.getJsonStore();
 
     return res.json(onboarding);
@@ -102,6 +124,7 @@ router.post(
 
 router.get(
   "/seed",
+  umbrelOnly,
   safeHandler(async (req, res) => {
     const {seed} = await diskLogic.getJsonStore();
 
@@ -111,6 +134,7 @@ router.get(
 
 router.get(
   "/seed-exists",
+  umbrelOnly,
   safeHandler(async (req, res) => {
     const {seed} = await diskLogic.getJsonStore();
 

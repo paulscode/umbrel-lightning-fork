@@ -38,7 +38,6 @@ const state = () => ({
     { type: "loading" },
   ],
   pending: [],
-  price: 0,
   fees: {
     fast: {
       total: "--",
@@ -144,9 +143,6 @@ const mutations = {
     }
   },
 
-  price(state, price) {
-    state.price = price;
-  },
 };
 
 // Functions to get data from the API
@@ -178,23 +174,6 @@ const actions = {
     commit("transactions", transactions);
   },
 
-  async getPrice({ commit, rootState }, requestedCurrency) {
-    const currency = requestedCurrency
-      ? String(requestedCurrency).toUpperCase()
-      : rootState.system.currency;
-    const price = await API.get(
-      `${process.env.VUE_APP_API_BASE_URL}/v1/external/price?currency=${encodeURIComponent(
-        currency
-      )}`
-    );
-
-    if (price && price[currency] !== undefined) {
-      commit("price", price[currency]);
-      return true;
-    }
-
-    return false;
-  },
 
   async getDepositAddress({ commit }) {
     const { address } = await API.get(

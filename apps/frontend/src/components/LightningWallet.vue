@@ -12,7 +12,7 @@
     <template v-slot:title>
       <div
         v-b-tooltip.hover.right
-        :title="walletBalanceInSats | satsToUSD"
+        :title="walletBalanceInSats | satsToOtherUnit"
         v-if="walletBalance !== -1"
       >
         <CountUp
@@ -219,7 +219,7 @@
                     <span
                       class="font-weight-bold d-block"
                       v-b-tooltip.hover.left
-                      :title="tx.amount | satsToUSD"
+                      :title="tx.amount | satsToOtherUnit"
                     >
                       <!-- Positive or negative prefix with amount -->
                       <span v-if="tx.type === 'incoming'">+</span>
@@ -289,7 +289,7 @@
                 </small>
               </div>
               <small class="d-block text-muted"
-                >~ {{ send.amount | satsToUSD }}</small
+                >~ {{ send.amount | satsToOtherUnit }}</small
               >
             </div>
 
@@ -397,7 +397,7 @@
             <small
               class="text-muted mt-2 d-block text-right mb-0"
               :style="{ opacity: receive.amount > 0 ? 1 : 0 }"
-              >~ {{ receive.amount | satsToUSD }}</small
+              >~ {{ receive.amount | satsToOtherUnit }}</small
             >
           </div>
 

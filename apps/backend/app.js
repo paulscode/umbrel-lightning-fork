@@ -3,6 +3,7 @@ require("module-alias").addPath(".");
 require("dotenv").config({ path: require("find-config")(".env") });
 
 const express = require("express");
+const fs = require("fs");
 const path = require("path");
 const morgan = require("morgan");
 const bodyParser = require("body-parser");
@@ -17,6 +18,7 @@ const requestCorrelationMiddleware = require("middlewares/requestCorrelationId.j
 const camelCaseReqMiddleware = require("middlewares/camelCaseRequest.js")
   .camelCaseRequest;
 const errorHandleMiddleware = require("middlewares/errorHandling.js");
+const basicAuth = require("middlewares/basicAuth.js");
 const LndError = require("models/errors.js").LndError;
 
 const logger = require("utils/logger.js");
@@ -34,10 +36,27 @@ const wallet = require("routes/v1/lnd/wallet.js");
 const watchtower = require("routes/v1/lnd/watchtower.js");
 const pages = require("routes/v1/pages.js");
 const system = require("routes/v1/system/index.js");
-const external = require("routes/v1/external.js");
 const widgets = require("routes/v1/lnd/widgets.js");
 const ping = require("routes/ping.js");
 const app = express();
+
+// StartOS puts nothing in front of the dashboard, so the password check comes
+// first, ahead of the static files. Umbrel's app proxy signs users in before
+// a request reaches this process.
+if (constants.IS_STARTOS) {
+  const readPassword = () => {
+    if (constants.DASHBOARD_PASSWORD_FILE) {
+      try {
+        const {password} = JSON.parse(fs.readFileSync(constants.DASHBOARD_PASSWORD_FILE, "utf8"));
+        return typeof password === "string" ? password : "";
+      } catch (error) {
+        return "";
+      }
+    }
+    return constants.DASHBOARD_PASSWORD || "";
+  };
+  app.use(basicAuth(readPassword));
+}
 
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
@@ -52,7 +71,6 @@ app.use("/", express.static("../frontend/dist"));
 
 app.use("/v1/lnd/address", address);
 app.use("/v1/lnd/channel", channel);
-app.use("/v1/lnd/conf", conf);
 app.use("/v1/lnd/info", info);
 app.use("/v1/lnd/lightning", lightning);
 app.use("/v1/bitcoin", bitcoin);
@@ -60,12 +78,17 @@ app.use("/v1/lnd/transaction", transaction);
 app.use("/v1/lnd/wallet", wallet);
 app.use("/v1/lnd/watchtower", watchtower);
 app.use("/v1/lnd/util", util);
-app.use("/v1/lnd/backups", backups);
 app.use("/v1/pages", pages);
 app.use("/v1/system", system);
-app.use("/v1/external", external);
-app.use("/v1/lnd/widgets", widgets);
 app.use("/ping", ping);
+
+// Umbrel only. StartOS owns lnd.conf and restarts LND itself, keeps its own
+// backups rather than Umbrel's backup server, and has no home-screen widgets.
+if (!constants.IS_STARTOS) {
+  app.use("/v1/lnd/conf", conf);
+  app.use("/v1/lnd/backups", backups);
+  app.use("/v1/lnd/widgets", widgets);
+}
 
 app.use(errorHandleMiddleware);
 app.use((req, res) => {
@@ -109,13 +132,18 @@ const initLnd = async () => {
 
 };
 
-// Retry init every 10 seconds in case of LND restart or crash
-(async () => {
-  while (true) {
-    await initLnd();
-    await delay(10 * SECOND_IN_MS);
-  }
-})();
+// Retry init every 10 seconds in case of LND restart or crash. Not on
+// StartOS: the package unlocks the wallet with its own password (or leaves it
+// to the user in Cold Storage Mode), and Umbrel's backup server is not in the
+// picture, so neither loop runs there.
+if (!constants.IS_STARTOS) {
+  (async () => {
+    while (true) {
+      await initLnd();
+      await delay(10 * SECOND_IN_MS);
+    }
+  })();
 
-// Monitor channel backups for changes and backup
-startChannelBackupMonitor();
+  // Monitor channel backups for changes and backup
+  startChannelBackupMonitor();
+}

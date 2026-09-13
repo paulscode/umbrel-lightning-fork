@@ -14,7 +14,11 @@
           </span>
         </div>
       </div>
-      <loading v-else-if="loading" :progress="loadingProgress"> </loading>
+      <loading v-else-if="loading" :progress="loadingProgress">
+        <small v-if="loadingMessage" class="text-muted text-center mt-2 w-75">{{
+          loadingMessage
+        }}</small>
+      </loading>
       <!-- component matched by the route will render here -->
       <router-view v-else></router-view>
     </transition>
@@ -36,15 +40,28 @@ export default {
       isIframe: window.self !== window.top,
       loading: true,
       loadingProgress: 0,
-      loadingPollInProgress: false
+      loadingPollInProgress: false,
+      platformKnown: false
     };
   },
   computed: {
     ...mapState({
       isApiOperational: state => state.system.api.operational,
       isLightningOperational: state => state.lightning.operational,
-      theme: state => state.system.theme
+      theme: state => state.system.theme,
+      platform: state => state.system.platform
     }),
+    isStartOS() {
+      return this.platform === "startos";
+    },
+    loadingMessage() {
+      // On StartOS the package unlocks the wallet, except in Cold Storage
+      // Mode, where the user does. Say so rather than spin without a word.
+      if (this.isStartOS && this.isApiOperational && !this.isLightningOperational) {
+        return "Waiting for the node. If Cold Storage Mode is on, run Unlock Wallet in StartOS.";
+      }
+      return "";
+    }
   },
   methods: {
     applyTheme(theme) {
@@ -69,10 +86,19 @@ export default {
       // Check if the API is up
       if (this.loadingProgress <= 40) {
         this.loadingProgress = 40;
+        // Which platform first: it decides which of the rest to ask for.
+        if (!this.platformKnown) {
+          await this.$store.dispatch("system/getPlatform");
+          this.platformKnown = true;
+        }
         await Promise.all([
           this.$store.dispatch("system/getApi"),
-          this.$store.dispatch("system/getOnboardingStatus"),
-          this.$store.dispatch("system/getSeedExists"),
+          ...(this.isStartOS
+            ? []
+            : [
+                this.$store.dispatch("system/getOnboardingStatus"),
+                this.$store.dispatch("system/getSeedExists"),
+              ]),
         ]);
         if (!this.isApiOperational) {
           this.loading = true;

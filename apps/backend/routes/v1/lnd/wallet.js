@@ -7,9 +7,11 @@ const constants = require("utils/const.js");
 const logger = require("utils/logger.js");
 const validator = require("utils/validator.js");
 const LndError = require("models/errors.js").LndError;
+const umbrelOnly = require("middlewares/umbrelOnly.js");
 
 router.post(
   "/create",
+  umbrelOnly,
   safeHandler(async (req, res) => {
     let seed = typeof req.body.seed === 'string' && req.body.seed.split(' ');
     console.log('Attempting to create new wallet...');

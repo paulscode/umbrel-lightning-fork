@@ -74,38 +74,24 @@
             <b-dropdown-item href="#" v-b-modal.node-id-modal
               >Node ID</b-dropdown-item
             >
-            <b-dropdown-item href="#" v-b-modal.connect-wallet-modal @click="getLndConnectUrls"
+            <!-- On StartOS the service's interfaces, actions and backups
+                 cover these, so the dashboard keeps to the node itself. -->
+            <b-dropdown-item v-if="!isStartOS" href="#" v-b-modal.connect-wallet-modal @click="getLndConnectUrls"
               >Connect wallet</b-dropdown-item
             >
-            <b-dropdown-item href="#" v-b-modal.secret-words-modal
+            <b-dropdown-item v-if="!isStartOS" href="#" v-b-modal.secret-words-modal
               >View secret words</b-dropdown-item
             >
-            <b-dropdown-item href="#" @click.stop.prevent="openAdvancedSettingsModal"
+            <b-dropdown-item v-if="!isStartOS" href="#" @click.stop.prevent="openAdvancedSettingsModal"
               >Advanced Settings</b-dropdown-item
             >
             <b-dropdown-divider></b-dropdown-divider>
-            <b-dropdown-item href="#" @click.stop.prevent="recoverChannels"
+            <b-dropdown-item v-if="!isStartOS" href="#" @click.stop.prevent="recoverChannels"
               >Recover channels</b-dropdown-item
             >
             <b-dropdown-item href="#" @click.stop.prevent="downloadChannelBackup"
               >Download channel backup file</b-dropdown-item
             >
-            <b-dropdown-group>
-              <div class="dropdown-group" @click.stop>
-                <div
-                  class="d-flex w-100 justify-content-between align-items-center"
-                >
-                  <span class="d-block mr-3 text-nowrap">Fiat currency</span>
-                  <b-form-select
-                    size="sm"
-                    class="currency-select"
-                    :value="currency"
-                    :options="currencyOptions"
-                    @change="changeCurrency"
-                  ></b-form-select>
-                </div>
-              </div>
-            </b-dropdown-group>
             <b-dropdown-group>
               <div class="dropdown-group">
                 <div class="d-flex w-100 justify-content-between align-items-center">
@@ -118,7 +104,7 @@
                 </div>
               </div>
             </b-dropdown-group>
-            <b-dropdown-group>
+            <b-dropdown-group v-if="!isStartOS">
               <div class="dropdown-group">
                 <div class="d-flex w-100 justify-content-between">
                   <div>
@@ -141,7 +127,7 @@
               </div>
             </b-dropdown-group>
 
-            <b-dropdown-group>
+            <b-dropdown-group v-if="!isStartOS">
               <div class="dropdown-group">
                 <div class="d-flex w-100 justify-content-between">
                   <div>
@@ -345,7 +331,7 @@
     </b-row>
 
     <!-- Modals  -->
-    <onboarding-modal />
+    <onboarding-modal v-if="!isStartOS" />
     <b-modal
       v-if="showRecoverChannelsModal"
       id="recover-channels-modal"
@@ -363,9 +349,10 @@
     </b-modal>
     <advanced-settings-modal v-if="showAdvancedSettingsModal" />
     <node-id-modal />
-    <secret-words-modal />
-    <connect-wallet-modal />
+    <secret-words-modal v-if="!isStartOS" />
+    <connect-wallet-modal v-if="!isStartOS" />
     <b-modal
+      v-if="!isStartOS"
       id="disable-automatic-backups-modal"
       size="lg"
       centered
@@ -417,7 +404,7 @@
         </div>
       </div>
     </b-modal>
-    <tor-backup-failed-modal />
+    <tor-backup-failed-modal v-if="!isStartOS" />
   </div>
 </template>
 
@@ -451,8 +438,7 @@ export default {
       selectedChannel: {},
       showRecoverChannelsModal: false,
       showAdvancedSettingsModal: false,
-      isChangingAutomaticBackups: false,
-      currencyChangeId: 0
+      isChangingAutomaticBackups: false
     };
   },
   computed: {
@@ -470,8 +456,7 @@ export default {
       channels: state => state.lightning.channels,
       unit: state => state.system.unit,
       theme: state => state.system.theme,
-      currency: state => state.system.currency,
-      supportedFiatCurrencies: state => state.system.supportedFiatCurrencies,
+      platform: state => state.system.platform,
       backupStatus: state => state.system.backupStatus,
       lastBackupDate: state => state.lightning.lastBackupDate,
       automaticBackups: state => state.system.automaticBackups,
@@ -479,11 +464,8 @@ export default {
       mostRecentBackupSuccess: state => state.system.mostRecentBackupSuccess,
       onboarding: state => state.system.onboarding
     }),
-    currencyOptions() {
-      return this.supportedFiatCurrencies.map(currency => ({
-        text: currency,
-        value: currency
-      }));
+    isStartOS() {
+      return this.platform === "startos";
     }
   },
   methods: {
@@ -518,24 +500,12 @@ export default {
     toggleTheme(isDark) {
       this.$store.dispatch("system/changeTheme", isDark ? "dark" : "light");
     },
-    async changeCurrency(currency) {
-      const currencyChangeId = this.currencyChangeId + 1;
-      this.currencyChangeId = currencyChangeId;
-
-      const didUpdatePrice = await this.$store.dispatch(
-        "bitcoin/getPrice",
-        currency
-      );
-      if (didUpdatePrice && currencyChangeId === this.currencyChangeId) {
-        this.$store.dispatch("system/changeCurrency", currency);
-      }
-    },
     async downloadChannelBackup() {
       await API.download(
         `${process.env.VUE_APP_API_BASE_URL}/v1/lnd/util/download-channel-backup`,
         {},
         true,
-        "my-umbrel-channels.backup"
+        "lightning-fork-channels.backup"
       );
     },
     openAdvancedSettingsModal() {
@@ -590,7 +560,6 @@ export default {
     },
     fetchData() {
       this.$store.dispatch("system/getUnit");
-      this.$store.dispatch("system/getCurrency");
       this.$store.dispatch("bitcoin/getSync");
       this.$store.dispatch("bitcoin/getBalance");
       this.$store.dispatch("bitcoin/getTransactions");
@@ -599,10 +568,19 @@ export default {
       this.$store.dispatch("lightning/getTransactions");
       this.$store.dispatch("lightning/getChannels");
       this.$store.dispatch("lightning/getLndPageData");
-      this.$store.dispatch("lightning/getLastBackupDate");
+      if (!this.isStartOS) {
+        this.$store.dispatch("lightning/getLastBackupDate");
+      }
     }
   },
   async created() {
+    if (this.isStartOS) {
+      // Wallet setup, LND configuration and backups are StartOS's, so the
+      // page needs none of the state behind them.
+      await this.fetchData();
+      return;
+    }
+
     await Promise.all([
       this.fetchData(),
       this.$store.dispatch("user/getLndConfig"),
