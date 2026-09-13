@@ -16,15 +16,6 @@ async function getSeed() {
   }
 }
 
-async function getBackupStatus() {
-  try {
-    const status = await diskLogic.readBackupStatusFile();
-    return status;
-  } catch (error) {
-    throw new NodeError("Unable to get backup status");
-  }
-}
-
 async function getTermsAcknowledge() {
   try {
     const terms = await diskLogic.readTermsAcknowledgeFile();
@@ -108,7 +99,6 @@ async function getLndConnectUrls() {
 
 module.exports = {
   getSeed,
-  getBackupStatus,
   getTermsAcknowledge,
   writeTermsAcknowledge,
   getLndConnectUrls

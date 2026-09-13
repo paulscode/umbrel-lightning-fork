@@ -17,6 +17,17 @@ What differs from upstream:
   note and the node URI shortening say so.
 - Transaction links open mempool.guide, an explorer for the BLAKE2b chain,
   instead of mempool.space, which would show the transaction as missing.
+- Channel backups to a place the owner controls. Upstream uploaded
+  `channel.backup` to Umbrel's backup server, which answers 403 to this app.
+  The backend now runs the channel-backup agent from the StartOS package
+  (`backup-agent.sh`, pinned by commit in the Dockerfile, with rclone): it
+  copies `channel.backup` to SFTP, Nextcloud, Dropbox or Google Drive
+  whenever it changes, and fetches it back for a restore. The dashboard's
+  "Channel backups" modal configures a target (`/v1/channel-backup/*`,
+  Umbrel only; StartOS has its own actions for the same agent), with the
+  SFTP host-key confirmation and the OAuth code exchange the StartOS action
+  has. Secrets stay in `channel-backup.json` beside LND's data and never
+  reach the browser.
 - Fiat amounts priced for this chain. Upstream asked mempool.space for the
   BTC price, which is the SHA256d coin's. This asks neoxa.exchange, where
   BTCB2 trades (its BTCB2/USDC market), and converts dollars to other
@@ -36,8 +47,9 @@ itself or what Umbrel provided:
   wallet is locked (Cold Storage Mode) the loading screen says so.
 - No `umbrel-lnd.conf` writing, no LND restarts, no Advanced Settings: the
   package owns `lnd.conf`. The wallet-unlock loop is off for the same reason.
-- No Umbrel backup server, Tor backup toggles, secret words, Connect
-  wallet or home-screen widgets; their API routes answer 404.
+- No channel-backup configuration, secret words, Connect wallet or
+  home-screen widgets; their API routes answer 404. StartOS runs the same
+  backup agent through its own actions.
 - A sign-in screen, because StartOS puts nothing in front of a UI
   interface. One password, no username, after the pattern Pickhash uses:
   `POST /v1/auth/login` opens a server-side session held in an HttpOnly

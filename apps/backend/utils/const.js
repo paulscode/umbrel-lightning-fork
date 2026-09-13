@@ -35,6 +35,10 @@ module.exports = {
     OK: 200
   },
   CHANNEL_BACKUP_FILE: process.env.CHANNEL_BACKUP_FILE,
+  // The node's data directory as this container sees it, where the channel
+  // backup agent keeps its settings and state (Umbrel mounts it at /data/.lnd).
+  LND_DIR: process.env.LND_DIR || "/data/.lnd",
+  BACKUP_AGENT: process.env.BACKUP_AGENT || "/usr/local/bin/backup-agent.sh",
   LND_REST_HIDDEN_SERVICE:
     process.env.LND_REST_HIDDEN_SERVICE || "unset.onion",
   LND_GRPC_HIDDEN_SERVICE:

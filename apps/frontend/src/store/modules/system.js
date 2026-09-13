@@ -3,13 +3,6 @@ import API from "@/helpers/api";
 // Initial state
 const state = () => ({
   version: "",
-  backupStatus: {
-    status: "", //success, failed
-    timestamp: null
-  },
-  automaticBackups: true,
-  backupOverTor: true, // by default we backup over Tor
-  mostRecentBackupSuccess: false,
   onboarding: false, // assume false to prevent modal flickering
   loading: true,
   unit: "sats", //sats or btc
@@ -22,6 +15,12 @@ const state = () => ({
   // StartOS provides wallet setup, LND configuration, backups and connection
   // strings itself, so the dashboard hides its own versions of those there.
   platform: "umbrel",
+  // Channel backups (Umbrel): the agent's status and the targets' settings,
+  // secrets replaced by whether one is stored. See backend logic/channelBackup.js.
+  channelBackup: {
+    status: null,
+    config: null
+  },
   // The sign-in gate (StartOS): whether a password is configured, whether
   // this browser holds a session, and the session's CSRF token for writes.
   // With no password configured (Umbrel signs users in at its proxy) the
@@ -52,6 +51,12 @@ const mutations = {
   setPlatform(state, platform) {
     state.platform = platform;
   },
+  setChannelBackupStatus(state, status) {
+    state.channelBackup = { ...state.channelBackup, status };
+  },
+  setChannelBackupConfig(state, config) {
+    state.channelBackup = { ...state.channelBackup, config };
+  },
   setAuth(state, { passwordEnabled, authed, csrf }) {
     state.auth = { known: true, passwordEnabled, authed, csrf };
   },
@@ -75,18 +80,6 @@ const mutations = {
   },
   setOnionAddress(state, address) {
     state.onionAddress = address;
-  },
-  setBackupStatus(state, status) {
-    state.backupStatus = status;
-  },
-  setAutomaticBackups(state, automaticBackups) {
-    state.automaticBackups = automaticBackups;
-  },
-  setBackupOverTor(state, backupOverTor) {
-    state.backupOverTor = backupOverTor;
-  },
-  setMostRecentBackupSuccess(state, mostRecentBackupSuccess) {
-    state.mostRecentBackupSuccess = mostRecentBackupSuccess;
   },
   setOnboarding(state, status) {
     state.onboarding = status;
@@ -179,7 +172,49 @@ const actions = {
     }
     commit("setAuthed", false);
   },
-  async getPlatform({ commit }) {
+  async getChannelBackupStatus({ commit }) {
+    const status = await API.get(
+      `${process.env.VUE_APP_API_BASE_URL}/v1/channel-backup/status`
+    );
+    if (status && Array.isArray(status.targets)) {
+      commit("setChannelBackupStatus", status);
+    }
+  },
+  async getChannelBackupConfig({ commit }) {
+    const config = await API.get(
+      `${process.env.VUE_APP_API_BASE_URL}/v1/channel-backup/config`
+    );
+    if (config && typeof config === "object") {
+      commit("setChannelBackupConfig", config);
+    }
+  },
+  // Resolves to the backend's answer ({message, needsHostKeyConfirmation,
+  // fingerprints}); a rejected save carries its reason in `error`.
+  async saveChannelBackupProvider({ commit }, { provider, settings }) {
+    const response = await API.post(
+      `${process.env.VUE_APP_API_BASE_URL}/v1/channel-backup/config`,
+      { provider, settings }
+    );
+    if (response.data && response.data.config) {
+      commit("setChannelBackupConfig", response.data.config);
+    }
+    return response.data;
+  },
+  async channelBackupNow({ commit }) {
+    const response = await API.post(
+      `${process.env.VUE_APP_API_BASE_URL}/v1/channel-backup/now`
+    );
+    if (response.data && response.data.state) {
+      const status = await API.get(
+        `${process.env.VUE_APP_API_BASE_URL}/v1/channel-backup/status`
+      );
+      if (status) {
+        commit("setChannelBackupStatus", status);
+      }
+    }
+    return response.data;
+  },
+  async getPlatform({ commit }){
     const data = await API.get(
       `${process.env.VUE_APP_API_BASE_URL}/v1/system/platform`
     );
@@ -232,53 +267,6 @@ const actions = {
       operational: !!(api && api.version),
       version: api && api.version ? api.version : ""
     });
-  },
-  async getBackupStatus({ commit }) {
-    const status = await API.get(
-      `${process.env.VUE_APP_API_BASE_URL}/v1/system/backup-status`
-    );
-    if (status && status.timestamp) {
-      commit("setBackupStatus", status);
-    }
-  },
-  async getBackupOverTor({ commit }) {
-    const backupOverTor = await API.get(
-      `${process.env.VUE_APP_API_BASE_URL}/v1/system/backup-over-tor`
-    );
-    commit("setBackupOverTor", backupOverTor);
-  },
-  async getAutomaticBackups({ commit }) {
-    const automaticBackups = await API.get(
-      `${process.env.VUE_APP_API_BASE_URL}/v1/system/automatic-backups`
-    );
-    commit("setAutomaticBackups", automaticBackups);
-  },
-  async changeAutomaticBackups({ commit }, newValue) {
-    const response = await API.post(`${process.env.VUE_APP_API_BASE_URL}/v1/system/automatic-backups`, {
-      automaticBackups: newValue
-    });
-
-    if (response.data.success) {
-      commit("setAutomaticBackups", newValue);
-    }
-  },
-  async changeBackupOverTor({ commit }, newValue) {
-    const response = await API.post(`${process.env.VUE_APP_API_BASE_URL}/v1/system/backup-over-tor`, {
-      backupOverTor: newValue
-    });
-
-    if (response.data.success) {
-      commit('setBackupOverTor', newValue);
-    }
-  },
-  async toggleBackupOverTor({ dispatch, state }) {
-    return dispatch("changeBackupOverTor", !state.backupOverTor);
-  },
-  async getMostRecentBackupSuccess({ commit }) {
-    const mostRecentBackupSuccess = await API.get(
-      `${process.env.VUE_APP_API_BASE_URL}/v1/system/recent-backup-success`
-    );
-    commit("setMostRecentBackupSuccess", mostRecentBackupSuccess);
   },
   async getOnboardingStatus({ commit }) {
     const onboarding = await API.get(

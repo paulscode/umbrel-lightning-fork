@@ -8,9 +8,9 @@ const morgan = require("morgan");
 const bodyParser = require("body-parser");
 
 const lightningLogic = require("logic/lightning");
+const channelBackup = require("logic/channelBackup");
 
 const constants = require("utils/const.js");
-const startChannelBackupMonitor = require("utils/channel-backup-monitor");
 
 // Keep requestCorrelationId middleware as the first middleware. Otherwise we risk losing logs.
 const requestCorrelationMiddleware = require("middlewares/requestCorrelationId.js"); // eslint-disable-line id-length
@@ -32,7 +32,7 @@ const lightning = require("routes/v1/lnd/lightning.js");
 const bitcoin = require("routes/v1/bitcoind/info.js");
 const transaction = require("routes/v1/lnd/transaction.js");
 const util = require("routes/v1/lnd/util.js");
-const backups = require("routes/v1/lnd/backups.js");
+const channelBackupRoutes = require("routes/v1/channel-backup.js");
 const wallet = require("routes/v1/lnd/wallet.js");
 const watchtower = require("routes/v1/lnd/watchtower.js");
 const pages = require("routes/v1/pages.js");
@@ -81,13 +81,13 @@ app.use("/v1/lnd/util", util);
 app.use("/v1/pages", pages);
 app.use("/v1/system", system);
 app.use("/v1/external", external);
+app.use("/v1/channel-backup", channelBackupRoutes);
 app.use("/ping", ping);
 
-// Umbrel only. StartOS owns lnd.conf and restarts LND itself, keeps its own
-// backups rather than Umbrel's backup server, and has no home-screen widgets.
+// Umbrel only. StartOS owns lnd.conf and restarts LND itself, and has no
+// home-screen widgets.
 if (!constants.IS_STARTOS) {
   app.use("/v1/lnd/conf", conf);
-  app.use("/v1/lnd/backups", backups);
   app.use("/v1/lnd/widgets", widgets);
 }
 
@@ -133,10 +133,10 @@ const initLnd = async () => {
 
 };
 
-// Retry init every 10 seconds in case of LND restart or crash. Not on
-// StartOS: the package unlocks the wallet with its own password (or leaves it
-// to the user in Cold Storage Mode), and Umbrel's backup server is not in the
-// picture, so neither loop runs there.
+// Retry init every 10 seconds in case of LND restart or crash, and run the
+// channel backup agent's watcher. Not on StartOS: the package unlocks the
+// wallet with its own password (or leaves it to the user in Cold Storage
+// Mode) and runs the agent itself, so neither runs there.
 if (!constants.IS_STARTOS) {
   (async () => {
     while (true) {
@@ -145,6 +145,5 @@ if (!constants.IS_STARTOS) {
     }
   })();
 
-  // Monitor channel backups for changes and backup
-  startChannelBackupMonitor();
+  channelBackup.startWatcher();
 }

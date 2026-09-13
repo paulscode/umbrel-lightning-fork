@@ -6,21 +6,23 @@
       :onConfirm="onClose"
     />
 
-    <!-- Default loading state  -->
+    <!-- Fetching every configured target's copy -->
     <div v-else-if="step === 'loading'">
       <div class="d-flex align-items-center w-100 flex flex-column text-center p-3 pb-4">
         <h3>Recover your channels</h3>
+        <p class="text-muted">Asking your backup targets for their copy of channel.backup…</p>
         <div class="py-3 my-3 d-flex">
           <b-spinner variant="primary"></b-spinner>
         </div>
       </div>
     </div>
 
-    <!-- Recovery: Select backup file -->
+    <!-- Recovery: pick a retrieved copy -->
     <recovery-select-backup-file
       v-else-if="step === 'recovery-select-backup'"
-      :timestamps="backups"
-      :onSelect="(timestamp) => restoreBackup({timestamp, backupFile: null})"
+      :copies="copies"
+      :unreachable="unreachable"
+      :onSelect="(provider) => restoreBackup({provider, backupFile: null})"
       :onSkip="() => changeStep('recovery-upload-backup')"
       :onBack="onBack"
       :loading="isRestoringBackup"
@@ -32,10 +34,9 @@
       v-else-if="step === 'recovery-upload-backup'"
       :disabled="isRestoringBackup"
       :loading="isRestoringBackup"
-      :onBack="() => backups.length ? changeStep('recovery-select-backup') : onBack()"
-      :onNext="(file) => restoreBackup({timestamp: null, backupFile: file})"
-      :torError="getBackupsFailedDueToTor"
-      :retryWithoutTor="retryWithoutTor"
+      :note="uploadNote"
+      :onBack="() => copies.length ? changeStep('recovery-select-backup') : onBack()"
+      :onNext="(file) => restoreBackup({provider: null, backupFile: file})"
     />
 
   </div>
@@ -68,16 +69,15 @@ export default {
   data() {
     return {
       step: 'loading',
-      uploadedBackupFile: null,
+      copies: [],
+      unreachable: [],
+      uploadNote: '',
       isRestoringBackup: false,
     };
   },
   computed: {
     ...mapState({
-      backups: state => state.lightning.backups,
       isLightningSyncing: state => !state.lightning.syncedToChain,
-      getBackupsFailedDueToTor: state => state.lightning.getBackupsFailedDueToTor,
-      backupOverTor: state => state.system.backupOverTor
     }),
   },
   methods: {
@@ -85,60 +85,35 @@ export default {
       this.step = step;
     },
 
+    // The backup targets are asked for their copy; whichever answer are
+    // offered, and a file of the user's own is always an option.
     async getBackups() {
+      let result;
       try {
-        await this.$store.dispatch("lightning/getBackups");
+        result = (await API.post(`${process.env.VUE_APP_API_BASE_URL}/v1/channel-backup/pull`)).data;
       } catch (err) {
-        this.isGettingBackups = false;
-        this.$bvToast.toast(
-          getErrorMessage(
-            err,
-            "Unable to get channel backups. Please try again."
-          ),
-          {
-            title: "Error",
-            autoHideDelay: 3000,
-            variant: "danger",
-            solid: true,
-            toaster: "b-toaster-bottom-right",
-          }
-        );
-        return this.changeStep('recovery-upload-backup');
+        result = { retrieved: [], unreachable: [], message: getErrorMessage(err, "Your backup targets could not be asked.") };
       }
-      if (this.backups.length === 0) {
+      this.copies = result.retrieved || [];
+      this.unreachable = result.unreachable || [];
+      if (this.copies.length === 0) {
+        this.uploadNote = result.message
+          || (this.unreachable.length
+            ? `Your backup target could not be reached (${this.unreachable.map(u => `${u.target}: ${u.code}`).join("; ")}).`
+            : "No backup target holds a copy of channel.backup.");
         return this.changeStep('recovery-upload-backup');
       }
       return this.changeStep('recovery-select-backup');
     },
 
-    async retryWithoutTor() {
-      const previousBackupOverTor = this.backupOverTor;
-
-      this.changeStep('loading');
-
-      try {
-        if (previousBackupOverTor) {
-          await this.$store.dispatch('system/changeBackupOverTor', false);
-        }
-        await this.getBackups();
-      } finally {
-        if (this.backupOverTor !== previousBackupOverTor) {
-          await this.$store.dispatch(
-            'system/changeBackupOverTor',
-            previousBackupOverTor
-          );
-        }
-      }
-    },
-
-    async restoreBackup({ timestamp, backupFile }) {
+    async restoreBackup({ provider, backupFile }) {
       this.isRestoringBackup = true;
       try {
         if (backupFile) {
           const backupFileBase64 = await toBase64(backupFile);
-          await API.post(`${process.env.VUE_APP_API_BASE_URL}/v1/lnd/backups/recover`, { backup: backupFileBase64 });
+          await API.post(`${process.env.VUE_APP_API_BASE_URL}/v1/channel-backup/restore`, { backup: backupFileBase64 });
         } else {
-          await API.post(`${process.env.VUE_APP_API_BASE_URL}/v1/lnd/backups/recover`, { timestamp });
+          await API.post(`${process.env.VUE_APP_API_BASE_URL}/v1/channel-backup/restore`, { provider });
         }
       } catch (err) {
         this.$bvToast.toast(

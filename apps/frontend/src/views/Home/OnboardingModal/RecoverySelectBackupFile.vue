@@ -2,26 +2,30 @@
   <div class="d-flex align-items-center w-100 flex flex-column text-center p-3 pb-4">
     <h3>Recover your channels</h3>
     <p>
-      The payment channels of your Lightning Node were periodically backed up.
+      These are the copies of channel.backup your backup targets hold.
     </p>
     <p>
-      Please make sure to select the backup file from the last time your previous Lightning Node was online.
+      Pick the one from the last time your previous node was online.
     </p>
     <div class="backup-files py-3 mb-3 d-flex">
       <div
-        v-for="timestamp in timestamps"
-        :key="timestamp"
+        v-for="copy in copies"
+        :key="copy.provider"
         class="backup-file mx-1"
-        @click="selectBackup(timestamp)"
+        @click="selectBackup(copy.provider)"
       >
       <img
         class="icon-backup-file mx-3"
         src="@/assets/icon-backup-file.svg"
       />
-      <small class="d-block mt-2">{{ getTime(timestamp) }}</small>
-      <small class="d-block">{{ getDate(timestamp) }}</small>
+      <small class="d-block mt-2 font-weight-bold">{{ label(copy.provider) }}</small>
+      <small class="d-block">{{ copy.mtime ? getDate(copy.mtime) : "" }}</small>
+      <small class="d-block text-muted">{{ copy.size }} bytes</small>
       </div>
     </div>
+    <p v-if="unreachable.length" class="text-warning">
+      Not reached: {{ unreachable.map(u => `${label(u.target)} (${u.code})`).join(", ") }}
+    </p>
     <p class="text-muted">Or upload your own channel backup file</p>
     <div>
       <b-button
@@ -51,45 +55,43 @@ export default {
   props: {
     disabled: Boolean,
     loading: Boolean,
-    timestamps: Array,
+    copies: Array,
+    unreachable: Array,
     onSelect: Function,
     onSkip: Function,
     onBack: Function,
   },
   methods: {
-    getTime(timestamp) {
-      return moment(timestamp).format("h:mm a"); // eg. "3:03 pm March 08, 2020"
+    label(provider) {
+      return { sftp: "SFTP", nextcloud: "Nextcloud", dropbox: "Dropbox", gdrive: "Google Drive" }[provider] || provider;
     },
-
-    getDate(timestamp) {
-      return moment(timestamp).format("MMM D, YYYY"); // eg. "3:03 pm March 08, 2020"
+    getDate(seconds) {
+      return moment(seconds * 1000).format("MMM D, YYYY h:mm a");
     },
-
-    selectBackup(timestamp) {
-      if (!window.confirm(`Are you sure you want to recover your Lightning channels from the backup made on ${this.getDate(timestamp)} at ${this.getTime(timestamp)}?`)) {
+    selectBackup(provider) {
+      if (this.disabled) {
         return;
       }
-      return this.onSelect(timestamp);
-    }
-  }
+      this.onSelect(provider);
+    },
+  },
 };
 </script>
 
 <style lang="scss" scoped>
 .backup-files {
-  background: #F9FAFA;
-  overflow-x: scroll;
-  -webkit-overflow-scrolling: touch;
-  width: calc(100% + 5rem);
-  .backup-file {
-    .icon-backup-file {
-      width: 80px;
-      cursor: pointer;
-      transition: transform 0.3s ease;
-      &:hover {
-        transform: scale3d(1.05 , 1.05 , 1.05 );
-      }
-    }
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.backup-file {
+  cursor: pointer;
+  padding: 0.5rem;
+  border-radius: 0.5rem;
+  &:hover {
+    background: rgba(78, 147, 255, 0.12);
   }
+}
+.icon-backup-file {
+  height: 64px;
 }
 </style>

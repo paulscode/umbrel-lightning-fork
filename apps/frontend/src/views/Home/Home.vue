@@ -89,6 +89,9 @@
             <b-dropdown-item v-if="!isStartOS" href="#" @click.stop.prevent="recoverChannels"
               >Recover channels</b-dropdown-item
             >
+            <b-dropdown-item v-if="!isStartOS" href="#" @click.stop.prevent="openChannelBackupModal"
+              >Channel backups</b-dropdown-item
+            >
             <b-dropdown-item v-if="!isStartOS" href="#" @click.stop.prevent="downloadChannelBackup"
               >Download channel backup file</b-dropdown-item
             >
@@ -128,54 +131,7 @@
             </b-dropdown-group>
             <b-dropdown-group v-if="!isStartOS">
               <div class="dropdown-group">
-                <div class="d-flex w-100 justify-content-between">
-                  <div>
-                    <span class="d-block">Automatic backups</span>
-                    <small class="d-block">
-                      <a
-                        class="backup-learn-more-link"
-                        href="https://github.com/getumbrel/umbrel-lightning/blob/master/docs/automatic-encrypted-backups.md"
-                        target="_blank"
-                        >Learn more</a
-                      >
-                    </small>
-                  </div>
-                  <toggle-switch
-                    class="align-self-center"
-                    :on="automaticBackups"
-                    @toggle="toggleAutomaticBackups"
-                  ></toggle-switch>
-                </div>
-              </div>
-            </b-dropdown-group>
-
-            <b-dropdown-group v-if="!isStartOS">
-              <div class="dropdown-group">
-                <div class="d-flex w-100 justify-content-between">
-                  <div>
-                    <span class="d-block">Backup over Tor</span>
-                  </div>
-                  <toggle-switch
-                    class="align-self-center"
-                    tooltip="If disabled, your backup and recovery requests will be sent over the clearnet"
-                    :on="backupOverTor"
-                    @toggle="toggleBackupOverTor"
-                  ></toggle-switch>
-                </div>
-                <small
-                  v-if="!automaticBackups"
-                  class="d-block mt-2"
-                  style="opacity: 0.4"
-                >
-                  Automatic backups are off
-                </small>
-                <small
-                  v-else-if="lastBackupDate"
-                  class="d-block mt-2"
-                  style="opacity: 0.4"
-                >
-                  Last backup at {{ getReadableTime(lastBackupDate) }}
-                </small>
+                <small class="d-block" style="opacity: 0.6">{{ channelBackupSummary }}</small>
               </div>
             </b-dropdown-group>
             <!-- <b-dropdown-divider /> -->
@@ -373,60 +329,10 @@
     <node-id-modal />
     <secret-words-modal v-if="!isStartOS" />
     <connect-wallet-modal v-if="!isStartOS" />
-    <b-modal
-      v-if="!isStartOS"
-      id="disable-automatic-backups-modal"
-      size="lg"
-      centered
-      hide-header
-      hide-footer
-    >
-      <div class="px-2 px-sm-3 pt-2 d-flex justify-content-center w-100">
-        <h3 class="text-center">Turn off automatic channel backups?</h3>
-      </div>
-      <div class="px-2 px-sm-3 pb-2 pb-sm-3 d-flex flex-column align-items-center">
-        <p class="h1">
-          <b-icon icon="exclamation-circle" variant="warning"></b-icon>
-        </p>
-        <div class="w-100">
-          <p>
-            This is risky. If your Umbrel's storage fails, is erased, or your
-            Lightning app data becomes corrupted, you may not be able to recover
-            your Lightning channels unless you have a recent channel backup
-            file.
-          </p>
-          <p>
-            Automatic channel backups are encrypted on your Umbrel before they
-            leave your node. When Backup over Tor is enabled, uploads and
-            recovery requests are sent over Tor. Umbrel also uses decoy backups
-            and random padding to make it harder for the backup server to learn
-            anything useful about your node or channel activity.
-          </p>
-          <p>
-            If you turn this off, download and safely store a fresh channel
-            backup every time your channels change. You can also use umbrelOS
-            backups as another layer of protection, but make sure they include
-            recent Lightning data before relying on them for recovery.
-          </p>
-        </div>
-        <div class="d-flex flex-column flex-lg-row justify-content-center w-100 mt-2">
-          <b-button
-            variant="success"
-            :disabled="isChangingAutomaticBackups"
-            class="btn-border w-100"
-            @click="$bvModal.hide('disable-automatic-backups-modal')"
-          >Keep automatic backups on</b-button>
-          <b-button
-            variant="outline-danger"
-            :disabled="isChangingAutomaticBackups"
-            :class="{'fade-in-out': isChangingAutomaticBackups}"
-            class="ml-lg-2 mt-lg-0 mt-2 w-100"
-            @click="disableAutomaticBackups"
-          >I understand, turn off backups</b-button>
-        </div>
-      </div>
-    </b-modal>
-    <tor-backup-failed-modal v-if="!isStartOS" />
+    <channel-backup-modal
+      v-if="!isStartOS && showChannelBackupModal"
+      @hidden="showChannelBackupModal = false"
+    />
   </div>
 </template>
 
@@ -452,7 +358,7 @@ import SecretWordsModal from "./SecretWordsModal.vue";
 import ConnectWalletModal from "./ConnectWalletModal";
 import OnboardingModal from "./OnboardingModal/OnboardingModal.vue";
 import RecoveryChannels from '@/views/Home/OnboardingModal/RecoveryChannels.vue';
-import TorBackupFailedModal from '@/views/Home/TorBackupFailedModal.vue';
+import ChannelBackupModal from '@/views/Home/ChannelBackupModal.vue';
 
 export default {
   data() {
@@ -460,7 +366,7 @@ export default {
       selectedChannel: {},
       showRecoverChannelsModal: false,
       showAdvancedSettingsModal: false,
-      isChangingAutomaticBackups: false,
+      showChannelBackupModal: false,
       currencyChangeId: 0,
       // The picker's own value: follows the currency in effect, and is put
       // back when a switch fails, so it never shows a choice that is not.
@@ -486,13 +392,30 @@ export default {
       passwordEnabled: state => state.system.auth.passwordEnabled,
       currency: state => state.system.currency,
       supportedFiatCurrencies: state => state.system.supportedFiatCurrencies,
-      backupStatus: state => state.system.backupStatus,
-      lastBackupDate: state => state.lightning.lastBackupDate,
-      automaticBackups: state => state.system.automaticBackups,
-      backupOverTor: state => state.system.backupOverTor,
-      mostRecentBackupSuccess: state => state.system.mostRecentBackupSuccess,
-      onboarding: state => state.system.onboarding
+      onboarding: state => state.system.onboarding,
+      channelBackupStatus: state => state.system.channelBackup.status
     }),
+    channelBackupSummary() {
+      const status = this.channelBackupStatus;
+      if (!status) {
+        return "";
+      }
+      if (!status.targets.length) {
+        return "No backup target set: channel.backup stays on this Umbrel only.";
+      }
+      const names = status.targets.map(t => this.providerLabel(t.provider)).join(", ");
+      const failures = status.state.failures || [];
+      if (failures.length) {
+        return `Backup to ${names} is failing: ${failures.map(f => `${this.providerLabel(f.target)} ${f.code}`).join("; ")}`;
+      }
+      if (status.state.lastSuccess) {
+        return `Copied to ${names} ${moment(status.state.lastSuccess * 1000).fromNow()}.`;
+      }
+      if (!status.hasBackup) {
+        return `Will copy to ${names} once your first channel opens.`;
+      }
+      return `Waiting to copy to ${names}.`;
+    },
     isStartOS() {
       return this.platform === "startos";
     },
@@ -516,30 +439,11 @@ export default {
     getReadableTime(timestamp) {
       return moment(timestamp).format("MMM D, h:mm:ss a");
     },
-    toggleBackupOverTor() {
-      this.$store.dispatch('system/toggleBackupOverTor');
+    providerLabel(provider) {
+      return { sftp: "SFTP", nextcloud: "Nextcloud", dropbox: "Dropbox", gdrive: "Google Drive" }[provider] || provider;
     },
-    async toggleAutomaticBackups(automaticBackups) {
-      if (!automaticBackups) {
-        this.$bvModal.show("disable-automatic-backups-modal");
-        return;
-      }
-
-      this.isChangingAutomaticBackups = true;
-      try {
-        await this.$store.dispatch("system/changeAutomaticBackups", true);
-      } finally {
-        this.isChangingAutomaticBackups = false;
-      }
-    },
-    async disableAutomaticBackups() {
-      this.isChangingAutomaticBackups = true;
-      try {
-        await this.$store.dispatch("system/changeAutomaticBackups", false);
-        this.$bvModal.hide("disable-automatic-backups-modal");
-      } finally {
-        this.isChangingAutomaticBackups = false;
-      }
+    openChannelBackupModal() {
+      this.showChannelBackupModal = true;
     },
     signOut() {
       this.$store.dispatch("system/logout");
@@ -644,7 +548,7 @@ export default {
       this.$store.dispatch("lightning/getChannels");
       this.$store.dispatch("lightning/getLndPageData");
       if (!this.isStartOS) {
-        this.$store.dispatch("lightning/getLastBackupDate");
+        this.$store.dispatch("system/getChannelBackupStatus");
       }
     }
   },
@@ -666,18 +570,23 @@ export default {
 
     await Promise.all([
       this.fetchData(),
-      this.$store.dispatch("user/getLndConfig"),
-      this.$store.dispatch("system/getBackupOverTor"),
-      this.$store.dispatch("system/getAutomaticBackups"),
-      this.$store.dispatch("system/getMostRecentBackupSuccess")
+      this.$store.dispatch("user/getLndConfig")
     ]);
 
     if (this.onboarding) {
       this.$bvModal.show("onboarding-modal");
     }
 
-    if (!this.mostRecentBackupSuccess && this.automaticBackups && this.backupOverTor && !this.onboarding) {
-      this.$bvModal.show("tor-backup-failed-modal");
+    // A failing target is worth a word once per visit; the menu keeps saying so.
+    const status = this.channelBackupStatus;
+    if (!this.onboarding && status && status.targets.length && status.state.failures.length) {
+      this.$bvToast.toast(this.channelBackupSummary, {
+        title: "Channel backups",
+        autoHideDelay: 8000,
+        variant: "warning",
+        solid: true,
+        toaster: "b-toaster-bottom-right"
+      });
     }
   },
   beforeDestroy() {
@@ -718,7 +627,7 @@ export default {
     ConnectWalletModal,
     OnboardingModal,
     RecoveryChannels,
-    TorBackupFailedModal
+    ChannelBackupModal
   }
 };
 </script>

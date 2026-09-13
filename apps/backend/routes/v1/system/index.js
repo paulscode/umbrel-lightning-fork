@@ -17,7 +17,6 @@ router.get(
   }))
 );
 
-
 router.get(
   "/lndconnect-urls",
   umbrelOnly,
@@ -25,77 +24,6 @@ router.get(
     const urls = await systemLogic.getLndConnectUrls();
 
     return res.status(constants.STATUS_CODES.OK).json(urls);
-  })
-);
-
-router.get(
-  "/backup-status",
-  umbrelOnly,
-  safeHandler(async (req, res) => {
-    const backup = await systemLogic.getBackupStatus();
-
-    return res.status(constants.STATUS_CODES.OK).json(backup);
-  })
-);
-
-// backupOverTor is a boolean that determines whether channel backup files should be uploaded/downloaded over Tor or clearnet
-router.get(
-  "/backup-over-tor",
-  umbrelOnly,
-  safeHandler(async (req, res) => {
-    const {backupOverTor} = await diskLogic.getJsonStore();
-
-    return res.json(backupOverTor);
-  })
-);
-
-router.post(
-  "/backup-over-tor",
-  umbrelOnly,
-  safeHandler(async (req, res) => {
-    const {backupOverTor} = req.body;
-
-    validator.isBoolean(backupOverTor);
-
-    await diskLogic.updateJsonStore({backupOverTor});
-
-    return res.json({success: true});
-  })
-);
-
-// automaticBackups determines whether channel backup files should be uploaded automatically.
-router.get(
-  "/automatic-backups",
-  umbrelOnly,
-  safeHandler(async (req, res) => {
-    const {automaticBackups} = await diskLogic.getJsonStore();
-
-    return res.json(automaticBackups);
-  })
-);
-
-router.post(
-  "/automatic-backups",
-  umbrelOnly,
-  safeHandler(async (req, res) => {
-    const {automaticBackups} = req.body;
-
-    validator.isBoolean(automaticBackups);
-
-    await diskLogic.updateJsonStore({automaticBackups});
-
-    return res.json({success: true});
-  })
-);
-
-// retrieves whether the latest backup attempt was successfully uploaded
-router.get(
-  "/recent-backup-success",
-  umbrelOnly,
-  safeHandler(async (req, res) => {
-    const {mostRecentBackupSuccess} = await diskLogic.getJsonStore();
-
-    return res.json(mostRecentBackupSuccess);
   })
 );
 

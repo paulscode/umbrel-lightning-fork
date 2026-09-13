@@ -62,9 +62,6 @@ const state = () => ({
   confirmedTransactions: [],
   pendingTransactions: [],
   pendingChannelEdit: {},
-  backups: [],
-  getBackupsFailedDueToTor: false,
-  lastBackupDate: false,
   recoveryInfo: {
     recoveryMode: false,
     recoveryFinished: false,
@@ -166,21 +163,12 @@ const mutations = {
     state.lndConnectUrls = urls;
   },
 
-  setBackups(state, backups) {
-    state.backups = backups;
-  },
 
-  setGetBackupsFailedDueToTor(state, status) {
-    state.getBackupsFailedDueToTor = status;
-  },
 
   setRecoveryInfo(state, info) {
     state.recoveryInfo = info;
   },
 
-  setLastBackupDate(state, timestamp) {
-    state.lastBackupDate = timestamp;
-  },
 
   setWatchtowerServiceUri(state, uri) {
     state.watchtowerServiceUri = uri;
@@ -231,35 +219,7 @@ const actions = {
     }
   },
 
-  async getBackups({ commit }) {
-    commit("setGetBackupsFailedDueToTor", false);
-    const response = await API.get(
-      `${process.env.VUE_APP_API_BASE_URL}/v1/lnd/backups`
-    );
 
-    if (!response) {
-      throw new Error("Unable to get channel backups.");
-    }
-
-    if (response.success === false) {
-      const errorMessage = response.error || "Unable to get channel backups.";
-      // set getBackupsFailedDueToTor to true if the error includes non-case-sensitive "Proxy"
-      // e.g, "SocksClientError: Proxy connection timed out"
-      if (errorMessage.toLowerCase().includes("proxy")) {
-        commit("setGetBackupsFailedDueToTor", true);
-      }
-      throw new Error(errorMessage);
-    }
-
-    commit("setBackups", Array.isArray(response.timestamps) ? response.timestamps : []);
-  },
-
-  async getLastBackupDate({ commit }) {
-    const { timestamp } = await API.get(
-      `${process.env.VUE_APP_API_BASE_URL}/v1/lnd/backups/latest`
-    );
-    commit("setLastBackupDate", timestamp);
-  },
 
   //basically fetches everything
   async getLndPageData({ commit, dispatch }) {
