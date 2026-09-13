@@ -49,8 +49,8 @@ Vue.filter("satsToFiat", (value) => {
     return value;
   }
   const price = store.state.bitcoin.price;
-  const currency = store.state.system.currency;
-  if (price > 0 && currency) {
+  const currency = store.state.bitcoin.priceCurrency;
+  if (price > 0 && currency && currency === store.state.system.currency) {
     try {
       return new Intl.NumberFormat(undefined, {
         style: "currency",

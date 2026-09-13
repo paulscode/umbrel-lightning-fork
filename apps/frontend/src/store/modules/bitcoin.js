@@ -24,8 +24,11 @@ const state = () => ({
     inbound: 0,
     outbound: 0,
   },
-  // BTCB2 in the selected currency; 0 while no quote can be had.
+  // BTCB2 in `priceCurrency`, or 0 while no quote can be had. The two are
+  // committed together so a poll that lands after a currency switch can
+  // never label one currency's figure with another's symbol.
   price: 0,
+  priceCurrency: "",
   balance: {
     total: -1, //loading
     confirmed: -1,
@@ -78,8 +81,9 @@ const state = () => ({
 
 // Functions to update the state directly
 const mutations = {
-  price(state, price) {
+  price(state, { currency, price }) {
     state.price = price;
+    state.priceCurrency = currency;
   },
   peers(state, peers) {
     state.peers.total = peers.total || 0;
@@ -180,29 +184,42 @@ const actions = {
   },
 
 
-  // True when a quote was had. `requestedCurrency` is a trial for the picker:
-  // it does not touch the price shown, so a failed switch changes nothing.
+  // Without an argument: refresh the quote for the selected currency, and
+  // commit it only if that is still the selected currency when the answer
+  // lands. With one: a trial for the picker, which returns the quote (or
+  // null) and commits nothing; the picker commits price and currency
+  // together once its own guard passes.
   async getPrice({ commit, rootState }, requestedCurrency) {
     const currency = requestedCurrency
       ? String(requestedCurrency).toUpperCase()
       : rootState.system.currency;
-    const price = await API.get(
+    const response = await API.get(
       `${process.env.VUE_APP_API_BASE_URL}/v1/external/price?currency=${encodeURIComponent(
         currency
       )}`
     );
+    const quote =
+      response && Number.isFinite(Number(response[currency]))
+        ? Number(response[currency])
+        : null;
 
-    if (price && price[currency] !== undefined) {
-      commit("price", price[currency]);
-      return true;
+    if (requestedCurrency) {
+      return quote;
     }
-
-    if (!requestedCurrency) {
-      // No quote right now: the hints fall back to the other unit rather
-      // than keep showing a figure from before the feed went away.
-      commit("price", 0);
+    if (response === undefined) {
+      // The same request is already in flight (API.get de-duplicates); its
+      // answer will do. Nothing is known yet, so nothing changes.
+      return false;
     }
-    return false;
+    if (currency !== rootState.system.currency) {
+      // The user switched while this was out; the switch brought its own.
+      return false;
+    }
+    // A quote, or 0 when none can be had right now: the hints fall back to
+    // the other unit rather than keep showing a figure from before the feed
+    // went away.
+    commit("price", { currency, price: quote === null ? 0 : quote });
+    return quote !== null;
   },
 
   async getDepositAddress({ commit }) {

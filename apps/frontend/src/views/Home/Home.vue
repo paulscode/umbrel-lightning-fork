@@ -101,7 +101,7 @@
                   <b-form-select
                     size="sm"
                     class="currency-select"
-                    :value="currency"
+                    v-model="selectedCurrency"
                     :options="currencyOptions"
                     @change="changeCurrency"
                   ></b-form-select>
@@ -458,7 +458,10 @@ export default {
       showRecoverChannelsModal: false,
       showAdvancedSettingsModal: false,
       isChangingAutomaticBackups: false,
-      currencyChangeId: 0
+      currencyChangeId: 0,
+      // The picker's own value: follows the currency in effect, and is put
+      // back when a switch fails, so it never shows a choice that is not.
+      selectedCurrency: "USD"
     };
   },
   computed: {
@@ -541,13 +544,28 @@ export default {
       const currencyChangeId = this.currencyChangeId + 1;
       this.currencyChangeId = currencyChangeId;
 
-      const didUpdatePrice = await this.$store.dispatch(
-        "bitcoin/getPrice",
-        currency
-      );
-      if (didUpdatePrice && currencyChangeId === this.currencyChangeId) {
-        this.$store.dispatch("system/changeCurrency", currency);
+      const quote = await this.$store.dispatch("bitcoin/getPrice", currency);
+      if (currencyChangeId !== this.currencyChangeId) {
+        // A later choice superseded this one.
+        return;
       }
+      if (quote === null) {
+        this.selectedCurrency = this.currency;
+        this.$bvToast.toast(
+          `No quote for ${currency} right now. Keeping ${this.currency}.`,
+          {
+            title: "Fiat currency",
+            autoHideDelay: 5000,
+            variant: "warning",
+            solid: true,
+            toaster: "b-toaster-bottom-right"
+          }
+        );
+        return;
+      }
+      // Price and currency move together, so no poll can split them.
+      this.$store.commit("bitcoin/price", { currency, price: quote });
+      this.$store.dispatch("system/changeCurrency", currency);
     },
     async downloadChannelBackup() {
       await API.download(
@@ -660,6 +678,12 @@ export default {
     window.clearInterval(this.priceInterval);
   },
   watch: {
+    currency: {
+      handler: function(currency) {
+        this.selectedCurrency = currency;
+      },
+      immediate: true
+    },
     onboarding: function(newVal, oldVal) {
       // Refresh data when onboarding completes. The initial fetchData() call
       // happens before the wallet exists, so the store has stale loading values.

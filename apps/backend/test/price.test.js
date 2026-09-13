@@ -47,6 +47,24 @@ test("the live rate table yields the dollar quote and the fiat list", () => {
   assert.deepEqual(fiat, [...fiat].sort());
 });
 
+test("a fiat entry without a usable quote is neither offered nor priced, and keys match in any case", () => {
+  const table = {
+    rates: {
+      usd: { type: "fiat", value: 80000 },
+      eur: { type: "fiat", value: 0 },
+      gbp: { type: "fiat", value: null },
+      JPY: { type: "fiat", value: 12000000 },
+      btc: { type: "crypto", value: 1 },
+    },
+  };
+  assert.deepEqual(price.fiatCurrencies(table), ["JPY", "USD"]);
+  assert.equal(price.getRate(table, "jpy"), 12000000, "the table's own case does not matter");
+  assert.equal(price.getRate(table, "EUR"), null);
+  assert.equal(price.getRate({ rates: "nonsense" }, "USD"), null);
+  assert.equal(price.getRate(table, "constructor"), null);
+  assert.equal(price.getRate(table, "__proto__"), null);
+});
+
 test("dollars are always offered, and first", () => {
   assert.deepEqual(price.withUsd([]), ["USD"]);
   assert.deepEqual(price.withUsd(["EUR", "USD", "GBP"]), ["USD", "EUR", "GBP"]);
@@ -107,6 +125,27 @@ test("a feed that answers with something unusable counts as down", async () => {
   const { logic } = fake({ neoxa: "<html>maintenance</html>", coingecko: { unexpected: true } });
   assert.equal(await logic.getPrice("USD"), null);
   assert.deepEqual(await logic.getSupportedCurrencies(), ["USD"]);
+});
+
+test("concurrent callers share one fetch", async () => {
+  let inFlight = 0;
+  let most = 0;
+  const fetchJson = async url => {
+    inFlight += 1;
+    most = Math.max(most, inFlight);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    inFlight -= 1;
+    return url === price.NEOXA_TICKER_URL ? tickers : rates;
+  };
+  const logic = price.createPriceLogic({ fetchJson, log: () => {} });
+  const answers = await Promise.all([
+    logic.getPrice("EUR"),
+    logic.getPrice("EUR"),
+    logic.getPrice("USD"),
+    logic.getSupportedCurrencies(),
+  ]);
+  assert.equal(most, 2, "at most one request per feed in flight, whatever the fan-in");
+  assert.ok(answers[0] > 0 && answers[0] === answers[1]);
 });
 
 test("answers are cached, and a failure is retried after its own shorter interval", async () => {

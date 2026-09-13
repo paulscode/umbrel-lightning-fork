@@ -1,11 +1,11 @@
 // The fiat estimate, the way Sparrow BLAKE2b does it.
 //
-// BTCB2 trades on neoxa.exchange, and its deepest market there by a wide
-// margin is BTCB2_USDC, so that pair's last trade is the dollar price; USDC
-// is treated as a dollar. It is not BTCB2_BTC times an outside BTC price, the
-// obvious construction: Neoxa's own BTC market is thin enough to drift a few
-// percent from the wider market, and multiplying by an outside price counts
-// that gap twice. Other currencies borrow a conversion from Coingecko's rate
+// BTCB2 trades on neoxa.exchange, and its deepest dollar market there is
+// BTCB2_USDC, so that pair's last trade is the dollar price; USDC is treated
+// as a dollar. It is not BTCB2_BTC times an outside BTC price, the obvious
+// construction: Neoxa's own BTC market is thin enough to drift a few percent
+// from the wider market, and multiplying by an outside price counts that gap
+// twice. Other currencies borrow a conversion from Coingecko's rate
 // table, the ratio of its BTC-in-currency quote to its BTC-in-dollars quote.
 // That cancels BTC out entirely, so Coingecko's opinion of what bitcoin (the
 // other chain's coin) is worth cannot reach the result.
@@ -50,26 +50,37 @@ function btcb2Price(tickers) {
   return ticker ? validPrice(ticker.last_price) : null;
 }
 
+// A rate table entry by currency code, whatever case the table uses.
+function rateEntry(rates, currencyCode) {
+  if (!rates || !rates.rates || typeof rates.rates !== "object" || !currencyCode) {
+    return null;
+  }
+  const wanted = String(currencyCode).toLowerCase();
+  const key = Object.keys(rates.rates).find(k => k.toLowerCase() === wanted);
+  return key === undefined ? null : rates.rates[key];
+}
+
 // What Coingecko says one bitcoin is worth in a currency, used only as one
 // half of a ratio.
 function getRate(rates, currencyCode) {
-  if (!rates || !rates.rates || !currencyCode) {
-    return null;
-  }
-  const rate = rates.rates[String(currencyCode).toLowerCase()];
+  const rate = rateEntry(rates, currencyCode);
   return rate ? validPrice(rate.value) : null;
 }
 
-// The fiat currencies in a rate table: what the picker offers beside dollars.
+// The fiat currencies in a rate table that carry a usable quote: what the
+// picker offers beside dollars, and exactly what getPrice can answer for.
 function fiatCurrencies(rates) {
-  if (!rates || !rates.rates) {
+  if (!rates || !rates.rates || typeof rates.rates !== "object") {
     return [];
   }
-  return Object.keys(rates.rates)
-    .filter(code => rates.rates[code] && rates.rates[code].type === "fiat")
+  const codes = Object.keys(rates.rates)
+    .filter(code => {
+      const entry = rates.rates[code];
+      return entry && entry.type === "fiat" && validPrice(entry.value) !== null;
+    })
     .map(code => code.toUpperCase())
-    .filter(code => /^[A-Z]{3}$/.test(code))
-    .sort();
+    .filter(code => /^[A-Z]{3}$/.test(code));
+  return [...new Set(codes)].sort();
 }
 
 // The convertible currencies with dollars first: dollars need nothing but
@@ -96,36 +107,71 @@ function usdToCurrency(btcb2Usd, btcPerUsd, btcPerCurrency) {
 }
 
 // The real fetch: axios, through Umbrel's Tor proxy when one is configured,
-// as the upstream price request was. Required lazily so the pure functions
-// above load without node_modules (the tests inject their own fetcher).
-function defaultFetchJson(url) {
-  const axios = require("axios");
-  let httpsAgent;
-  if (process.env.TOR_PROXY_IP && process.env.TOR_PROXY_PORT) {
-    const { SocksProxyAgent } = require("socks-proxy-agent");
-    httpsAgent = new SocksProxyAgent(`socks5h://${process.env.TOR_PROXY_IP}:${process.env.TOR_PROXY_PORT}`);
+// as the upstream price request was. One agent for the process, on both
+// schemes, and no redirects followed: a redirect to plain http would
+// otherwise leave Tor. Required lazily so the pure functions above load
+// without node_modules (the tests inject their own fetcher).
+let torAgent;
+function proxyAgent() {
+  if (torAgent === undefined) {
+    torAgent = null;
+    if (process.env.TOR_PROXY_IP && process.env.TOR_PROXY_PORT) {
+      const { SocksProxyAgent } = require("socks-proxy-agent");
+      torAgent = new SocksProxyAgent(`socks5h://${process.env.TOR_PROXY_IP}:${process.env.TOR_PROXY_PORT}`);
+    }
   }
-  return axios({ url, method: "GET", httpsAgent, headers: HEADERS, timeout: REQUEST_TIMEOUT_MS })
-    .then(response => response.data);
+  return torAgent;
 }
 
-function createPriceLogic({ fetchJson = defaultFetchJson, now = Date.now, log = console.warn } = {}) {
+function defaultFetchJson(url) {
+  const axios = require("axios");
+  const agent = proxyAgent() || undefined;
+  return axios({
+    url,
+    method: "GET",
+    httpAgent: agent,
+    httpsAgent: agent,
+    headers: HEADERS,
+    timeout: REQUEST_TIMEOUT_MS,
+    maxRedirects: 0,
+  }).then(response => response.data);
+}
+
+// A clock that only moves forward: the cache must not freeze because the
+// wall clock stepped back, which a board without an RTC does at boot.
+function monotonicNow() {
+  const { performance } = require("perf_hooks");
+  return performance.now();
+}
+
+function createPriceLogic({ fetchJson = defaultFetchJson, now = monotonicNow, log = console.warn } = {}) {
+  // url -> {value, at, ttl} once settled, or {pending} while a fetch is out,
+  // so concurrent callers share one request rather than stampede the feed.
   const cache = new Map();
 
-  async function cached(url, ttl) {
+  function cached(url, ttl) {
     const entry = cache.get(url);
-    if (entry && now() - entry.at < entry.ttl) {
-      return entry.value;
+    if (entry) {
+      if (entry.pending) {
+        return entry.pending;
+      }
+      if (now() - entry.at < entry.ttl) {
+        return Promise.resolve(entry.value);
+      }
     }
-    let value = null;
-    try {
-      value = await fetchJson(url);
-    } catch (error) {
-      log(`[price] ${url}: ${error && error.message ? error.message : error}`);
-      value = null;
-    }
-    cache.set(url, { value, at: now(), ttl: value === null ? FAILURE_TTL_MS : ttl });
-    return value;
+    const pending = (async () => {
+      let value = null;
+      try {
+        value = await fetchJson(url);
+      } catch (error) {
+        log(`[price] ${url}: ${error && error.message ? error.message : error}`);
+        value = null;
+      }
+      cache.set(url, { value, at: now(), ttl: value === null ? FAILURE_TTL_MS : ttl });
+      return value;
+    })();
+    cache.set(url, { pending });
+    return pending;
   }
 
   const getBtcb2Usd = async () => btcb2Price(await cached(NEOXA_TICKER_URL, PRICE_TTL_MS));

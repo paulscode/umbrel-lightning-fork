@@ -10,7 +10,7 @@ const constants = require("utils/const.js");
 router.get(
   "/price",
   safeHandler(async (req, res) => {
-    const currency = String(req.query.currency || "USD").trim().toUpperCase();
+    const currency = String(req.query.currency || "").trim().toUpperCase() || "USD";
     const price = await priceLogic.getPrice(currency);
     if (price === null) {
       return res.status(constants.STATUS_CODES.BAD_GATEWAY).json();
