@@ -1,3 +1,28 @@
+# Lightning Fork dashboard for Umbrel
+
+A fork of [Umbrel's Lightning Node dashboard](https://github.com/getumbrel/umbrel-lightning)
+for [Lightning Fork](https://github.com/paulscode/lightning-fork), the LND fork
+that follows the Bitcoin BLAKE2b chain. It is the `app` container of the
+`paulscode-lightning-fork` app in the PaulsCode Umbrel store.
+
+What differs from upstream, all in `apps/frontend`:
+
+- Named Lightning Fork, with the chain named beside it and the daemon's
+  version (`0.21.3-beta-blake2b.N`) shown where LND's was.
+- Dark by default, in the storm-navy and electric blue of the app icon;
+  the light theme stays available under the same toggle.
+- The peer port is 9737 (the official app keeps 9735), so the hybrid-mode
+  note and the node URI shortening say so.
+- Transaction links open mempool.guide, an explorer for the BLAKE2b chain,
+  instead of mempool.space, which would show the transaction as missing.
+
+The backend is upstream's, unchanged: Lightning Fork speaks LND's RPC.
+
+Image: `paulscode/umbrel-lightning-fork`, built from this repository's
+`Dockerfile` for amd64 and arm64 and pinned by digest in the store.
+
+---
+
 <p align="center">
   <a href="https://umbrel.com">
     <img src="https://i.imgur.com/kNSdYQy.jpg" alt="Logo">

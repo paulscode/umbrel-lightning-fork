@@ -3,7 +3,7 @@
     <h3>Welcome to the <br/> Lightning Network</h3>
     <img
       class="app-icon mt-3"
-      src="@/assets/icon.svg"
+      src="@/assets/icon.png"
     />
     <div class="mt-4 mb-3">
       <a

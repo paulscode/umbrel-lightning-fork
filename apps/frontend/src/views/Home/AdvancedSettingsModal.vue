@@ -162,7 +162,7 @@
                       enhancing both latency and connection stability.
                     </p>
                     <p class="mb-0">
-                      Note: To enable incoming clearnet connections, you may need to forward port 9735 on your router. For greater privacy, you can disable Hybrid Mode;
+                      Note: To enable incoming clearnet connections, you may need to forward port 9737 on your router. For greater privacy, you can disable Hybrid Mode;
                       however, this may decrease reliability.
                     </p>
                   </small>

@@ -7,7 +7,7 @@
         <div class="d-flex justify-content-start align-items-start mb-2 mb-sm-4">
           <img
             class="app-icon mr-2 mr-sm-3"
-            src="@/assets/icon.svg"
+            src="@/assets/icon.png"
           />
           <div>
             <div class="d-flex align-items-center">
@@ -24,11 +24,12 @@
               <small v-else class="ml-1 text-warning">Starting</small>
             </div>
             <h3 class="font-weight-bold mb-0 mb-sm-1 app-title">
-              Lightning Node
+              Lightning Fork
+              <span class="chain-badge ml-1">Bitcoin BLAKE2b chain</span>
             </h3>
             <span class="text-muted text-xs-small">
               {{
-                this.lndVersion ? `LND ${this.lndVersion.split(" commit")[0]}` : "..."
+                this.lndVersion ? `Lightning Fork ${this.lndVersion.split(" commit")[0]}, an LND fork` : "..."
               }}
             </span>
           </div>

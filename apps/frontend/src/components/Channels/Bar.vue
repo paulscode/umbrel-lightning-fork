@@ -14,11 +14,11 @@ export default {
 
       let background;
       if (leftPercent === 100) {
-        background = `#5351FB`;
+        background = `#4e93ff`;
       } else if (leftPercent === 0) {
         background = `#00CD98`;
       } else {
-        background = `linear-gradient(90deg, #5351FB 0%, #5351FB ${leftPercent -
+        background = `linear-gradient(90deg, #4e93ff 0%, #4e93ff ${leftPercent -
           7}%, #00CD98 ${leftPercent + 7}%, #00CD98 100%)`;
       }
 
@@ -46,12 +46,12 @@ export default {
         (leftValue * 100) / (leftValue + rightValue)
       );
       if (leftPercent === 100) {
-        return `#5351FB`;
+        return `#4e93ff`;
       }
       if (leftPercent === 0) {
         return `#00CD98`;
       }
-      return `linear-gradient(90deg, #5351FB 0%, #5351FB ${leftPercent -
+      return `linear-gradient(90deg, #4e93ff 0%, #4e93ff ${leftPercent -
         7}%, #00CD98 ${leftPercent + 7}%, #00CD98 100%)`;
     }
   },

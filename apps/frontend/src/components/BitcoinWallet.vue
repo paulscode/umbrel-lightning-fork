@@ -705,21 +705,17 @@ export default {
       if (this.localExplorerTxUrl) {
         return `${this.localExplorerTxUrl}/tx/${txHash}`;
       } else {
-        if (window.location.origin.indexOf(".onion") > 0) {
-          return this.chain === "test"
-            ? `http://mempoolhqx4isw62xs7abwphsq7ldayuidyx2v2oethdhhj6mlo2r6ad.onion/testnet/tx/${txHash}`
-            : `http://mempoolhqx4isw62xs7abwphsq7ldayuidyx2v2oethdhhj6mlo2r6ad.onion/tx/${txHash}`;
-        }
-        return this.chain === "test"
-          ? `https://mempool.space/testnet/tx/${txHash}`
-          : `https://mempool.space/tx/${txHash}`;
+        // mempool.space follows the SHA256d chain and would show a
+        // transaction on this chain as missing; mempool.guide follows the
+        // Bitcoin BLAKE2b chain. It has no onion service we know of.
+        return `https://mempool.guide/tx/${txHash}`;
       }
     },
     openTxInExplorer(event) {
       if (
         !this.localExplorerTxUrl &&
         !window.confirm(
-          "This will open your transaction details in a public explorer (mempool.space). Do you wish to continue?"
+          "This will open your transaction details in a public explorer for the Bitcoin BLAKE2b chain (mempool.guide). Do you wish to continue?"
         )
       ) {
         event.preventDefault();

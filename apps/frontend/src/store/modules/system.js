@@ -24,7 +24,7 @@ const state = () => ({
   onboarding: false, // assume false to prevent modal flickering
   loading: true,
   unit: "sats", //sats or btc
-  theme: "light",
+  theme: "dark",
   currency: "USD",
   supportedFiatCurrencies: SUPPORTED_FIAT_CURRENCIES,
   api: {

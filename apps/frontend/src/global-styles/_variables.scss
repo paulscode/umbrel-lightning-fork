@@ -1,5 +1,8 @@
 $black: #141821;
-$purple: #5351fb;
+// Lightning Fork: the electric blue of the bolt in the app icon, on the
+// storm-navy of its sky. The variable keeps its upstream name, since the
+// components refer to the accent as "purple".
+$purple: #4e93ff;
 $primary: $purple;
 $green: #00cd98;
 $yellow: #f6b900;

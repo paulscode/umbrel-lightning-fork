@@ -9,11 +9,11 @@
     @click="$emit('click')"
   >
     <div class="qr-frame" :style="{ width: `${size}px`, height: `${size}px` }">
-      <!-- Popup umbrel logo in the middle of QR code -->
+      <!-- Popup Lightning Fork icon in the middle of QR code -->
       <transition name="qr-logo-popup" appear>
         <img
           v-show="showLogo"
-          src="@/assets/umbrel-qr-icon.svg"
+          src="@/assets/qr-icon.png"
           class="qr-logo"
         />
       </transition>

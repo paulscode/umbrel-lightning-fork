@@ -80,7 +80,7 @@ button {
 }
 
 .bg-purple {
-  background: #c172fe;
+  background: linear-gradient(90deg, #2f6fe8 0%, #4e93ff 55%, #8fd0ff 100%);
 }
 
 
@@ -703,17 +703,19 @@ body {
 }
 
 body.theme-dark {
-  --theme-page: #10141d;
-  --theme-surface: #181f2d;
-  --theme-surface-raised: #20293a;
-  --theme-surface-soft: #131925;
-  --theme-border: rgba(255, 255, 255, 0.09);
-  --theme-border-strong: rgba(255, 255, 255, 0.16);
-  --theme-text: #edf2ff;
-  --theme-muted: #9ba6bc;
-  --theme-muted-soft: #748097;
-  --theme-input: #111722;
-  --theme-shadow: rgba(0, 0, 0, 0.42);
+  // Lightning Fork: storm-navy surfaces with blue-tinted edges, so the
+  // electric-blue accent reads like the bolt against the sky in the icon.
+  --theme-page: #050b18;
+  --theme-surface: #0c1630;
+  --theme-surface-raised: #122044;
+  --theme-surface-soft: #080f22;
+  --theme-border: rgba(88, 153, 242, 0.18);
+  --theme-border-strong: rgba(88, 153, 242, 0.34);
+  --theme-text: #e8f1ff;
+  --theme-muted: #8fa6cf;
+  --theme-muted-soft: #6a7fa8;
+  --theme-input: #070d1c;
+  --theme-shadow: rgba(0, 0, 0, 0.6);
 
   background-color: var(--theme-page);
   color: var(--theme-text);
@@ -1139,4 +1141,31 @@ body.theme-dark {
       color: var(--theme-text);
     }
   }
+}
+
+// Lightning Fork: the accent glows a little, like the bolt; kept subtle so
+// it reads as light rather than decoration.
+body.theme-dark .btn-primary,
+body.theme-dark .btn-purple {
+  box-shadow: 0 0 18px rgba(78, 147, 255, 0.35);
+}
+body.theme-dark .btn-primary:hover,
+body.theme-dark .btn-purple:hover {
+  box-shadow: 0 0 26px rgba(78, 147, 255, 0.55);
+}
+.chain-badge {
+  display: inline-block;
+  padding: 0.1rem 0.55rem;
+  border-radius: 1rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #c6e2fc;
+  background: rgba(78, 147, 255, 0.16);
+  border: 1px solid rgba(78, 147, 255, 0.35);
+  vertical-align: middle;
+}
+body:not(.theme-dark) .chain-badge {
+  color: #1e4ca6;
+  background: rgba(78, 147, 255, 0.12);
 }
