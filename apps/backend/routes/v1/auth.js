@@ -12,6 +12,7 @@ router.get(
   safeHandler(async (req, res) => {
     const enabled = auth.passwordConfigured();
     const session = enabled ? auth.sessionFromReq(req) : null;
+    res.set("Cache-Control", "no-store");
     return res.json({
       password_enabled: enabled,
       authed: !enabled || Boolean(session),
@@ -26,9 +27,11 @@ router.post(
     if (!auth.passwordConfigured()) {
       return res.status(400).json({error: "no_password_set"}); // eslint-disable-line no-magic-numbers
     }
+    res.set("Cache-Control", "no-store");
     const r = await auth.login(String((req.body && req.body.password) || ""));
     if (!r.ok) {
-      const status = r.reason === "locked" ? 429 : 401; // eslint-disable-line no-magic-numbers
+      // eslint-disable-next-line no-magic-numbers
+      const status = r.reason === "locked" ? 429 : r.reason === "not_configured" ? 503 : 401;
       return res.status(status).json({error: r.reason, retry_after: r.retryAfter || 0});
     }
     res.set("Set-Cookie", auth.cookieHeader(r.id));
@@ -42,6 +45,7 @@ router.post(
   safeHandler(async (req, res) => {
     auth.logout(req);
     res.set("Set-Cookie", auth.clearCookieHeader());
+    res.set("Cache-Control", "no-store");
     return res.json({ok: true});
   })
 );

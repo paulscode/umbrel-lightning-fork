@@ -223,9 +223,16 @@ const actions = {
   },
 
   async getDepositAddress({ commit }) {
-    const { address } = await API.get(
-      `${process.env.VUE_APP_API_BASE_URL}/v1/lnd/address`
-    );
+    // A POST: a new address changes the wallet, and the write carries the
+    // session's CSRF token.
+    let address;
+    try {
+      ({ address } = (
+        await API.post(`${process.env.VUE_APP_API_BASE_URL}/v1/lnd/address`)
+      ).data);
+    } catch (error) {
+      address = null;
+    }
 
     if (address) {
       commit("depositAddress", address);

@@ -42,9 +42,12 @@ const external = require("routes/v1/external.js");
 const ping = require("routes/ping.js");
 const app = express();
 
+// Exact-case paths only: the sign-in gate and the routers must never
+// disagree about what a path is.
+app.set("case sensitive routing", true);
+
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
-app.use(express.static(path.join(__dirname, "public")));
 
 app.use(requestCorrelationMiddleware);
 app.use(camelCaseReqMiddleware);
@@ -58,10 +61,11 @@ app.use(morgan(logger.morganConfiguration));
 // The static frontend stays public so the sign-in screen can render; the
 // gate covers the API (middlewares/sessionAuth.js).
 if (constants.IS_STARTOS || auth.passwordConfigured()) {
-  app.use(sessionAuth);
+  app.use("/v1", sessionAuth);
 }
 
 // serve frontend
+app.use(express.static(path.join(__dirname, "public")));
 app.use("/", express.static("../frontend/dist"));
 
 app.use("/v1/auth", authRoutes);

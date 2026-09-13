@@ -44,7 +44,14 @@ itself or what Umbrel provided:
   cookie with a per-session CSRF token that every non-GET request must carry
   (`X-CSRF-Token`); sessions last twelve hours and end at `/v1/auth/logout`;
   a global lockout, persisted in the JSON store, backs off from the third
-  wrong attempt (429 with `retry_after`). The password comes from
+  wrong attempt (429 with `retry_after`), verifies attempts one at a time so
+  a parallel burst cannot outrun the counter, and refuses attempts it cannot
+  record. Sessions and the lockout remember a fingerprint of the password
+  they belong to: changing the password ends every session and starts the
+  counter afresh, which is the owner's way out of a lockout somebody else
+  caused. Express runs with case-sensitive routing and the gate is mounted
+  at `/v1` so the two can never disagree about what is under it. The
+  password comes from
   `DASHBOARD_PASSWORD`, or from the JSON file named by
   `DASHBOARD_PASSWORD_FILE` (`{"password": "..."}`), read on every attempt
   so the platform can change it without a restart. The backend refuses to

@@ -6,19 +6,32 @@ const assert = require("node:assert/strict");
 process.env.DASHBOARD_PASSWORD = "correct horse";
 const auth = require("../logic/auth.js");
 
-function fake({ password = "correct horse" } = {}) {
+function fake({ password = "correct horse", failWrites = false } = {}) {
   let clock = 1_000_000;
-  let state = { failCount: 0, lockedUntil: 0 };
+  let state = { failCount: 0, lockedUntil: 0, fingerprint: "" };
   const writes = [];
+  const current = { password };
   const a = auth.createAuth({
-    getPassword: () => password,
+    getPassword: () => current.password,
     now: () => clock,
+    log: () => {},
     store: {
-      read: async () => ({ ...state }),
-      write: async (next) => { state = { ...next }; writes.push({ ...next }); },
+      // Like the JSON store: asynchronous, a read and a write apart.
+      read: async () => { await new Promise(r => setImmediate(r)); return { ...state }; },
+      write: async (next) => {
+        await new Promise(r => setImmediate(r));
+        if (failWrites) { throw new Error("EROFS"); }
+        state = { ...next }; writes.push({ ...next });
+      },
     },
   });
-  return { a, tick: (s) => { clock += s; }, state: () => state, writes };
+  return {
+    a,
+    tick: (s) => { clock += s; },
+    state: () => state,
+    writes,
+    setPassword: (p) => { current.password = p; },
+  };
 }
 
 const reqWith = (cookie, headers = {}) => ({ headers: { cookie, ...headers } });
@@ -52,11 +65,58 @@ test("a wrong password, a wrong length and an empty one are refused in the same 
   assert.equal(a.sessionCount(), 0);
 });
 
-test("a configured source that yields no password keeps the door shut", async () => {
-  const { a } = fake({ password: "" });
+test("a configured source that yields no password keeps the door shut, and counts nothing", async () => {
+  const { a, writes } = fake({ password: "" });
   assert.equal(a.passwordUsable(), false);
   const r = await a.login("");
   assert.equal(r.ok, false);
+  assert.equal(r.reason, "not_configured");
+  assert.equal(writes.length, 0, "the owner's attempts while the file is unreadable must not lock them out");
+});
+
+test("a burst of parallel guesses is counted one by one", async () => {
+  const { a, state } = fake();
+  const results = await Promise.all(Array.from({ length: 20 }, () => a.login("no")));
+  const reasons = results.map(r => r.reason);
+  assert.deepEqual(reasons.slice(0, 3), ["bad_password", "bad_password", "bad_password"]);
+  assert.ok(reasons.slice(3).every(r => r === "locked"), "everything after the third waits out the lockout");
+  assert.equal(state().failCount, 3);
+});
+
+test("a new password starts the counter afresh and ends every session", async () => {
+  const { a, setPassword, state } = fake();
+  for (let i = 0; i < 12; i += 1) {
+    await a.login("no");
+  }
+  assert.ok(state().lockedUntil > 0);
+  assert.equal((await a.login("correct horse")).reason, "locked");
+
+  const opened = await a.login("correct horse").catch(() => null);
+  setPassword("a different one");
+  const r = await a.login("a different one");
+  assert.equal(r.ok, true, "the owner's way out of a lockout somebody else caused");
+  assert.equal(state().failCount, 0);
+
+  const before = await (async () => {
+    setPassword("first");
+    const s = await a.login("first");
+    return s;
+  })();
+  const req = reqWith(`${auth.SESSION_COOKIE}=${before.id}`);
+  assert.ok(a.sessionFromReq(req));
+  setPassword("second");
+  assert.equal(a.sessionFromReq(req), null, "changing the password cuts off whoever holds a session");
+  void opened;
+});
+
+test("a counter that cannot be written refuses the attempt rather than forget it", async () => {
+  const { a } = fake({ failWrites: true });
+  const r = await a.login("no");
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, "locked");
+  assert.equal(r.retryAfter, auth.MAX_BACKOFF_SEC);
+  const ok = await a.login("correct horse");
+  assert.equal(ok.ok, true, "the right password still works while the counter is clean");
 });
 
 test("from the third failure the lockout backs off, persists, and clears on success", async () => {
@@ -80,7 +140,7 @@ test("from the third failure the lockout backs off, persists, and clears on succ
   tick(5);
   const ok = await a.login("correct horse");
   assert.equal(ok.ok, true);
-  assert.deepEqual(state(), { failCount: 0, lockedUntil: 0 });
+  assert.deepEqual(state(), { failCount: 0, lockedUntil: 0, fingerprint: "" });
   assert.ok(writes.length >= 5);
 });
 

@@ -1,7 +1,7 @@
 {
   "name": "umbrel-lightning-fork",
   "author": "Paul Lamb, from Umbrel's umbrel-lightning",
-  "version": "1.3.2-blake2b.6",
+  "version": "1.3.2-blake2b.7",
   "description": "",
   "private": true,
   "scripts": {

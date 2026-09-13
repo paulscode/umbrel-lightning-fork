@@ -165,6 +165,9 @@ const actions = {
       if (status === 401) {
         return "Wrong password.";
       }
+      if (status === 503) {
+        return "No password is set on this server. Run Set Dashboard Password in StartOS.";
+      }
       return "Could not sign in. Is the node running?";
     }
   },
