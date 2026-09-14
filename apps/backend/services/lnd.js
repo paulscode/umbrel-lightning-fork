@@ -12,6 +12,7 @@ const ROUTERRPC_PROTO_FILE =
   process.env.ROUTERRPC_PROTO_FILE || "./resources/routerrpc.proto";
 const WATCHTOWERRPC_PROTO_FILE = process.env.WATCHTOWERRPC_PROTO_FILE || "./resources/watchtowerrpc.proto";
 const WTCLIENTRPC_PROTO_FILE = process.env.WTCLIENTRPC_PROTO_FILE || "./resources/wtclientrpc.proto";
+const OFFERSRPC_PROTO_FILE = process.env.OFFERSRPC_PROTO_FILE || "./resources/offersrpc.proto";
 const LND_PORT = process.env.LND_PORT || 10009; // eslint-disable-line no-magic-numbers
 const LND_NETWORK = process.env.LND_NETWORK || "mainnet";
 
@@ -39,6 +40,10 @@ const lnrpcWatchtower = lnrpcWatchtowerDescriptor.watchtowerrpc;
 
 const lnrpcWtclientDescriptor = grpc.load(WTCLIENTRPC_PROTO_FILE);
 const lnrpcWtclient = lnrpcWtclientDescriptor.wtclientrpc;
+
+// BOLT 12 offers, a Lightning Fork sub-server.
+const lnrpcOffersDescriptor = grpc.load(OFFERSRPC_PROTO_FILE);
+const lnrpcOffers = lnrpcOffersDescriptor.offersrpc;
 
 const DEFAULT_RECOVERY_WINDOW = 250;
 const SMALL_PAYMENT_THRESHOLD = 1000;
@@ -106,6 +111,11 @@ async function initializeRPCClient() {
           credentials
         ),
         router: new lnrpcRouter.Router(
+          LND_HOST + ":" + LND_PORT,
+          credentials,
+          GRPC_PARAMS
+        ),
+        offers: new lnrpcOffers.Offers(
           LND_HOST + ":" + LND_PORT,
           credentials,
           GRPC_PARAMS
@@ -734,7 +744,104 @@ function stopDaemon() {
   ));
 }
 
+// ---- BOLT 12 offers -------------------------------------------------------
+
+// Offer ids and payment hashes travel as hex over HTTP and as bytes over
+// gRPC.
+function bytesFromHex(hex) {
+  return Buffer.from(hex || "", "hex");
+}
+
+function createOffer({ description, amountMsat, absoluteExpiry, issuer, label, quantityMax, quantityAny }) {
+  const rpcPayload = {
+    description: description || "",
+    amount_msat: amountMsat || 0,
+    absolute_expiry: absoluteExpiry || 0,
+    issuer: issuer || "",
+    label: label || "",
+    quantity_max: quantityMax || 0,
+    quantity_any: Boolean(quantityAny),
+  };
+
+  return initializeRPCClient().then(({ offers }) =>
+    promiseify(offers, offers.CreateOffer, rpcPayload, "create offer")
+  );
+}
+
+function listOffers(activeOnly) {
+  return initializeRPCClient().then(({ offers }) =>
+    promiseify(offers, offers.ListOffers, { active_only: Boolean(activeOnly) }, "list offers")
+  );
+}
+
+function disableOffer(offerIdHex) {
+  return initializeRPCClient().then(({ offers }) =>
+    promiseify(offers, offers.DisableOffer, { offer_id: bytesFromHex(offerIdHex) }, "disable offer")
+  );
+}
+
+function enableOffer(offerIdHex) {
+  return initializeRPCClient().then(({ offers }) =>
+    promiseify(offers, offers.EnableOffer, { offer_id: bytesFromHex(offerIdHex) }, "enable offer")
+  );
+}
+
+function decodeBolt12(bolt12) {
+  return initializeRPCClient().then(({ offers }) =>
+    promiseify(offers, offers.DecodeBolt12, { bolt12 }, "decode offer")
+  );
+}
+
+function fetchOfferInvoice({ offer, amountMsat, quantity, payerNote, timeoutSeconds }) {
+  const rpcPayload = {
+    offer,
+    amount_msat: amountMsat || 0,
+    quantity: quantity || 0,
+    payer_note: payerNote || "",
+    timeout_seconds: timeoutSeconds || 0,
+  };
+
+  return initializeRPCClient().then(({ offers }) =>
+    promiseify(offers, offers.FetchInvoice, rpcPayload, "fetch an invoice for the offer")
+  );
+}
+
+function payOffer({ offer, invoice, amountMsat, quantity, payerNote, timeoutSeconds, feeLimitMsat, maxParts }) {
+  const rpcPayload = {
+    offer: offer || "",
+    invoice: invoice || "",
+    amount_msat: amountMsat || 0,
+    quantity: quantity || 0,
+    payer_note: payerNote || "",
+    timeout_seconds: timeoutSeconds || 0,
+    fee_limit_msat: feeLimitMsat || 0,
+    max_parts: maxParts || 0,
+  };
+
+  return initializeRPCClient().then(({ offers }) =>
+    promiseify(offers, offers.PayOffer, rpcPayload, "pay the offer")
+  );
+}
+
+function listOfferInvoices(offerIdHex) {
+  const rpcPayload = {
+    offer_id: offerIdHex ? bytesFromHex(offerIdHex) : Buffer.alloc(0),
+  };
+
+  return initializeRPCClient().then(({ offers }) =>
+    promiseify(offers, offers.ListOfferInvoices, rpcPayload, "list the offer's invoices")
+  );
+}
+
 module.exports = {
+  createOffer,
+  listOffers,
+  disableOffer,
+  enableOffer,
+  decodeBolt12,
+  fetchOfferInvoice,
+  payOffer,
+  listOfferInvoices,
   addInvoice,
   changePassword,
   closeChannel,

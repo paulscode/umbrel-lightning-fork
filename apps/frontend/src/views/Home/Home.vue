@@ -74,6 +74,9 @@
             <b-dropdown-item href="#" v-b-modal.node-id-modal
               >Node ID</b-dropdown-item
             >
+            <b-dropdown-item href="#" v-b-modal.offers-modal
+              >Lightning offers</b-dropdown-item
+            >
             <!-- On StartOS the service's interfaces, actions and backups
                  cover these, so the dashboard keeps to the node itself. -->
             <b-dropdown-item v-if="!isStartOS" href="#" v-b-modal.connect-wallet-modal @click="getLndConnectUrls"
@@ -327,6 +330,7 @@
     </b-modal>
     <advanced-settings-modal v-if="showAdvancedSettingsModal" />
     <node-id-modal />
+    <offers-modal />
     <secret-words-modal v-if="!isStartOS" />
     <connect-wallet-modal v-if="!isStartOS" />
     <channel-backup-modal
@@ -350,6 +354,7 @@ import TotalBalance from "@/components/TotalBalance";
 import ToggleSwitch from "@/components/Utility/ToggleSwitch";
 import ChannelList from "@/components/Channels/List";
 import ChannelOpen from "@/components/Channels/Open";
+import OffersModal from "@/views/Home/OffersModal";
 import ChannelManage from "@/components/Channels/Manage";
 
 import AdvancedSettingsModal from "./AdvancedSettingsModal.vue";
@@ -622,6 +627,7 @@ export default {
     ChannelList,
     ChannelOpen,
     ChannelManage,
+    OffersModal,
     AdvancedSettingsModal,
     NodeIdModal,
     SecretWordsModal,

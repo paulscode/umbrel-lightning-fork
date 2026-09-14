@@ -263,7 +263,7 @@
             </a>
           </div>
 
-          <label class="sr-onlsy" for="input-sats">Paste Invoice</label>
+          <label class="sr-onlsy" for="input-sats">Paste Invoice or Offer</label>
           <b-input
             id="input-sats"
             class="mb-4 neu-input"
@@ -276,8 +276,45 @@
             :disabled="send.isSending"
           ></b-input>
 
+          <!-- An offer that lets the payer choose the amount -->
+          <div v-if="send.isValidInvoice && send.kind === 'offer' && send.anyAmount">
+            <label class="sr-onlsy" for="input-offer-amount">Amount</label>
+            <div class="mb-3">
+              <b-input-group class="neu-input-group">
+                <b-input
+                  id="input-offer-amount"
+                  class="neu-input"
+                  type="text"
+                  size="lg"
+                  v-model.number="send.amountInput"
+                  :disabled="send.isSending || !!send.fetchedInvoice"
+                  style="padding-right: 82px"
+                ></b-input>
+                <b-input-group-append class="neu-input-group-append">
+                  <sats-btc-switch
+                    class="align-self-center"
+                    size="sm"
+                  ></sats-btc-switch>
+                </b-input-group-append>
+              </b-input-group>
+              <small
+                class="text-muted mt-2 d-block text-right mb-0"
+                :style="{ opacity: send.amount > 0 ? 1 : 0 }"
+                >~ {{ send.amount | satsToFiat }}</small
+              >
+            </div>
+            <div v-if="send.description" class="mb-2">
+              <small class="d-block text-muted mb-1">Offer</small>
+              <span>{{ send.description }}</span>
+            </div>
+            <small class="d-block text-muted mb-2">
+              This is a reusable offer: your node asks the recipient for an
+              invoice and pays it.
+            </small>
+          </div>
+
           <!-- Invoice amount + description -->
-          <div v-if="send.isValidInvoice && send.amount">
+          <div v-else-if="send.isValidInvoice && send.amount">
             <div class="d-flex justify-content-between mb-3 align-items-center">
               <div>
                 <small class="d-block text-muted mb-1">Paying</small>
@@ -297,7 +334,14 @@
               <small class="d-block text-muted mb-1">For</small>
               <span>{{ send.description }}</span>
             </div>
+            <small v-if="send.kind === 'offer'" class="d-block text-muted mt-2">
+              This is a reusable offer: your node asks the recipient for an
+              invoice and pays it.
+            </small>
           </div>
+          <small v-if="send.isSending && send.kind !== 'bolt11'" class="d-block text-muted">
+            {{ send.progress }}
+          </small>
         </div>
 
         <!-- SCREEN/MODE: Successfully paid invoice -->
@@ -374,7 +418,24 @@
             </a>
           </div>
 
-          <label class="sr-onlsy" for="input-sats">Amount</label>
+          <!-- Invoice (one payment) or offer (reusable) -->
+          <b-form-radio-group
+            v-model="receive.kind"
+            :options="[
+              { text: 'Invoice', value: 'invoice' },
+              { text: 'Reusable offer', value: 'offer' },
+            ]"
+            buttons
+            button-variant="outline-primary"
+            size="sm"
+            class="w-100 mb-3 neu-kind-switch"
+            :disabled="receive.isGeneratingInvoice"
+          ></b-form-radio-group>
+
+          <label class="sr-onlsy" for="input-sats">
+            Amount
+            <small v-if="receive.kind === 'offer'" class="text-muted">(optional)</small>
+          </label>
           <div class="mb-2">
             <b-input-group class="neu-input-group">
               <b-input
@@ -385,6 +446,7 @@
                 autofocus
                 v-model.number="receive.amountInput"
                 :disabled="receive.isGeneratingInvoice"
+                :placeholder="receive.kind === 'offer' ? 'Any amount' : ''"
                 style="padding-right: 82px"
               ></b-input>
               <b-input-group-append class="neu-input-group-append">
@@ -403,15 +465,89 @@
 
           <label class="sr-onlsy" for="input-description">
             Description
-            <small class="text-muted">(optional)</small>
+            <small class="text-muted">{{ receive.kind === 'offer' ? '' : '(optional)' }}</small>
           </label>
           <b-input
             id="input-description"
-            class="mb-4 neu-input"
+            class="mb-2 neu-input"
             size="lg"
             v-model="receive.description"
+            :placeholder="receive.kind === 'offer' ? 'e.g. OCEAN Payouts for bc1q…' : ''"
             :disabled="receive.isGeneratingInvoice"
           ></b-input>
+          <small v-if="receive.kind === 'offer'" class="d-block text-muted mb-4">
+            An offer can be paid again and again by anyone who has it. For a
+            mining pool payout, use the description the pool asks for and
+            leave the amount empty. Manage your offers from the menu.
+          </small>
+          <div v-else class="mb-2"></div>
+        </div>
+
+        <!-- SCREEN/MODE: Show a created offer -->
+        <div
+          class="px-3 px-lg-4 pb-2 mode-invoice wallet-mode"
+          v-else-if="mode === 'offer'"
+          key="mode-offer"
+        >
+          <!-- Back Button -->
+          <div class="pb-3">
+            <a
+              href="#"
+              class="card-link text-muted"
+              v-on:click.stop.prevent="reset"
+            >
+              <svg
+                width="7"
+                height="13"
+                viewBox="0 0 7 13"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M6.74372 11.4153C7.08543 11.7779 7.08543 12.3659 6.74372 12.7285C6.40201 13.0911 5.84799 13.0911 5.50628 12.7285L0.256283 7.15709C-0.0749738 6.80555 -0.0865638 6.23951 0.229991 5.87303L5.04249 0.301606C5.36903 -0.0764332 5.92253 -0.101971 6.27876 0.244565C6.63499 0.591101 6.65905 1.17848 6.33251 1.55652L2.08612 6.47256L6.74372 11.4153Z"
+                  fill="#C3C6D1"
+                />
+              </svg>
+              Back
+            </a>
+          </div>
+          <p class="text-center text-muted mb-2">
+            <span class="blink" v-if="receive.isGeneratingInvoice"
+              >Creating Offer</span
+            >
+            <span v-else>
+              {{ offer.existed ? "Your existing offer for" : "Offer for" }}
+              <b>{{ receive.description }}</b>
+              <br />
+              <small>
+                <span v-if="receive.amount">
+                  {{ receive.amount | unit | localize }}
+                  {{ unit | formatUnit(receive.amount) }}
+                </span>
+                <span v-else>any amount</span>
+                · reusable
+              </small>
+            </span>
+          </p>
+          <qr-code
+            class="mb-3 mx-auto"
+            :showLogo="!receive.isGeneratingInvoice"
+            :value="offer.qr"
+            level="L"
+          ></qr-code>
+          <transition name="slide-up" appear>
+            <div class v-show="!receive.isGeneratingInvoice">
+              <input-copy
+                size="sm"
+                :value="offer.bolt12"
+                class="mb-2"
+              ></input-copy>
+              <small class="text-center d-block text-muted">
+                Reusable: share it as many times as you like. To be paid by a
+                pool, give it the pool as your Lightning payout address.
+              </small>
+            </div>
+          </transition>
         </div>
 
         <!-- SCREEN/MODE: Show Generated Invoice -->
@@ -737,7 +873,7 @@
             fill="#FFFFFF"
           />
         </svg>
-        {{ this.send.isSending ? "Sending..." : "Send" }}
+        {{ send.isSending ? "Sending..." : send.fetchedInvoice ? "Retry Payment" : send.kind === "offer" ? "Pay Offer" : "Send" }}
       </b-button>
 
       <!-- Button: Create Invoice (receive mode) -->
@@ -746,9 +882,19 @@
         variant="success"
         style="border-radius: 0; border-bottom-left-radius: 1rem; border-bottom-right-radius: 1rem; padding-top: 1rem; padding-bottom: 1rem;"
         @click="createInvoice"
-        v-else-if="mode === 'receive'"
+        v-else-if="mode === 'receive' && receive.kind !== 'offer'"
         :disabled="!receive.amount || receive.amount <= 0"
         >Create Invoice</b-button
+      >
+      <!-- Button: Create Offer (receive mode, reusable offer) -->
+      <b-button
+        class="w-100"
+        variant="success"
+        style="border-radius: 0; border-bottom-left-radius: 1rem; border-bottom-right-radius: 1rem; padding-top: 1rem; padding-bottom: 1rem;"
+        @click="createOffer"
+        v-else-if="mode === 'receive'"
+        :disabled="!receive.description.trim() || receive.isGeneratingInvoice"
+        >Create Offer</b-button
       >
 
       <!-- spacer if no button -->
@@ -783,6 +929,7 @@ export default {
       mode: "transactions", //transactions (default mode), receive (create invoice), invoice, send, sent, payment-success, invoice-info
       receive: {
         //receive info
+        kind: "invoice", //invoice (one payment) or offer (reusable)
         amount: null, //invoice amount
         description: "", //invoice description
         paymentRequest: "", //Bolt 11 invoice
@@ -794,12 +941,25 @@ export default {
       },
       send: {
         //send info
-        paymentRequest: "", //Bolt 11 payment request/invoice entered by the user
+        paymentRequest: "", //Bolt 11 invoice, BOLT 12 offer (lno1) or BOLT 12 invoice (lni1) entered by the user
+        kind: "bolt11", //what was pasted: bolt11, offer or bolt12invoice
+        anyAmount: false, //an offer that lets the payer choose the amount
+        amountInput: null, //the amount the user types for such an offer, in the display unit
         description: "", //invoice description
         amount: null, //invoice amount
-        isValidInvoice: false, //check if invoice entered by user is a valid Bolt 11 invoice
+        isValidInvoice: false, //check if what the user pasted is valid and payable
         isSending: false, //used for transition while tx is being broadcasted,
+        progress: "", //what the node is doing while paying an offer
         paymentPreImage: "", //proof of payment
+        fetchedInvoice: "", //the BOLT 12 invoice fetched for an offer, so a retry pays the same one
+        fetchedAmount: null, //that invoice's amount, in sats
+        decodeSeq: 0, //so a slow decode of an earlier paste cannot overwrite a later one
+      },
+      offer: {
+        //a reusable offer just created from the receive screen
+        bolt12: "",
+        qr: "1",
+        existed: false,
       },
       paymentInfo: {
         //outgoing payment info
@@ -865,6 +1025,7 @@ export default {
 
       //reset state
       this.receive = {
+        kind: "invoice",
         amount: null,
         amountInput: "",
         description: "",
@@ -877,11 +1038,20 @@ export default {
       };
       this.send = {
         paymentRequest: "",
+        kind: "bolt11",
+        anyAmount: false,
+        amountInput: "",
         description: "",
         amount: null,
         isValidInvoice: false,
         isSending: false,
+        progress: "",
+        paymentPreImage: "",
+        fetchedInvoice: "",
+        fetchedAmount: null,
+        decodeSeq: 0,
       };
+      this.offer = { bolt12: "", qr: "1", existed: false };
       this.paymentInfo = {
         amount: null,
         description: "",
@@ -899,6 +1069,10 @@ export default {
     async sendSats() {
       //broadcast tx
       if (!this.send.isValidInvoice) return; //check if the invoice user pasted is valid
+
+      if (this.send.kind !== "bolt11") {
+        return this.payOffer();
+      }
 
       this.loading = true;
       this.send.isSending = true;
@@ -931,6 +1105,202 @@ export default {
 
       this.loading = false;
       this.send.isSending = false;
+    },
+    //pay a BOLT 12 offer or a BOLT 12 invoice: the node fetches the invoice
+    //from the recipient over onion messages and pays it
+    async payOffer() {
+      const isOffer = this.send.kind === "offer";
+      if (isOffer && this.send.anyAmount && !(this.send.amount > 0)) {
+        return (this.error = "Enter the amount to pay");
+      }
+
+      this.loading = true;
+      this.send.isSending = true;
+      this.error = "";
+
+      try {
+        // An offer is paid in two steps: ask the recipient for an invoice,
+        // then pay that invoice. The invoice is kept, so a retry after a
+        // failure pays the same invoice again rather than fetching a new
+        // one, which could pay twice if the first attempt settles late.
+        let invoice = this.send.fetchedInvoice;
+        if (isOffer && !invoice) {
+          this.send.progress = "Asking the recipient for an invoice…";
+          const fetched = await API.post(
+            `${process.env.VUE_APP_API_BASE_URL}/v1/lnd/offers/fetchInvoice`,
+            {
+              offer: this.send.paymentRequest.trim(),
+              amountSat: this.send.anyAmount ? this.send.amount : 0,
+            }
+          );
+          invoice = fetched.data.bolt12;
+          const invoiceAmount = Number(fetched.data.invoice.amountSat);
+          const expected = this.send.anyAmount ? this.send.amount : this.send.amount;
+          if (expected && invoiceAmount !== expected) {
+            throw new Error(
+              `The recipient invoiced ${invoiceAmount} sats, not ${expected}; not paying.`
+            );
+          }
+          this.send.fetchedInvoice = invoice;
+          this.send.fetchedAmount = invoiceAmount;
+        } else if (!isOffer) {
+          invoice = this.send.paymentRequest.trim();
+        }
+
+        this.send.progress = "Paying…";
+        const res = await API.post(
+          `${process.env.VUE_APP_API_BASE_URL}/v1/lnd/offers/pay`,
+          { invoice }
+        );
+        this.send.amount = Number(res.data.amountSat);
+        this.send.paymentPreImage = res.data.paymentPreimage;
+        this.send.fetchedInvoice = "";
+        this.mode = "sent";
+
+        //refresh
+        this.$store.dispatch("lightning/getTransactions");
+        this.$store.dispatch("lightning/getChannels");
+      } catch (error) {
+        this.error = getErrorMessage(
+          error,
+          "Unable to pay. Please try again."
+        );
+        if (this.send.fetchedInvoice) {
+          this.error += " Retrying pays the same invoice, not a new one.";
+        }
+      }
+
+      this.loading = false;
+      this.send.isSending = false;
+      this.send.progress = "";
+    },
+    //create a reusable offer from the receive screen
+    async createOffer() {
+      this.loading = true;
+      this.receive.isGeneratingInvoice = true;
+      this.offer.bolt12 = "";
+      this.offer.qr = "1";
+      this.offer.existed = false;
+      this.mode = "offer";
+      this.error = "";
+
+      this.QRAnimation = window.setInterval(() => {
+        this.offer.qr = `${this.offer.qr}2345`;
+      }, 200);
+
+      const payload = {
+        description: this.receive.description.trim(),
+        amountSat: this.receive.amount || 0,
+      };
+
+      try {
+        const res = await API.post(
+          `${process.env.VUE_APP_API_BASE_URL}/v1/lnd/offers`,
+          payload
+        );
+        this.offer.bolt12 = res.data.offer.bolt12;
+        this.offer.qr = res.data.offer.bolt12;
+        this.offer.existed = !res.data.created;
+      } catch (error) {
+        this.mode = "receive";
+        this.error = getErrorMessage(
+          error,
+          "Unable to create the offer. Please try again."
+        );
+      }
+      window.clearInterval(this.QRAnimation);
+      this.loading = false;
+      this.receive.isGeneratingInvoice = false;
+    },
+    //what the user pasted, with a lightning: or bitcoin:?lno= wrapper taken off
+    cleanPasted(str) {
+      let s = (str || "").trim();
+      const lno = s.match(/[?&]lno=([^&]+)/i);
+      if (lno) {
+        s = decodeURIComponent(lno[1]);
+      }
+      s = s.replace(/^lightning:/i, "");
+      return s;
+    },
+    //what was pasted: a BOLT 11 invoice, a BOLT 12 offer or a BOLT 12 invoice
+    pastedKind(str) {
+      const s = this.cleanPasted(str).toLowerCase();
+      if (s.startsWith("lno1")) return "offer";
+      if (s.startsWith("lni1")) return "bolt12invoice";
+      return "bolt11";
+    },
+    //fetch what a pasted BOLT 12 string is, and show it before paying
+    async fetchBolt12Details(kind) {
+      const seq = ++this.send.decodeSeq;
+      const pasted = this.cleanPasted(this.send.paymentRequest);
+      this.send.paymentRequest = pasted;
+      let decoded;
+      try {
+        decoded = await API.get(
+          `${process.env.VUE_APP_API_BASE_URL}/v1/lnd/offers/decode?bolt12=${encodeURIComponent(
+            pasted
+          )}`
+        );
+      } catch (error) {
+        decoded = null;
+      }
+      if (seq !== this.send.decodeSeq) {
+        return; // a later paste is being decoded
+      }
+      if (!decoded || !decoded.type) {
+        this.error = kind === "offer" ? "Invalid offer" : "Invalid invoice";
+        this.loading = false;
+        return;
+      }
+      if (!decoded.forThisChain) {
+        this.error = "This is for another chain, not the BLAKE2b chain";
+        this.loading = false;
+        return;
+      }
+      if (kind === "offer") {
+        if (!decoded.valid) {
+          this.error = decoded.validationError || "This offer cannot be paid";
+          this.loading = false;
+          return;
+        }
+        if (decoded.ours) {
+          this.error = "This is your own offer";
+          this.loading = false;
+          return;
+        }
+        this.send.description = decoded.offer.description;
+        this.send.anyAmount = decoded.offer.anyAmount;
+        this.send.amount = decoded.offer.anyAmount ? null : Number(decoded.offer.amountSat);
+        this.send.isValidInvoice = true;
+      } else {
+        const inv = decoded.invoice;
+        if (!inv || decoded.type !== "invoice") {
+          this.error = "Invalid invoice";
+          this.loading = false;
+          return;
+        }
+        if (!inv.signatureValid) {
+          this.error = "This invoice's signature is not valid";
+          this.loading = false;
+          return;
+        }
+        if (decoded.ours) {
+          this.error = "This is an invoice for your own offer";
+          this.loading = false;
+          return;
+        }
+        const expiresOn = (Number(inv.createdAt) + Number(inv.relativeExpiry || 7200)) * 1000;
+        if (Date.now() > expiresOn) {
+          this.error = `Invoice expired ${moment(expiresOn).fromNow()}`;
+          this.loading = false;
+          return;
+        }
+        this.send.description = decoded.offer ? decoded.offer.description : "";
+        this.send.amount = Number(inv.amountSat);
+        this.send.isValidInvoice = true;
+      }
+      this.error = "";
+      this.loading = false;
     },
     async createInvoice() {
       //generate invoice to receive payment
@@ -984,6 +1354,10 @@ export default {
         this.send.description = "";
         this.send.isValidInvoice = false;
         this.send.amount = null;
+        this.send.anyAmount = false;
+        this.send.amountInput = "";
+        this.send.fetchedInvoice = "";
+        this.send.fetchedAmount = null;
         this.send.description = "";
         this.error = "";
         return;
@@ -992,9 +1366,18 @@ export default {
       this.send.description = "";
       this.send.isValidInvoice = false;
       this.send.amount = null;
+      this.send.anyAmount = false;
+      this.send.amountInput = "";
+      this.send.fetchedInvoice = "";
+      this.send.fetchedAmount = null;
       this.send.description = "";
       this.error = "";
       this.loading = true;
+
+      this.send.kind = this.pastedKind(this.send.paymentRequest);
+      if (this.send.kind !== "bolt11") {
+        return this.fetchBolt12Details(this.send.kind);
+      }
 
       const fetchedInvoice = await API.get(
         `${process.env.VUE_APP_API_BASE_URL}/v1/lnd/lightning/invoice?paymentRequest=${this.send.paymentRequest}`
@@ -1106,14 +1489,31 @@ export default {
         this.receive.amount = btcToSats(val);
       }
     },
+    "send.amountInput": function(val) {
+      // the amount typed for an offer that lets the payer choose it
+      if (!this.send.anyAmount) return;
+      if (this.unit === "sats") {
+        this.send.amount = Number(val);
+      } else if (this.unit === "btc") {
+        this.send.amount = btcToSats(val);
+      }
+    },
     unit: function(val) {
       // this watcher is used to update the receive.amount shown when creating an invoice and toggling between sats/btc
       // we only run this if receive.amountInput is not empty, otherwise paid and pending invoices will not show the correct amount when toggling between sats/btc
-      if (this.receive.amountInput === "") return;
-      if (val === "sats") {
-        this.receive.amount = Number(this.receive.amountInput);
-      } else if (val === "btc") {
-        this.receive.amount = btcToSats(this.receive.amountInput);
+      if (this.receive.amountInput !== "" && this.receive.amountInput !== null) {
+        if (val === "sats") {
+          this.receive.amount = Number(this.receive.amountInput);
+        } else if (val === "btc") {
+          this.receive.amount = btcToSats(this.receive.amountInput);
+        }
+      }
+      if (this.send.anyAmount && this.send.amountInput !== "" && this.send.amountInput !== null) {
+        if (val === "sats") {
+          this.send.amount = Number(this.send.amountInput);
+        } else if (val === "btc") {
+          this.send.amount = btcToSats(this.send.amountInput);
+        }
       }
     },
   },
