@@ -16,7 +16,23 @@ What differs from upstream:
 - The peer port is 9737 (the official app keeps 9735), so the hybrid-mode
   note and the node URI shortening say so.
 - Transaction links open mempool.guide, an explorer for the BLAKE2b chain,
-  instead of mempool.space, which would show the transaction as missing.
+  instead of mempool.space, which would show the transaction as missing;
+  or the Mempool app the operator chooses under the menu's "Mempool app"
+  entry (Mempool or Mempool Pruned on StartOS, Mempool Pruned on Umbrel),
+  which the wrapper tells the backend how to reach (`MEMPOOL_GUIDE_*` and
+  `MEMPOOL_PRUNED_*` in the environment). The same app supplies the fee
+  rates: sending and opening channels offer Low, Medium and High, the
+  rates the app's own page shows (read from its `/api/v1/fees/recommended`),
+  or the node's estimate for 24, 6 and 1 blocks without an app. The node's
+  estimate always sizes the transaction, so a rate becomes a total.
+- Balances, channels and transactions refresh every ten seconds while the
+  page is visible, and the node's alias is shown under the title with the
+  color it announces.
+- Channel details show the funding transaction, and the closing transaction
+  while a channel closes, with a copy button that works over plain http
+  and a link to the chosen explorer.
+- A page whose session has ended returns to the sign-in screen by itself:
+  the status poll asks the sign-in gate each round.
 - Channel backups to a place the owner controls. Upstream uploaded
   `channel.backup` to Umbrel's backup server, which answers 403 to this app.
   The backend now runs the channel-backup agent from the StartOS package

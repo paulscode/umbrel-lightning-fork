@@ -121,6 +121,37 @@
           </span>
         </div>
 
+        <div
+          class="d-flex justify-content-between align-items-center mb-3"
+          v-if="channel.status === 'Opening' && confirmationsLeft > 0"
+        >
+          <span class="text-muted">Confirmations</span>
+          <span class="font-bold">{{ confirmationsSoFar }} so far</span>
+        </div>
+
+        <div
+          class="d-flex justify-content-between align-items-center mb-3"
+          v-if="fundingTxid"
+        >
+          <span class="text-muted">Funding Transaction</span>
+          <tx-link :txid="fundingTxid"></tx-link>
+        </div>
+
+        <div
+          class="d-flex justify-content-between align-items-center mb-3"
+          v-if="channel.closingTxid"
+        >
+          <span class="text-muted">Closing Transaction</span>
+          <tx-link :txid="channel.closingTxid"></tx-link>
+        </div>
+        <div
+          class="d-flex justify-content-between align-items-center mb-3"
+          v-else-if="channel.status === 'Closing'"
+        >
+          <span class="text-muted">Closing Transaction</span>
+          <small class="font-bold text-muted">Not known yet</small>
+        </div>
+
         <div class="d-flex justify-content-between align-items-center mb-3">
           <span class="text-muted">Remote Pub Key</span>
           <div class="w-75 text-right">
@@ -164,6 +195,7 @@
 
 <script>
 import Bar from "@/components/Channels/Bar";
+import TxLink from "@/components/Utility/TxLink";
 import API from "@/helpers/api";
 import getErrorMessage from "@/helpers/error-message";
 
@@ -180,6 +212,22 @@ export default {
   computed: {
     unit() {
       return this.$store.state.system.unit;
+    },
+    // The channel point is the funding outpoint, txid:index.
+    fundingTxid() {
+      const point = this.channel.channelPoint || "";
+      const txid = point.split(":")[0];
+      return /^[0-9a-fA-F]{64}$/.test(txid) ? txid : "";
+    },
+    confirmationsNeeded() {
+      return 3;
+    },
+    confirmationsLeft() {
+      const left = parseInt(this.channel.remainingConfirmations, 10);
+      return Number.isFinite(left) ? Math.max(0, left) : 0;
+    },
+    confirmationsSoFar() {
+      return Math.max(0, this.confirmationsNeeded - this.confirmationsLeft);
     },
     canCloseChannel() {
       if (
@@ -234,6 +282,7 @@ export default {
   },
   components: {
     Bar,
+    TxLink,
   },
 };
 </script>

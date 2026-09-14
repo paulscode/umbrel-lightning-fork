@@ -33,6 +33,7 @@ const state = () => ({
     pending: -1
   },
   alias: "",
+  color: "",
   pubkey: "",
   lndConnectUrls: {
     restTor: "",
@@ -154,6 +155,9 @@ const mutations = {
   setAlias(state, alias) {
     state.alias = alias;
   },
+  setColor(state, color) {
+    state.color = color;
+  },
 
   setUris(state, uris) {
     state.uris = uris;
@@ -234,6 +238,7 @@ const actions = {
       const lightningInfo = data.lightningInfo;
 
       commit("setAlias", lightningInfo.alias);
+      commit("setColor", lightningInfo.color || "");
       commit("setUris", lightningInfo.uris);
       commit("setPubKey", lightningInfo.identityPubkey);
       commit("setVersion", lightningInfo.version);

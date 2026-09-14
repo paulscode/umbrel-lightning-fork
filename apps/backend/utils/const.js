@@ -61,5 +61,24 @@ module.exports = {
   TERMS_ACKNOWLEDGE_FILE:
     process.env.TERMS_ACKNOWLEDGE_FILE || "/statuses/terms-acknowledge.json",
   EXPLORER_PORT: process.env.EXPLORER_PORT,
-  EXPLORER_HIDDEN_SERVICE: process.env.EXPLORER_HIDDEN_SERVICE
+  EXPLORER_HIDDEN_SERVICE: process.env.EXPLORER_HIDDEN_SERVICE,
+
+  // The Mempool apps the package can reach, for fee rates and transaction
+  // links. Each is offered when the wrapper set its API base (the app's web
+  // UI, whose nginx serves /api/v1/fees/recommended); the browser-facing
+  // address is a full URL (StartOS) or a port on the same host (Umbrel),
+  // with an onion address for a page opened over Tor.
+  MEMPOOL_APPS: [
+    { id: "mempool", name: "Mempool Guide", prefix: "MEMPOOL_GUIDE" },
+    { id: "mempool-pruned", name: "Mempool Pruned", prefix: "MEMPOOL_PRUNED" },
+  ]
+    .map(({ id, name, prefix }) => ({
+      id,
+      name,
+      api: process.env[`${prefix}_API`] || "",
+      uiUrl: process.env[`${prefix}_UI_URL`] || "",
+      uiPort: process.env[`${prefix}_UI_PORT`] || "",
+      hiddenService: process.env[`${prefix}_HIDDEN_SERVICE`] || "",
+    }))
+    .filter(app => /^https?:\/\//.test(app.api)),
 };

@@ -1624,6 +1624,9 @@ message PendingChannelsResponse {
 
         /// The balance in satoshis encumbered in this channel
         int64 limbo_balance = 2 [ json_name = "limbo_balance" ];
+
+        /// The transaction id of the closing transaction, once known.
+        string closing_txid = 4 [ json_name = "closing_txid" ];
     }
 
     message ClosedChannel {

@@ -295,6 +295,7 @@
           <div class="px-3 px-lg-4 mt-1" v-show="!error">
             <fee-selector
               :fee="this.fees"
+              :mempool-fees="mempoolFees"
               :disabled="!withdraw.amount || !withdraw.address"
               @change="selectWithdrawalFee"
             ></fee-selector>
@@ -366,13 +367,7 @@
                 <small>&nbsp;sat/vB</small>
                 <br />
                 <small>
-                  ~
-                  {{
-                    ((parseInt(fees.fast.total, 10) /
-                      parseInt(fees.fast.perByte, 10)) *
-                      parseInt(withdraw.selectedFee.satPerByte, 10))
-                      | satsToFiat
-                  }}
+                  ~ {{ withdraw.selectedFee.total | satsToFiat }}
                   Transaction fee
                 </small>
               </span>
@@ -386,15 +381,12 @@
             <div class="d-flex justify-content-between pb-3" v-else>
               <span class="text-muted">
                 <b>
-                  {{
-                    fees[withdraw.selectedFee.type]["total"] | unit | localize
-                  }}
+                  {{ withdraw.selectedFee.total | unit | localize }}
                 </b>
                 <small>&nbsp;{{ unit | formatUnit }}</small>
                 <br />
                 <small>
-                  ~
-                  {{ fees[withdraw.selectedFee.type]["total"] | satsToFiat }}
+                  ~ {{ withdraw.selectedFee.total | satsToFiat }}
                   Transaction fee
                 </small>
               </span>
@@ -617,6 +609,7 @@ import { mapState, mapGetters } from "vuex";
 
 import { satsToBtc, btcToSats } from "@/helpers/units.js";
 import API from "@/helpers/api";
+import { txExplorerUrl, confirmPublicExplorer } from "@/helpers/explorer";
 import getErrorMessage from "@/helpers/error-message";
 
 import CountUp from "@/components/Utility/CountUp";
@@ -641,7 +634,7 @@ export default {
         isTyping: false, //to disable button when the user changes amount/address
         isWithdrawing: false, //awaiting api response for withdrawal request?
         txHash: "", //tx hash of withdrawal tx,
-        selectedFee: { type: "normal", satPerByte: 0 }, //selected withdrawal fee
+        selectedFee: { type: "medium", speed: "normal", satPerByte: 0, total: 0 }, //selected withdrawal fee
       },
       loading: false, //overall state of the wallet, used to toggle progress bar on top of the card,
       error: "", //used to show any error occured, eg. invalid amount, enter more than 0 sats, invoice expired, etc
@@ -668,6 +661,7 @@ export default {
       unit: (state) => state.system.unit,
       chain: (state) => state.bitcoin.chain,
       localExplorerTxUrl: (state) => state.system.localExplorerUrl,
+      mempoolFees: (state) => state.bitcoin.mempoolFees,
     }),
     ...mapGetters({
       transactions: "bitcoin/transactions",
@@ -677,21 +671,11 @@ export default {
         return 0;
       }
 
-      if (this.withdraw.selectedFee.type !== "custom") {
-        const remainingBalanceInSats =
-          this.$store.state.bitcoin.balance.total -
-          this.withdraw.amount -
-          this.fees[this.withdraw.selectedFee.type].total;
-        return parseInt(remainingBalanceInSats, 10);
-      } else {
-        const remainingBalanceInSats =
-          this.$store.state.bitcoin.balance.total -
-          this.withdraw.amount -
-          (parseInt(this.fees.fast.total, 10) /
-            parseInt(this.fees.fast.perByte, 10)) *
-            parseInt(this.withdraw.selectedFee.satPerByte, 10);
-        return parseInt(Math.round(remainingBalanceInSats), 10);
-      }
+      const remainingBalanceInSats =
+        this.$store.state.bitcoin.balance.total -
+        this.withdraw.amount -
+        (Number(this.withdraw.selectedFee.total) || 0);
+      return parseInt(Math.round(remainingBalanceInSats), 10);
     },
   },
   methods: {
@@ -702,24 +686,10 @@ export default {
       return moment(timestamp).format("MMMM D, h:mm:ss a"); //used in the list of txs, eg "March 08, 2020 3:03:12 pm"
     },
     getTxExplorerUrl(txHash) {
-      if (this.localExplorerTxUrl) {
-        return `${this.localExplorerTxUrl}/tx/${txHash}`;
-      } else {
-        // mempool.space follows the SHA256d chain and would show a
-        // transaction on this chain as missing; mempool.guide follows the
-        // Bitcoin BLAKE2b chain. It has no onion service we know of.
-        return `https://mempool.guide/tx/${txHash}`;
-      }
+      return txExplorerUrl(this.localExplorerTxUrl, txHash);
     },
     openTxInExplorer(event) {
-      if (
-        !this.localExplorerTxUrl &&
-        !window.confirm(
-          "This will open your transaction details in a public explorer for the Bitcoin BLAKE2b chain (mempool.guide). Do you wish to continue?"
-        )
-      ) {
-        event.preventDefault();
-      }
+      confirmPublicExplorer(event, this.localExplorerTxUrl);
     },
     async changeMode(mode) {
       //change between different modes/screens of the wallet from - transactions (default), withdraw, withdrawan, depsoit
@@ -753,7 +723,7 @@ export default {
         isTyping: false, //to disable button when the user changes amount/address
         isWithdrawing: false,
         txHash: "",
-        selectedFee: { type: "normal", satPerByte: 0 },
+        selectedFee: { type: "medium", speed: "normal", satPerByte: 0, total: 0 },
       };
 
       this.loading = false;
@@ -779,15 +749,16 @@ export default {
             params.amt = this.withdraw.amount;
           }
 
+          // The app's rates arrive on their own; the form need not wait
+          // for an app that is slow or down.
+          this.$store.dispatch("bitcoin/getMempoolFees");
           await this.$store.dispatch("bitcoin/getFees", params);
 
           if (this.fees) {
             //show error if any
-            if (
-              this.fees[this.withdraw.selectedFee.type] &&
-              this.fees[this.withdraw.selectedFee.type].error.code
-            ) {
-              this.error = this.fees[this.withdraw.selectedFee.type].error.text;
+            const speed = this.withdraw.selectedFee.speed || "fast";
+            if (this.fees[speed] && this.fees[speed].error.code) {
+              this.error = this.fees[speed].error.text;
             } else {
               this.error = "";
             }

@@ -43,6 +43,7 @@ const state = () => ({
     { type: "loading" },
   ],
   pending: [],
+  mempoolFees: { app: "", name: "", fees: null, error: "", minRelayFeeSatPerVbyte: 0 },
   fees: {
     fast: {
       total: "--",
@@ -131,6 +132,10 @@ const mutations = {
 
   depositAddress(state, address) {
     state.depositAddress = address;
+  },
+
+  mempoolFees(state, mempoolFees) {
+    state.mempoolFees = mempoolFees;
   },
 
   fees(state, fees) {
@@ -236,6 +241,24 @@ const actions = {
 
     if (address) {
       commit("depositAddress", address);
+    }
+  },
+
+  // The rates the chosen Mempool app recommends, the ones its page shows.
+  // Without an app, or when it does not answer, the fee selector uses the
+  // node's estimate and says so.
+  async getMempoolFees({ commit }) {
+    const result = await API.get(
+      `${process.env.VUE_APP_API_BASE_URL}/v1/lnd/transaction/mempoolFees`
+    );
+    if (result && typeof result === "object") {
+      commit("mempoolFees", {
+        app: result.app || "",
+        name: result.name || "",
+        fees: result.fees || null,
+        error: result.error || "",
+        minRelayFeeSatPerVbyte: Number(result.minRelayFeeSatPerVbyte) || 0
+      });
     }
   },
 

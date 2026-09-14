@@ -55,7 +55,7 @@
     </b-row>
     <b-row>
       <b-col col cols="12" sm="6">
-        <fee-selector :fee="fee" class @change="selectFee"></fee-selector>
+        <fee-selector :fee="fee" :mempool-fees="mempoolFees" class @change="selectFee"></fee-selector>
       </b-col>
       <b-col class="d-flex" col cols="12" sm="6">
         <div class="w-100 d-flex flex-column justify-content-between">
@@ -129,8 +129,10 @@ export default {
       fundingAmount: 0,
       isOpening: false,
       selectedFee: {
-        type: "normal",
+        type: "medium",
+        speed: "normal",
         satPerByte: 0,
+        total: 0,
       },
       fee: {
         fast: {
@@ -168,12 +170,13 @@ export default {
     ...mapState({
       unit: (state) => state.system.unit,
       confirmedBtcBalance: (state) => state.bitcoin.balance.confirmed,
+      mempoolFees: (state) => state.bitcoin.mempoolFees,
     }),
   },
   methods: {
     selectFee(fee) {
-      // Remove any error shown due to fee
-      this.error = "";
+      // The estimate's error stands until the next estimate: a level with
+      // an error cannot be chosen, so a choice never clears one.
       this.selectedFee = fee;
     },
     async openChannel() {
@@ -185,21 +188,26 @@ export default {
         return;
       }
 
-      if (
-        this.selectedFee.type !== "custom" &&
-        this.fee[this.selectedFee.type].error
-      ) {
+      // The node's estimate for the level's target sizes the transaction
+      // and carries the errors that matter (funds, address, dust).
+      const sized = this.fee[this.selectedFee.speed || "fast"];
+      if (sized && sized.error) {
         this.isOpening = false;
-        this.error = this.fee[this.selectedFee.type].error;
+        this.error = sized.error;
         return;
       }
 
       this.error = "";
 
+      // When every coin goes into the channel, the amount is what is left
+      // after the fee at the chosen rate, not at the node's target rate.
+      const sweepAmount = sized
+        ? parseInt(sized.sweepAmount, 10) +
+          (parseInt(sized.total, 10) || 0) -
+          (parseInt(this.selectedFee.total, 10) || 0)
+        : 0;
       const payload = {
-        amt: this.sweep
-          ? parseInt(this.fee[this.selectedFee.type].sweepAmount, 10)
-          : parseInt(this.fundingAmount, 10),
+        amt: this.sweep ? sweepAmount : parseInt(this.fundingAmount, 10),
         name: "",
         purpose: "",
         satPerByte: parseInt(this.selectedFee.satPerByte, 10),
@@ -266,6 +274,7 @@ export default {
         if (this.fundingAmount) {
           let estimates;
 
+          this.$store.dispatch("bitcoin/getMempoolFees");
           try {
             estimates = await API.get(
               `${process.env.VUE_APP_API_BASE_URL}/v1/lnd/channel/estimateFee?confTarget=0&amt=${this.fundingAmount}&sweep=${this.sweep}`

@@ -476,9 +476,9 @@
             :disabled="receive.isGeneratingInvoice"
           ></b-input>
           <small v-if="receive.kind === 'offer'" class="d-block text-muted mb-4">
-            An offer can be paid again and again by anyone who has it. For a
-            mining pool payout, use the description the pool asks for and
-            leave the amount empty. Manage your offers from the menu.
+            Anyone holding an offer can pay it as often as they like. For a
+            pool payout, use the description the pool asks for and leave the
+            amount empty.
           </small>
           <div v-else class="mb-2"></div>
         </div>

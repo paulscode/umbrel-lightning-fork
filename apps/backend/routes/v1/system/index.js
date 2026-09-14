@@ -6,6 +6,8 @@ const diskLogic = require('logic/disk');
 const safeHandler = require("utils/safeHandler");
 const constants = require("utils/const.js");
 const umbrelOnly = require("middlewares/umbrelOnly.js");
+const mempoolLogic = require("logic/mempool.js");
+const ValidationError = require("models/errors.js").ValidationError;
 
 // Which platform hosts the dashboard, so the frontend can hide what the
 // platform provides itself. Answered before any other state is read.
@@ -72,9 +74,25 @@ router.get(
   })
 );
 
-router.get("/explorer", safeHandler(async (req, res) => res.json({
-  port: constants.EXPLORER_PORT,
-  hiddenService: constants.EXPLORER_HIDDEN_SERVICE,
-})));
+// Where transaction links go: the selected Mempool app, or the wrapper's
+// explorer setting when no app is selected.
+router.get("/explorer", safeHandler(async (req, res) =>
+  res.json(await mempoolLogic.explorer())
+));
+
+// The Mempool app used for fee rates and transaction links, and the apps
+// the wrapper can reach.
+router.get("/mempool", safeHandler(async (req, res) =>
+  res.json(await mempoolLogic.settings())
+));
+
+router.post("/mempool", safeHandler(async (req, res) => {
+  const app = req.body.app;
+  if (typeof app !== "string" || app.length > 64) {
+    throw new ValidationError("app must be the id of a Mempool app, or empty", 400);
+  }
+  await mempoolLogic.select(app);
+  res.json(await mempoolLogic.settings());
+}));
 
 module.exports = router;

@@ -27,6 +27,10 @@
               Lightning Fork
               <span class="chain-badge ml-1">Bitcoin BLAKE2b chain</span>
             </h3>
+            <div v-if="alias" class="d-flex align-items-center node-identity mb-0 mb-sm-1" :title="nodeColor ? `Node color ${nodeColor}` : ''">
+              <span class="node-color-dot mr-1" :style="{ backgroundColor: nodeColor || '#3399ff' }"></span>
+              <span class="font-weight-bold node-alias">{{ alias }}</span>
+            </div>
             <span class="text-muted text-xs-small">
               {{
                 this.lndVersion ? `Lightning Fork ${this.lndVersion.split(" commit")[0]}, an LND fork` : "..."
@@ -76,6 +80,9 @@
             >
             <b-dropdown-item href="#" v-b-modal.offers-modal
               >Lightning offers</b-dropdown-item
+            >
+            <b-dropdown-item href="#" v-b-modal.mempool-modal
+              >Mempool app</b-dropdown-item
             >
             <!-- On StartOS the service's interfaces, actions and backups
                  cover these, so the dashboard keeps to the node itself. -->
@@ -331,6 +338,7 @@
     <advanced-settings-modal v-if="showAdvancedSettingsModal" />
     <node-id-modal />
     <offers-modal />
+    <mempool-modal />
     <secret-words-modal v-if="!isStartOS" />
     <connect-wallet-modal v-if="!isStartOS" />
     <channel-backup-modal
@@ -355,6 +363,7 @@ import ToggleSwitch from "@/components/Utility/ToggleSwitch";
 import ChannelList from "@/components/Channels/List";
 import ChannelOpen from "@/components/Channels/Open";
 import OffersModal from "@/views/Home/OffersModal";
+import MempoolModal from "@/views/Home/MempoolModal";
 import ChannelManage from "@/components/Channels/Manage";
 
 import AdvancedSettingsModal from "./AdvancedSettingsModal.vue";
@@ -388,6 +397,8 @@ export default {
       maxSend: state => state.lightning.maxSend,
       numPeers: state => state.lightning.numPeers,
       alias: state => state.lightning.alias,
+      color: state => state.lightning.color,
+      authed: state => state.system.auth.authed,
       pubkey: state => state.lightning.pubkey,
       lndConnectUrls: state => state.lightning.lndConnectUrls,
       channels: state => state.lightning.channels,
@@ -420,6 +431,11 @@ export default {
         return `Will copy to ${names} once your first channel opens.`;
       }
       return `Waiting to copy to ${names}.`;
+    },
+    // The color the node announces, a hex triplet from lnd.conf; anything
+    // else is not painted.
+    nodeColor() {
+      return /^#[0-9a-fA-F]{6}$/.test(this.color || "") ? this.color : "";
     },
     isStartOS() {
       return this.platform === "startos";
@@ -552,8 +568,30 @@ export default {
       this.$store.dispatch("lightning/getTransactions");
       this.$store.dispatch("lightning/getChannels");
       this.$store.dispatch("lightning/getLndPageData");
+      this.$store.dispatch("system/getLocalExplorerUrl");
+      this.$store.dispatch("system/getMempool");
       if (!this.isStartOS) {
         this.$store.dispatch("system/getChannelBackupStatus");
+      }
+    },
+    // What changes on its own while the page is open: balances, channels
+    // and their states, transactions, sync. Requests in flight are not
+    // repeated (the API helper answers a second call for the same URL
+    // with the first), so a slow node is not asked twice.
+    refreshData() {
+      if (document.hidden || !this.authed) {
+        return;
+      }
+      this.$store.dispatch("bitcoin/getSync");
+      this.$store.dispatch("bitcoin/getBalance");
+      this.$store.dispatch("bitcoin/getTransactions");
+      this.$store.dispatch("lightning/getSync");
+      this.$store.dispatch("lightning/getTransactions");
+      this.$store.dispatch("lightning/getLndPageData");
+    },
+    onVisible() {
+      if (!document.hidden) {
+        this.refreshData();
       }
     }
   },
@@ -565,6 +603,11 @@ export default {
       () => this.$store.dispatch("bitcoin/getPrice"),
       60000
     );
+    // Balances, channels and transactions keep up with the node on their
+    // own, every ten seconds while the tab is visible, and at once when
+    // it becomes visible again.
+    this.dataInterval = window.setInterval(this.refreshData, 10000);
+    document.addEventListener("visibilitychange", this.onVisible);
 
     if (this.isStartOS) {
       // Wallet setup, LND configuration and backups are StartOS's, so the
@@ -598,6 +641,7 @@ export default {
   beforeDestroy() {
     window.clearInterval(this.dataInterval);
     window.clearInterval(this.priceInterval);
+    document.removeEventListener("visibilitychange", this.onVisible);
   },
   watch: {
     currency: {
@@ -628,6 +672,7 @@ export default {
     ChannelOpen,
     ChannelManage,
     OffersModal,
+    MempoolModal,
     AdvancedSettingsModal,
     NodeIdModal,
     SecretWordsModal,
@@ -648,6 +693,18 @@ export default {
 
 .currency-select {
   max-width: 90px;
+}
+
+.node-color-dot {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  flex: 0 0 auto;
+}
+.node-alias {
+  overflow-wrap: anywhere;
 }
 
 .btn-border {

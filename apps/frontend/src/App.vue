@@ -96,6 +96,20 @@ export default {
 
       this.loadingPollInProgress = true;
 
+      // Once the page is up, the poll's other checks are behind it, so
+      // each round asks the sign-in gate whether the session still stands.
+      // The gate's state is public and cheap. An ended session, or a
+      // password changed under the page, brings the sign-in screen back
+      // rather than leaving a page that quietly stopped updating.
+      if (this.loadingProgress > 40 && this.platformKnown) {
+        await this.$store.dispatch("system/getAuthState");
+        if (this.showLogin) {
+          this.loading = true;
+          this.loadingPollInProgress = false;
+          return;
+        }
+      }
+
       // Check if the API is up
       if (this.loadingProgress <= 40) {
         this.loadingProgress = 40;

@@ -38,6 +38,10 @@ const state = () => ({
   onionAddress: "",
   seedExists: false,
   localExplorerUrl: false,
+  explorerName: "",
+  // The Mempool app chosen for fee rates and transaction links, and the
+  // apps the wrapper can reach.
+  mempool: { selected: "", apps: [], known: false },
 });
 
 // Functions to update the state directly
@@ -89,6 +93,12 @@ const mutations = {
   },
   setLocalExplorerUrl(state, localExplorerUrl) {
     state.localExplorerUrl = localExplorerUrl;
+  },
+  setExplorerName(state, name) {
+    state.explorerName = name;
+  },
+  setMempool(state, { selected, apps }) {
+    state.mempool = { selected, apps, known: true };
   }
 };
 
@@ -287,19 +297,53 @@ const actions = {
     );
     commit("setSeedExists", seedExists);
   },
+  // Where transaction links go: the chosen Mempool app's own address (a
+  // full URL on StartOS, a port on this host on Umbrel, its onion address
+  // for a page opened over Tor), or nothing, which means the public
+  // explorer for this chain.
   async getLocalExplorerUrl({ commit }) {
-    const {port, hiddenService} = await API.get(
+    const explorer = await API.get(
       `${process.env.VUE_APP_API_BASE_URL}/v1/system/explorer`
     );
+    if (!explorer) {
+      return;
+    }
+    const { url, port, hiddenService, name } = explorer;
 
     let localExplorerUrl = false;
 
     if (window.location.origin.endsWith(".onion") && hiddenService) {
       localExplorerUrl = `http://${hiddenService}`;
+    } else if (url) {
+      localExplorerUrl = url;
     } else if (port) {
       localExplorerUrl = `${window.location.protocol}//${window.location.hostname}:${port}`;
     }
     commit("setLocalExplorerUrl", localExplorerUrl);
+    commit("setExplorerName", localExplorerUrl ? name || "" : "");
+  },
+  async getMempool({ commit }) {
+    const settings = await API.get(
+      `${process.env.VUE_APP_API_BASE_URL}/v1/system/mempool`
+    );
+    if (settings && Array.isArray(settings.apps)) {
+      commit("setMempool", settings);
+    }
+  },
+  // Resolves to "" on success, or a message.
+  async setMempool({ commit, dispatch }, app) {
+    try {
+      const response = await API.post(
+        `${process.env.VUE_APP_API_BASE_URL}/v1/system/mempool`,
+        { app }
+      );
+      commit("setMempool", response.data);
+      await dispatch("getLocalExplorerUrl");
+      return "";
+    } catch (error) {
+      const data = error.response && error.response.data;
+      return (data && (data.message || data.error)) || "Could not save the choice.";
+    }
   },
 };
 
