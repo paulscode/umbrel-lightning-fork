@@ -1257,6 +1257,9 @@ message Channel {
     directly to that key. 
     */
     bool static_remote_key = 22 [json_name = "static_remote_key"];
+
+    /// Whether the channel's signatures bind to this chain (option_unified_sigs).
+    bool unified_sigs = 1001 [json_name = "unified_sigs"];
 }
 
 
@@ -1589,6 +1592,9 @@ message PendingChannelsResponse {
         balance.
         */
         int64 remote_chan_reserve_sat = 7 [json_name = "remote_chan_reserve_sat"];
+
+        /// Whether the channel's signatures bind to this chain (option_unified_sigs).
+        bool unified_sigs = 1001 [json_name = "unified_sigs"];
     }
 
     message PendingOpenChannel {
@@ -1711,6 +1717,9 @@ message WalletBalanceResponse {
 
     /// The unconfirmed balance of a wallet(with 0 confirmations)
     int64 unconfirmed_balance = 3 [json_name = "unconfirmed_balance"];
+
+    /// Coinbase outputs not yet deep enough for a spend of them to relay.
+    int64 immature_coinbase_balance = 1001 [json_name = "immature_coinbase_balance"];
 }
 
 message ChannelBalanceRequest {

@@ -35,6 +35,7 @@ const state = () => ({
     pending: -1,
     pendingIn: -1,
     pendingOut: -1,
+    immatureCoinbase: 0,
   },
   transactions: [
     { type: "loading" },
@@ -96,6 +97,10 @@ const mutations = {
     state.balance.total = parseInt(balance.totalBalance);
     state.balance.confirmed = parseInt(balance.confirmedBalance);
     state.balance.pending = parseInt(balance.unconfirmedBalance);
+    // Coinbase outputs not yet deep enough to relay a spend of; counted in
+    // none of the balances above. Absent from daemons before .13.
+    state.balance.immatureCoinbase =
+      parseInt(balance.immatureCoinbaseBalance) || 0;
   },
 
   transactions(state, transactions) {

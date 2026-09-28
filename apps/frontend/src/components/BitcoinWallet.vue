@@ -27,6 +27,15 @@
         style="width: 140px;"
         v-else
       ></span>
+      <div
+        v-if="immatureCoinbaseInSats > 0"
+        class="text-muted small"
+        v-b-tooltip.hover.right
+        title="Coins this wallet mined are not spendable until a spend of them will relay: 6480 confirmations on this chain while the long coinbase maturity rule is deployed. They are not counted in the balance above until then."
+      >
+        + {{ immatureCoinbaseInSats | unit | localize }}
+        {{ unit | formatUnit }} mined, maturing
+      </div>
     </template>
     <div class="wallet-content">
       <!-- transition switching between different modes -->
@@ -655,6 +664,8 @@ export default {
         return state.bitcoin.balance.total;
       },
       walletBalanceInSats: (state) => state.bitcoin.balance.total,
+      immatureCoinbaseInSats: (state) =>
+        state.bitcoin.balance.immatureCoinbase || 0,
       confirmedBtcBalance: (state) => state.bitcoin.balance.confirmed,
       depositAddress: (state) => state.bitcoin.depositAddress,
       fees: (state) => state.bitcoin.fees,

@@ -583,6 +583,7 @@ const getChannels = async () => {
         channel.capacity = channel.channel.capacity;
         channel.localBalance = channel.channel.localBalance;
         channel.remoteBalance = channel.channel.remoteBalance;
+        channel.unifiedSigs = channel.channel.unifiedSigs;
   
         delete channel.channel;
   

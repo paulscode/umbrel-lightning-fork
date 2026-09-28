@@ -45,6 +45,17 @@
           >
         </div>
 
+        <!-- Only daemons from 0.21.3-beta-blake2b.13 report it. -->
+        <div
+          v-if="channel.unifiedSigs !== undefined"
+          class="d-flex justify-content-between align-items-center mb-3"
+          v-b-tooltip.hover.top
+          title="Whether this channel's signatures bind to the Bitcoin BLAKE2b chain. A node holding such a channel must not go back to a version from before 0.21.3-beta-blake2b.10, which cannot sign for it."
+        >
+          <span class="text-muted">Chain-bound Signatures</span>
+          <span class="font-bold">{{ channel.unifiedSigs ? "Yes" : "No" }}</span>
+        </div>
+
         <div class="d-flex justify-content-between align-items-center mb-3">
           <span class="text-muted">Remote Peer Alias</span>
           <div class="w-75 text-right">
