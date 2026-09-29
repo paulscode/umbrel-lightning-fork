@@ -75,13 +75,14 @@ router.get(
     try {
       result = await mempoolLogic.recommendedFees();
     } catch (error) {
-      const selected = await mempoolLogic.settings();
-      const app = selected.apps.find(a => a.id === selected.selected);
+      // Only the name is needed here; asking every app again would add
+      // their timeouts to an error that is already slow.
+      const name = await mempoolLogic.selectedName();
       result = {
-        app: selected.selected,
-        name: app ? app.name : "",
+        app: await mempoolLogic.selectedId(),
+        name,
         fees: null,
-        error: `${app ? app.name : "The Mempool app"} ${mempoolLogic.describeFetchError(error)}.`,
+        error: `${name || "The Mempool app"} ${mempoolLogic.describeFetchError(error)}.`,
       };
     }
     // The node's own floor, in sat/vB: a rate under it is refused at

@@ -114,6 +114,9 @@ export default {
       this.checked = "";
       await this.$store.dispatch("system/getMempool");
       this.choice = this.selected;
+      // The chain checks may have moved on since the page loaded: an app
+      // now known to be on the other chain no longer backs the links.
+      this.$store.dispatch("system/getLocalExplorerUrl");
     },
     async save() {
       this.saving = true;

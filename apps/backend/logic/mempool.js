@@ -125,11 +125,24 @@ function createMempool({
     }
     const hit = chains.get(app.id);
     if (hit) {
+      // A check already on its way is shared, not repeated: a page asks for
+      // the settings, the explorer and the fee rates at once.
+      if (hit.pending) {
+        return hit.pending;
+      }
       const ttl = hit.chain === "unknown" ? CHAIN_RETRY_MS : CHAIN_CACHE_MS;
       if (now() - hit.at < ttl) {
         return hit.chain;
       }
     }
+    const pending = checkChain(app, activation);
+    chains.set(app.id, { pending });
+    const chain = await pending;
+    chains.set(app.id, { at: now(), chain });
+    return chain;
+  }
+
+  async function checkChain(app, activation) {
     let chain;
     try {
       const hash = (await fetchText(
@@ -145,7 +158,6 @@ function createMempool({
     } catch (error) {
       chain = "unknown";
     }
-    chains.set(app.id, { at: now(), chain });
     return chain;
   }
 
@@ -264,7 +276,14 @@ function createMempool({
     return { app: id, name: app.name, fees };
   }
 
-  return { settings, select, explorer, recommendedFees, selectedId, chainOf };
+  // The selected app's name, without asking any app anything: for an error
+  // message about it.
+  async function selectedName() {
+    const app = findApp(await selectedId());
+    return app ? app.name : "";
+  }
+
+  return { settings, select, explorer, recommendedFees, selectedId, selectedName, chainOf };
 }
 
 // The JSON store, required lazily so the pure parts above load without

@@ -176,9 +176,7 @@ test("mainnet: an app on the other chain cannot be chosen", async () => {
 });
 
 test("mainnet: an app chosen before it was known to be on the other chain is not used", async () => {
-  const { m } = fake({ network: "mainnet", blockHash: BITCOIN });
   // As if chosen by an older dashboard, which did not check.
-  await m.select("").catch(() => {});
   const state = { mempoolApp: "mempool" };
   const m2 = createMempool({
     apps: () => APPS,
@@ -212,4 +210,44 @@ test("mainnet: an answer that is not a block hash is unknown, not other", async 
   const { m } = fake({ network: "mainnet", blockHash: "<html>Not found</html>" });
   assert.deepEqual((await m.settings()).apps.map(a => a.chain), ["unknown", "unknown"]);
   await m.select("mempool");
+});
+
+test("mainnet: checks already on their way are shared, not repeated", async () => {
+  let asked = 0;
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const m = createMempool({
+    apps: () => APPS,
+    fallbackExplorer: () => ({ port: "", hiddenService: "" }),
+    badRequest: message => new Error(message),
+    store: { read: async () => ({}), write: async () => {} },
+    fetchJson: async () => ({}),
+    fetchText: async () => { asked++; await gate; return BLAKE2B; },
+    network: () => "mainnet",
+  });
+  const both = Promise.all([m.chainOf(APPS[0]), m.chainOf(APPS[0]), m.chainOf(APPS[0])]);
+  release();
+  assert.deepEqual(await both, ["blake2b", "blake2b", "blake2b"]);
+  assert.equal(asked, 1);
+});
+
+test("mainnet: a verdict of other chain is checked again after it expires", async () => {
+  const { m, fetched, tick } = fake({ network: "mainnet", blockHash: BITCOIN });
+  await m.settings();
+  const asked = () => fetched.filter(u => u.endsWith("/api/block-height/961640")).length;
+  const first = asked();
+  tick(9 * 60 * 1000);
+  await m.settings();
+  assert.equal(asked(), first, "still cached");
+  tick(2 * 60 * 1000);
+  await m.settings();
+  assert.ok(asked() > first, "asked again once the verdict expired");
+});
+
+test("the selected app's name is given without asking any app", async () => {
+  const { m, fetched } = fake({ network: "mainnet", blockHash: BLAKE2B });
+  await m.select("mempool-pruned");
+  const before = fetched.length;
+  assert.equal(await m.selectedName(), "Mempool Pruned");
+  assert.equal(fetched.length, before);
 });

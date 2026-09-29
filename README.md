@@ -18,9 +18,12 @@ What differs from upstream:
 - Transaction links open mempool.guide, an explorer for the BLAKE2b chain,
   instead of mempool.space, which would show the transaction as missing;
   or the Mempool app the operator chooses under the menu's "Mempool app"
-  entry (Mempool or Mempool Pruned on StartOS, Mempool Pruned on Umbrel),
-  which the wrapper tells the backend how to reach (`MEMPOOL_GUIDE_*` and
-  `MEMPOOL_PRUNED_*` in the environment). The same app supplies the fee
+  entry (Mempool, Mempool Guide or Mempool Pruned), which the wrapper tells
+  the backend how to reach (`MEMPOOL_GUIDE_*` and `MEMPOOL_PRUNED_*` in the
+  environment, `*_NAME` for the name to show). Which chain a Mempool app
+  follows is its node's, so on mainnet the backend asks each for block
+  961640, the first BLAKE2b block, and will not use one that answers with
+  the other chain's. The same app supplies the fee
   rates: sending and opening channels offer Low, Medium and High, the
   rates the app's own page shows (read from its `/api/v1/fees/recommended`),
   or the node's estimate for 24, 6 and 1 blocks without an app. The node's

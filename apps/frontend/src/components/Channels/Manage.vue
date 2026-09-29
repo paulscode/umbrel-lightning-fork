@@ -186,8 +186,9 @@
               class="mb-1"
             ></input-copy>
             <small class="text-muted"
-              >This node announces no address. To open a channel to it, ask
-              its operator for one and add it after the key, as
+              >No address is known for this node, as is usual for one with
+              only private channels. To open a channel to it, ask its
+              operator for an address and add it after the key, as
               key@host:port.</small
             >
           </template>
@@ -246,13 +247,14 @@ export default {
     unit() {
       return this.$store.state.system.unit;
     },
-    // The channel point is the funding outpoint, txid:index.
+    // key@host:port for each address the peer announces.
     connectStrings() {
       const pubkey = this.channel.remotePubkey || "";
       return (this.channel.remoteAddresses || []).map(
         (addr) => `${pubkey}@${addr}`
       );
     },
+    // The channel point is the funding outpoint, txid:index.
     fundingTxid() {
       const point = this.channel.channelPoint || "";
       const txid = point.split(":")[0];

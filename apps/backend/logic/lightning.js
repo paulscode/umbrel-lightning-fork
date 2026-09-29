@@ -12,6 +12,7 @@ const bitcoindLogic = require("logic/bitcoind.js");
 
 const constants = require("utils/const.js");
 const convert = require("utils/convert.js");
+const nodeHelpers = require("utils/nodeInfo.js");
 
 const UNIMPLEMENTED_CODE = 12;
 
@@ -480,24 +481,20 @@ function getTxnHashFromChannelPoint(channelPoint) {
 }
 
 // Returns a list of all open channels.
-// Whether the daemon reports option_unified_sigs per channel, which Lightning
-// Fork does from 0.21.3-beta-blake2b.13. Earlier daemons do not send the
-// field, and the proto loader fills in false for it, which would claim that
-// every channel is not chain-bound: so it is only passed on when the daemon
-// is known to send it.
-async function daemonReportsUnifiedSigs() {
-  try {
-    const info = await lndService.getInfo();
-    const m = /-blake2b\.(\d+)/.exec(info.version || "");
-    return m !== null && parseInt(m[1], 10) >= 13;
-  } catch (err) {
-    return false;
-  }
-}
-
 const getChannels = async () => {
   try {
-    const reportsUnifiedSigs = await daemonReportsUnifiedSigs();
+    // Daemons before 0.21.3-beta-blake2b.13 do not send unified_sigs, and
+    // the proto loader fills in false for it, which would claim that every
+    // channel is not chain-bound: so it is only passed on from a daemon
+    // known to send it. Unknown if getinfo fails, which hides the row.
+    let unifiedSigsReported = false;
+    try {
+      unifiedSigsReported = nodeHelpers.reportsUnifiedSigs(
+        (await lndService.getInfo()).version
+      );
+    } catch (error) {
+      unifiedSigsReported = false;
+    }
     // const managedChannelsCall = getManagedChannels();
     const openChannelsCall = await lndService.getOpenChannels();
     const pendingChannels = await lndService.getPendingChannels();
@@ -608,25 +605,27 @@ const getChannels = async () => {
         // We might have invalid channels that dne in the onChainTxList. Skip these channels
         const knownChannel =
           chainTxns[getTxnHashFromChannelPoint(channel.channelPoint)];
+        // A channel the peer funded is not in this wallet's transactions,
+        // so its confirmations cannot be counted here; everything below
+        // still applies to it.
         if (!knownChannel) {
           channel.managed = false;
           channel.name = "";
           channel.purpose = "";
-  
-          continue;
-        }
-        const numConfirmations = knownChannel.numConfirmations;
-  
-        if (channel.type === "FORCE_CLOSING_CHANNEL") {
-          // BlocksTilMaturity is provided by Lnd for forced closing channels once they have one confirmation
-          channel.remainingConfirmations = channel.blocksTilMaturity;
-        } else if (channel.type === "PENDING_CLOSING_CHANNEL") {
-          // Lnd seams to be clearing these channels after just one confirmation and thus they never exist in this state.
-          // Defaulting to 1 just in case.
-          channel.remainingConfirmations = 1;
-        } else if (channel.type === "PENDING_OPEN_CHANNEL") {
-          channel.remainingConfirmations =
-            constants.LN_REQUIRED_CONFIRMATIONS - numConfirmations;
+        } else {
+          const numConfirmations = knownChannel.numConfirmations;
+
+          if (channel.type === "FORCE_CLOSING_CHANNEL") {
+            // BlocksTilMaturity is provided by Lnd for forced closing channels once they have one confirmation
+            channel.remainingConfirmations = channel.blocksTilMaturity;
+          } else if (channel.type === "PENDING_CLOSING_CHANNEL") {
+            // Lnd seams to be clearing these channels after just one confirmation and thus they never exist in this state.
+            // Defaulting to 1 just in case.
+            channel.remainingConfirmations = 1;
+          } else if (channel.type === "PENDING_OPEN_CHANNEL") {
+            channel.remainingConfirmations =
+              constants.LN_REQUIRED_CONFIRMATIONS - numConfirmations;
+          }
         }
       }
   
@@ -635,7 +634,7 @@ const getChannels = async () => {
       channel.remoteAlias = alias || "";
       channel.remoteAddresses = addresses || [];
 
-      if (!reportsUnifiedSigs) {
+      if (!unifiedSigsReported) {
         delete channel.unifiedSigs;
       }
   
@@ -967,23 +966,10 @@ async function getNodeAlias(pubkey) {
   }
   return {
     alias: nodeInfo.node.alias,
-    addresses: announcedAddresses(nodeInfo.node),
+    addresses: nodeHelpers.announcedAddresses(nodeInfo.node),
   };
 }
 
-// The addresses a node announces in its node_announcement, clearnet first:
-// they connect directly, where an .onion address needs Tor on the side that
-// dials. These, not the address a peer happens to be connected from, are what
-// someone opening a channel to the node has to enter; an inbound peer's
-// connection comes from a port it does not listen on.
-function announcedAddresses(node) {
-  const addrs = ((node && node.addresses) || [])
-    .map(a => a.addr)
-    .filter(Boolean);
-  const onion = a => /\.onion(:\d+)?$/i.test(a);
-
-  return addrs.filter(a => !onion(a)).concat(addrs.filter(onion));
-}
 
 function updateChannelPolicy(
   global,
