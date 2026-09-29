@@ -480,8 +480,24 @@ function getTxnHashFromChannelPoint(channelPoint) {
 }
 
 // Returns a list of all open channels.
+// Whether the daemon reports option_unified_sigs per channel, which Lightning
+// Fork does from 0.21.3-beta-blake2b.13. Earlier daemons do not send the
+// field, and the proto loader fills in false for it, which would claim that
+// every channel is not chain-bound: so it is only passed on when the daemon
+// is known to send it.
+async function daemonReportsUnifiedSigs() {
+  try {
+    const info = await lndService.getInfo();
+    const m = /-blake2b\.(\d+)/.exec(info.version || "");
+    return m !== null && parseInt(m[1], 10) >= 13;
+  } catch (err) {
+    return false;
+  }
+}
+
 const getChannels = async () => {
   try {
+    const reportsUnifiedSigs = await daemonReportsUnifiedSigs();
     // const managedChannelsCall = getManagedChannels();
     const openChannelsCall = await lndService.getOpenChannels();
     const pendingChannels = await lndService.getPendingChannels();
@@ -617,6 +633,10 @@ const getChannels = async () => {
       // Fetch remote node alias and set it
       const { alias } = await getNodeAlias(channel.remotePubkey);
       channel.remoteAlias = alias || "";
+
+      if (!reportsUnifiedSigs) {
+        delete channel.unifiedSigs;
+      }
   
       // If a managed channel exists, set the name and purpose
       // if (Object.prototype.hasOwnProperty.call(managedChannels, channel.channelPoint)) {

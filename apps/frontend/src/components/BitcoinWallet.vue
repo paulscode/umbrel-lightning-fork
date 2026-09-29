@@ -31,10 +31,10 @@
         v-if="immatureCoinbaseInSats > 0"
         class="text-muted small"
         v-b-tooltip.hover.right
-        title="Coins this wallet mined are not spendable until a spend of them will relay: 6480 confirmations on this chain while the long coinbase maturity rule is deployed. They are not counted in the balance above until then."
+        title="Coinbase outputs paid to this wallet, for example by a mining pool, are not spendable until a spend of them will relay: 6480 confirmations on this chain while the long coinbase maturity rule is deployed. They are not counted in the balance above until then."
       >
         + {{ immatureCoinbaseInSats | unit | localize }}
-        {{ unit | formatUnit }} mined, maturing
+        {{ unit | formatUnit }} from mining, maturing
       </div>
     </template>
     <div class="wallet-content">
