@@ -25,15 +25,35 @@
             this chain, after asking.
           </small>
         </b-form-radio>
-        <b-form-radio v-for="app in apps" :key="app.id" :value="app.id" class="mb-2">
+        <b-form-radio
+          v-for="app in apps"
+          :key="app.id"
+          :value="app.id"
+          :disabled="app.chain === 'other'"
+          class="mb-2"
+        >
           <span class="font-bold">{{ app.name }}</span>
           <small class="d-block text-muted">{{ describe(app) }}</small>
+          <small v-if="app.chain === 'other'" class="d-block text-danger">
+            Follows the other chain: its node has not upgraded to BLAKE2b, so
+            its fee rates and transactions are Bitcoin's. Point it at a BLAKE2b
+            node to use it here.
+          </small>
+          <small v-else-if="app.chain === 'unknown'" class="d-block text-warning">
+            Did not say which chain it follows. It can still be chosen, but
+            check that its node is on the BLAKE2b chain.
+          </small>
         </b-form-radio>
       </b-form-radio-group>
+      <b-alert :show="selectedOnOtherChain" variant="warning" class="small">
+        {{ selectedName }} follows the other chain, so its fee rates and links
+        are not being used: the dashboard is on your node's own estimate until
+        you choose again.
+      </b-alert>
       <p v-if="known && !apps.length" class="text-muted small">
-        No Mempool app was found. Install
-        {{ isStartOS ? "Mempool or Mempool Pruned" : "Mempool Pruned" }},
-        then restart Lightning Fork so it can reach the app.
+        No Mempool app was found. Install Mempool Pruned, or Mempool on a node
+        that follows the BLAKE2b chain, then restart Lightning Fork so it can
+        reach the app.
       </p>
       <b-alert :show="Boolean(error)" variant="warning" class="small">{{ error }}</b-alert>
       <b-alert :show="Boolean(checked)" variant="success" class="small">{{ checked }}</b-alert>
@@ -62,6 +82,15 @@ export default {
     };
   },
   computed: {
+    selectedApp() {
+      return this.apps.find(app => app.id === this.selected) || null;
+    },
+    selectedOnOtherChain() {
+      return Boolean(this.selectedApp && this.selectedApp.chain === "other");
+    },
+    selectedName() {
+      return this.selectedApp ? this.selectedApp.name : "";
+    },
     ...mapState({
       selected: state => state.system.mempool.selected,
       apps: state => state.system.mempool.apps,
@@ -77,7 +106,8 @@ export default {
         : app.uiPort
         ? `port ${app.uiPort} on this host`
         : "installed";
-      return `Installed: ${where}`;
+      const chain = app.chain === "blake2b" ? " · on the BLAKE2b chain" : "";
+      return `Installed: ${where}${chain}`;
     },
     async load() {
       this.error = "";

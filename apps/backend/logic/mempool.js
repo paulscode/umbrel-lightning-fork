@@ -19,6 +19,24 @@ const CACHE_MS = 10 * 1000;
 // selector would otherwise wait the full timeout on every estimate.
 const FAILURE_CACHE_MS = 30 * 1000;
 const REQUEST_TIMEOUT_MS = 5 * 1000;
+
+// Which chain a Mempool app follows, told by the one block the two chains
+// cannot agree on: the first BLAKE2b block. A Mempool app on the other chain
+// (the official app over a Bitcoin Core or pre-fork Knots node, say) answers
+// every request happily, with fee rates and transactions from the wrong
+// chain, so reaching it proves nothing. The test networks have no fixed
+// activation block, and are not checked.
+const ACTIVATION = {
+  mainnet: {
+    height: 961640,
+    hash: "0000000000000050c1e5f69672f459293be14f46e5a494e7a8c8541396f18eeb",
+  },
+};
+// A verdict stands for a while; an app that did not answer is asked again
+// sooner.
+const CHAIN_CACHE_MS = 10 * 60 * 1000;
+const CHAIN_RETRY_MS = 60 * 1000;
+const WRONG_CHAIN = "WRONG_CHAIN";
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_SANE_RATE = 100000; // sat/vB; anything above is a broken answer
 
@@ -58,14 +76,33 @@ function describeFetchError(error) {
   if (code === "ECONNREFUSED") return "refused the connection";
   if (code === "ECONNABORTED" || code === "ETIMEDOUT") return "did not answer in time";
   if (code === "ENOTFOUND" || code === "EAI_AGAIN") return "could not be found on the network";
+  if (code === WRONG_CHAIN) return "follows the other chain, not the BLAKE2b one: its fee rates and transactions are Bitcoin's. Choose another app, or the node's own estimate";
   if (error && /not a fee rate|not an object/.test(error.message)) return `gave an answer that ${error.message.replace(/^the answer /, "")}`;
   return "did not answer";
+}
+
+// A plain text answer, as the block-height endpoint gives.
+function defaultFetchText(url) {
+  const axios = require("axios");
+  return axios({
+    url,
+    method: "GET",
+    timeout: REQUEST_TIMEOUT_MS,
+    maxRedirects: 0,
+    maxContentLength: MAX_BODY_BYTES,
+    maxBodyLength: MAX_BODY_BYTES,
+    responseType: "text",
+    transformResponse: [data => data],
+  }).then(response => String(response.data));
 }
 
 function createMempool({
   apps,
   store,
   fetchJson = defaultFetchJson,
+  fetchText = defaultFetchText,
+  // The network the node runs on, which decides the block to check.
+  network = () => process.env.LND_NETWORK || "mainnet",
   now = Date.now,
   // The wrapper's explorer setting, used when no app is chosen.
   fallbackExplorer = () => ({
@@ -77,6 +114,46 @@ function createMempool({
   const known = () => (apps ? apps() : constants().MEMPOOL_APPS);
   const findApp = id => known().find(app => app.id === id) || null;
   const cache = new Map();
+  const chains = new Map();
+
+  // "blake2b", "other", "unknown" (it did not answer, or not with a block
+  // hash) or "unchecked" (a network without a fixed activation block).
+  async function chainOf(app) {
+    const activation = ACTIVATION[network()];
+    if (!activation) {
+      return "unchecked";
+    }
+    const hit = chains.get(app.id);
+    if (hit) {
+      const ttl = hit.chain === "unknown" ? CHAIN_RETRY_MS : CHAIN_CACHE_MS;
+      if (now() - hit.at < ttl) {
+        return hit.chain;
+      }
+    }
+    let chain;
+    try {
+      const hash = (await fetchText(
+        app.api.replace(/\/+$/, "") + `/api/block-height/${activation.height}`
+      )).trim().toLowerCase();
+      if (hash === activation.hash) {
+        chain = "blake2b";
+      } else if (/^[0-9a-f]{64}$/.test(hash)) {
+        chain = "other";
+      } else {
+        chain = "unknown";
+      }
+    } catch (error) {
+      chain = "unknown";
+    }
+    chains.set(app.id, { at: now(), chain });
+    return chain;
+  }
+
+  const wrongChain = app => {
+    const error = new Error(`${app.name} follows the other chain`);
+    error.code = WRONG_CHAIN;
+    return error;
+  };
 
   // The chosen app's id, or "" for none. A choice naming an app the wrapper
   // no longer offers counts as none.
@@ -87,8 +164,17 @@ function createMempool({
   }
 
   async function select(id) {
-    if (id !== "" && !findApp(id)) {
+    const app = id === "" ? null : findApp(id);
+    if (id !== "" && !app) {
       throw badRequest("Unknown Mempool app");
+    }
+    if (app && (await chainOf(app)) === "other") {
+      throw badRequest(
+        `${app.name} follows the other chain, not the BLAKE2b one: its ` +
+          "fee rates and transaction links would be Bitcoin's. It is " +
+          "connected to a Bitcoin node that has not upgraded; point it at " +
+          "a BLAKE2b node, or choose another app."
+      );
     }
     await store.write({ mempoolApp: id });
   }
@@ -102,14 +188,19 @@ function createMempool({
   });
 
   async function settings() {
-    return { selected: await selectedId(), apps: known().map(publicApp) };
+    const listed = await Promise.all(
+      known().map(async app => ({ ...publicApp(app), chain: await chainOf(app) }))
+    );
+    return { selected: await selectedId(), apps: listed };
   }
 
   // Where the page sends transaction links. Without an app, the wrapper's
   // explorer setting, which the page resolves to a port on its own host.
   async function explorer() {
     const app = findApp(await selectedId());
-    if (app) {
+    // Links into an app on the other chain would show Bitcoin's version of
+    // a transaction, or none: fall back as if no app were chosen.
+    if (app && (await chainOf(app)) !== "other") {
       return {
         app: app.id,
         name: app.name,
@@ -152,6 +243,9 @@ function createMempool({
       return { app: "", name: "", fees: null };
     }
     const app = findApp(id);
+    if ((await chainOf(app)) === "other") {
+      throw wrongChain(app);
+    }
     const hit = cache.get(id);
     if (hit && hit.fees && now() - hit.at < CACHE_MS) {
       return { app: id, name: app.name, fees: hit.fees };
@@ -170,7 +264,7 @@ function createMempool({
     return { app: id, name: app.name, fees };
   }
 
-  return { settings, select, explorer, recommendedFees, selectedId };
+  return { settings, select, explorer, recommendedFees, selectedId, chainOf };
 }
 
 // The JSON store, required lazily so the pure parts above load without
@@ -186,5 +280,6 @@ module.exports = {
   relayFloorSatPerVbyte,
   FEES_PATH,
   FEE_KEYS,
+  ACTIVATION,
   ...createMempool({ store: defaultStore }),
 };

@@ -204,7 +204,11 @@ export default {
         return `Rates from ${this.mempoolFees.name}`;
       }
       if (this.mempoolFees && this.mempoolFees.error) {
-        return `${this.mempoolFees.name || "The Mempool app"} is not answering; rates estimated by your node`;
+        const name = this.mempoolFees.name || "The Mempool app";
+        if (/other chain/.test(this.mempoolFees.error)) {
+          return `${name} follows the other chain; rates estimated by your node`;
+        }
+        return `${name} is not answering; rates estimated by your node`;
       }
       return "Rates estimated by your node";
     },

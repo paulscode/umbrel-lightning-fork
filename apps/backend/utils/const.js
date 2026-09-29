@@ -69,12 +69,15 @@ module.exports = {
   // address is a full URL (StartOS) or a port on the same host (Umbrel),
   // with an onion address for a page opened over Tor.
   MEMPOOL_APPS: [
-    { id: "mempool", name: "Mempool Guide", prefix: "MEMPOOL_GUIDE" },
+    // The StartOS package id "mempool" is both Start9's Mempool and the
+    // Mempool Guide build, so the name the wrapper passes wins; without
+    // one, both are named.
+    { id: "mempool", name: "Mempool / Mempool Guide", prefix: "MEMPOOL_GUIDE" },
     { id: "mempool-pruned", name: "Mempool Pruned", prefix: "MEMPOOL_PRUNED" },
   ]
     .map(({ id, name, prefix }) => ({
       id,
-      name,
+      name: process.env[`${prefix}_NAME`] || name,
       api: process.env[`${prefix}_API`] || "",
       uiUrl: process.env[`${prefix}_UI_URL`] || "",
       uiPort: process.env[`${prefix}_UI_PORT`] || "",

@@ -3,14 +3,14 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { createMempool, describeFetchError, relayFloorSatPerVbyte, FEES_PATH } = require("../logic/mempool.js");
+const { createMempool, describeFetchError, relayFloorSatPerVbyte, FEES_PATH, ACTIVATION } = require("../logic/mempool.js");
 
 const APPS = [
   { id: "mempool", name: "Mempool Guide", api: "http://10.0.3.7:8080/", uiUrl: "https://mempool.box.local", hiddenService: "abc.onion" },
   { id: "mempool-pruned", name: "Mempool Pruned", api: "http://10.0.3.9:8080", uiPort: "3032" },
 ];
 
-function fake({ apps = APPS, answer, fail } = {}) {
+function fake({ apps = APPS, answer, fail, network = "regtest", blockHash } = {}) {
   let clock = 1000;
   let state = {};
   const fetched = [];
@@ -27,6 +27,12 @@ function fake({ apps = APPS, answer, fail } = {}) {
       if (fail) { throw new Error(fail); }
       return answer === undefined ? { fastestFee: 15, halfHourFee: 12, hourFee: 8, economyFee: 3, minimumFee: 1 } : answer;
     },
+    fetchText: async url => {
+      fetched.push(url);
+      if (blockHash instanceof Error) { throw blockHash; }
+      return blockHash;
+    },
+    network: () => network,
     now: () => clock,
   });
   return { m, fetched, tick: ms => { clock += ms; }, state: () => state };
@@ -37,8 +43,8 @@ test("nothing selected: no app, no fees, explorer falls back", async () => {
   assert.deepEqual(await m.settings(), {
     selected: "",
     apps: [
-      { id: "mempool", name: "Mempool Guide", uiUrl: "https://mempool.box.local", uiPort: "", hiddenService: "abc.onion" },
-      { id: "mempool-pruned", name: "Mempool Pruned", uiUrl: "", uiPort: "3032", hiddenService: "" },
+      { id: "mempool", name: "Mempool Guide", uiUrl: "https://mempool.box.local", uiPort: "", hiddenService: "abc.onion", chain: "unchecked" },
+      { id: "mempool-pruned", name: "Mempool Pruned", uiUrl: "", uiPort: "3032", hiddenService: "", chain: "unchecked" },
     ],
   });
   assert.deepEqual(await m.recommendedFees(), { app: "", name: "", fees: null });
@@ -146,4 +152,64 @@ test("the node's relay floor converts to whole sat/vB without floating-point dri
   assert.equal(relayFloorSatPerVbyte(0), 0);
   assert.equal(relayFloorSatPerVbyte(undefined), 0);
   assert.equal(relayFloorSatPerVbyte("x"), 0);
+});
+
+// The chain an app follows, told by block 961640 on mainnet.
+const BLAKE2B = ACTIVATION.mainnet.hash;
+const BITCOIN = "0000000000000000000186ab4b0a15b0c2f0c3a5c7b1f0a6e3f4f1a2b3c4d5e6";
+
+test("mainnet: an app on the BLAKE2b chain is offered and used", async () => {
+  const { m, fetched } = fake({ network: "mainnet", blockHash: BLAKE2B + "\n" });
+  const listed = await m.settings();
+  assert.deepEqual(listed.apps.map(a => a.chain), ["blake2b", "blake2b"]);
+  assert.ok(fetched.includes("http://10.0.3.7:8080/api/block-height/961640"));
+  await m.select("mempool");
+  assert.equal((await m.recommendedFees()).fees.hourFee, 8);
+  assert.equal((await m.explorer()).app, "mempool");
+});
+
+test("mainnet: an app on the other chain cannot be chosen", async () => {
+  const { m } = fake({ network: "mainnet", blockHash: BITCOIN });
+  assert.deepEqual((await m.settings()).apps.map(a => a.chain), ["other", "other"]);
+  await assert.rejects(m.select("mempool"), /follows the other chain/);
+  assert.equal((await m.settings()).selected, "");
+});
+
+test("mainnet: an app chosen before it was known to be on the other chain is not used", async () => {
+  const { m } = fake({ network: "mainnet", blockHash: BITCOIN });
+  // As if chosen by an older dashboard, which did not check.
+  await m.select("").catch(() => {});
+  const state = { mempoolApp: "mempool" };
+  const m2 = createMempool({
+    apps: () => APPS,
+    fallbackExplorer: () => ({ port: "", hiddenService: "" }),
+    badRequest: message => new Error(message),
+    store: { read: async () => state, write: async () => {} },
+    fetchJson: async () => ({ fastestFee: 15, halfHourFee: 12, hourFee: 8, economyFee: 3, minimumFee: 1 }),
+    fetchText: async () => BITCOIN,
+    network: () => "mainnet",
+  });
+  await assert.rejects(m2.recommendedFees(), error => {
+    assert.match(describeFetchError(error), /follows the other chain/);
+    return true;
+  });
+  assert.equal((await m2.explorer()).app, "", "links fall back rather than point at the other chain");
+});
+
+test("mainnet: an app that does not answer the check is not refused, and is asked again later", async () => {
+  const { m, fetched, tick } = fake({ network: "mainnet", blockHash: new Error("ECONNREFUSED") });
+  assert.deepEqual((await m.settings()).apps.map(a => a.chain), ["unknown", "unknown"]);
+  await m.select("mempool-pruned");
+  const asked = fetched.filter(u => u.endsWith("/api/block-height/961640")).length;
+  await m.settings();
+  assert.equal(fetched.filter(u => u.endsWith("/api/block-height/961640")).length, asked, "cached");
+  tick(61 * 1000);
+  await m.settings();
+  assert.ok(fetched.filter(u => u.endsWith("/api/block-height/961640")).length > asked, "asked again");
+});
+
+test("mainnet: an answer that is not a block hash is unknown, not other", async () => {
+  const { m } = fake({ network: "mainnet", blockHash: "<html>Not found</html>" });
+  assert.deepEqual((await m.settings()).apps.map(a => a.chain), ["unknown", "unknown"]);
+  await m.select("mempool");
 });
