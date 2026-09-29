@@ -163,13 +163,34 @@
           <small class="font-bold text-muted">Not known yet</small>
         </div>
 
-        <div class="d-flex justify-content-between align-items-center mb-3">
-          <span class="text-muted">Remote Pub Key</span>
-          <div class="w-75 text-right">
-            <small class="font-bold" style="overflow-wrap: break-word;">{{
-              channel.remotePubkey
-            }}</small>
-          </div>
+        <div class="d-flex justify-content-between align-items-center mb-1">
+          <span class="text-muted">Connect To</span>
+        </div>
+        <!-- What to enter to open a channel to this node: its key and an
+             address it announces. A node that announces none can only be
+             given as a key. -->
+        <div class="mb-3">
+          <template v-if="connectStrings.length">
+            <input-copy
+              v-for="uri in connectStrings"
+              :key="uri"
+              size="sm"
+              :value="uri"
+              class="mb-1"
+            ></input-copy>
+          </template>
+          <template v-else>
+            <input-copy
+              size="sm"
+              :value="channel.remotePubkey"
+              class="mb-1"
+            ></input-copy>
+            <small class="text-muted"
+              >This node announces no address. To open a channel to it, ask
+              its operator for one and add it after the key, as
+              key@host:port.</small
+            >
+          </template>
         </div>
 
         <div class="d-flex justify-content-end" v-if="canCloseChannel">
@@ -207,6 +228,7 @@
 <script>
 import Bar from "@/components/Channels/Bar";
 import TxLink from "@/components/Utility/TxLink";
+import InputCopy from "@/components/Utility/InputCopy";
 import API from "@/helpers/api";
 import getErrorMessage from "@/helpers/error-message";
 
@@ -225,6 +247,12 @@ export default {
       return this.$store.state.system.unit;
     },
     // The channel point is the funding outpoint, txid:index.
+    connectStrings() {
+      const pubkey = this.channel.remotePubkey || "";
+      return (this.channel.remoteAddresses || []).map(
+        (addr) => `${pubkey}@${addr}`
+      );
+    },
     fundingTxid() {
       const point = this.channel.channelPoint || "";
       const txid = point.split(":")[0];
@@ -294,6 +322,7 @@ export default {
   components: {
     Bar,
     TxLink,
+    InputCopy,
   },
 };
 </script>

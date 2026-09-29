@@ -631,8 +631,9 @@ const getChannels = async () => {
       }
   
       // Fetch remote node alias and set it
-      const { alias } = await getNodeAlias(channel.remotePubkey);
+      const { alias, addresses } = await getNodeAlias(channel.remotePubkey);
       channel.remoteAlias = alias || "";
+      channel.remoteAddresses = addresses || [];
 
       if (!reportsUnifiedSigs) {
         delete channel.unifiedSigs;
@@ -962,9 +963,26 @@ async function getNodeAlias(pubkey) {
   try {
     nodeInfo = await lndService.getNodeInfo(pubkey, includeChannels);
   } catch (error) {
-    return { alias: "" };
+    return { alias: "", addresses: [] };
   }
-  return { alias: nodeInfo.node.alias }; // eslint-disable-line object-shorthand
+  return {
+    alias: nodeInfo.node.alias,
+    addresses: announcedAddresses(nodeInfo.node),
+  };
+}
+
+// The addresses a node announces in its node_announcement, clearnet first:
+// they connect directly, where an .onion address needs Tor on the side that
+// dials. These, not the address a peer happens to be connected from, are what
+// someone opening a channel to the node has to enter; an inbound peer's
+// connection comes from a port it does not listen on.
+function announcedAddresses(node) {
+  const addrs = ((node && node.addresses) || [])
+    .map(a => a.addr)
+    .filter(Boolean);
+  const onion = a => /\.onion(:\d+)?$/i.test(a);
+
+  return addrs.filter(a => !onion(a)).concat(addrs.filter(onion));
 }
 
 function updateChannelPolicy(
