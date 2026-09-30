@@ -147,5 +147,6 @@ if (!constants.IS_STARTOS) {
     }
   })();
 
+  channelBackup.completeSavedNextcloud();
   channelBackup.startWatcher();
 }

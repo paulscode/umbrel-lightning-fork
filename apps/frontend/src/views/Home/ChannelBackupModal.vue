@@ -83,7 +83,7 @@
 
         <!-- Nextcloud -->
         <template v-else-if="provider === 'nextcloud'">
-          <b-form-group label="WebDAV URL" description="Files → Settings → WebDAV, e.g. https://cloud.example.com/remote.php/dav/files/USER/">
+          <b-form-group label="Address" description="The address you open Nextcloud at, e.g. https://cloud.example.com. It is completed to the WebDAV address for your username when saved; a full WebDAV address (Files → Settings → WebDAV) works too.">
             <b-form-input v-model="form.url" size="sm" class="neu-input"></b-form-input>
           </b-form-group>
           <b-form-group label="Username"><b-form-input v-model="form.user" size="sm" class="neu-input"></b-form-input></b-form-group>

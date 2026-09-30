@@ -151,7 +151,7 @@ test("saves run one at a time, so a slow one cannot overwrite a fast one", async
   ]);
   assert.equal(results.length, 2);
   const onDisk = JSON.parse(fs.readFileSync(path.join(dir, "channel-backup.json"), "utf8"));
-  assert.equal(onDisk.nextcloud.url, "https://one.example/");
+  assert.equal(onDisk.nextcloud.url, "https://one.example/remote.php/dav/files/a/");
   assert.equal(onDisk.dropbox.clientId, "k9");
 });
 
@@ -160,4 +160,48 @@ test("host addresses are read the same way from a URL and a bare host", () => {
   assert.equal(cb.hostOf("HOST.Example"), "host.example");
   assert.throws(() => cb.rejectLocalOrOnion("https://127.0.0.1/", "X"), /this Umbrel/);
   assert.doesNotThrow(() => cb.rejectLocalOrOnion("https://cloud.example/", "X"));
+});
+
+test("a Nextcloud address is completed to the WebDAV form rclone requires", () => {
+  const c = (address, user, prev) => cb.nextcloudDavUrl(address, user, prev);
+  const dav = "https://cloud.example.com/remote.php/dav/files/alice/";
+  // The address users open Nextcloud at, with or without a slash.
+  assert.equal(c("https://cloud.example.com", "alice"), dav);
+  assert.equal(c("https://cloud.example.com/", "alice"), dav);
+  // A Nextcloud under a path keeps the path.
+  assert.equal(c("https://example.com/nextcloud/", "alice"),
+    "https://example.com/nextcloud/remote.php/dav/files/alice/");
+  // Partial WebDAV forms and pages inside Nextcloud are completed from their
+  // base.
+  for (const partial of ["https://cloud.example.com/remote.php/dav", "https://cloud.example.com/remote.php/webdav/",
+    "https://cloud.example.com/index.php/apps/files/", "https://cloud.example.com/apps/files/?dir=/"]) {
+    assert.equal(c(partial, "alice"), dav, partial);
+  }
+  // A complete address is kept as typed, port included.
+  assert.equal(c(dav, "alice"), dav);
+  assert.equal(c("https://cloud.example.com:8443/remote.php/dav/files/alice/sub/", "alice"),
+    "https://cloud.example.com:8443/remote.php/dav/files/alice/sub/");
+  // A user change follows into the path only when the path named the old one.
+  assert.equal(c(dav, "bob", "alice"), "https://cloud.example.com/remote.php/dav/files/bob/");
+  assert.equal(c(dav, "bob", "carol"), dav);
+  // Names are escaped; without a user nothing can be completed.
+  assert.equal(c("https://cloud.example.com", "a b@x"), "https://cloud.example.com/remote.php/dav/files/a%20b%40x/");
+  assert.equal(c("https://cloud.example.com", ""), "https://cloud.example.com");
+  assert.throws(() => c("not a url", "alice"), cb.InputError);
+});
+
+test("saving a Nextcloud target completes its address, and a saved one is completed once at start", async () => {
+  await cb.saveProvider("nextcloud", { enabled: true, url: "https://cloud.example.com", user: "alice", pass: "p", path: "lnd" });
+  const file = path.join(dir, "channel-backup.json");
+  assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).nextcloud.url, "https://cloud.example.com/remote.php/dav/files/alice/");
+
+  // A file an earlier release wrote, with the bare address.
+  const cfg = JSON.parse(fs.readFileSync(file, "utf8"));
+  cfg.nextcloud.url = "https://cloud.example.com/";
+  fs.writeFileSync(file, JSON.stringify(cfg));
+  const quiet = () => {};
+  assert.equal(cb.completeSavedNextcloud(quiet), true);
+  assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).nextcloud.url, "https://cloud.example.com/remote.php/dav/files/alice/");
+  assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).nextcloud.pass, "p", "nothing else changes");
+  assert.equal(cb.completeSavedNextcloud(quiet), false, "and only once");
 });

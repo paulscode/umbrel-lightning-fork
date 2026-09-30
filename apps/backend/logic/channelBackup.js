@@ -81,6 +81,70 @@ function writeConfig(cfg) {
   fs.renameSync(tmp, file);
 }
 
+// rclone's nextcloud vendor refuses any address that does not end in
+// /remote.php/dav/files/USER/, a form neither Nextcloud's own pages nor most
+// hosts show. So the address a user opens Nextcloud at is completed to it, as
+// the StartOS package does (startos/utils.ts nextcloudDavUrl there). An
+// address already in that form is kept, unless it names the previous user
+// and the user changed. Throws on an address that is not a URL.
+function nextcloudDavUrl(address, user, previousUser) {
+  let url;
+  try {
+    url = new URL(address);
+  } catch (error) {
+    throw new InputError("Nextcloud: that is not a valid address.");
+  }
+  if (!user) {
+    return address;
+  }
+  const existing = url.pathname.match(/^(.*\/dav\/files\/)([^/]+)(\/.*)?$/);
+  if (existing) {
+    let pathUser = "";
+    try {
+      pathUser = decodeURIComponent(existing[2]);
+    } catch (error) {
+      // A malformed escape names nobody.
+    }
+    if (previousUser && previousUser !== user && pathUser === previousUser) {
+      url.pathname = `${existing[1]}${encodeURIComponent(user)}${existing[3] || "/"}`;
+      return url.toString();
+    }
+    return address;
+  }
+  const base = url.pathname
+    .replace(/\/+$/, "")
+    .replace(/\/(remote\.php\/(dav(\/files)?|webdav)|index\.php.*|apps\/.*)$/, "");
+  return `${url.origin}${base}/remote.php/dav/files/${encodeURIComponent(user)}/`;
+}
+
+// Completes a Nextcloud address saved before completion existed, once, at
+// start. A complete address is left alone, so this writes nothing twice.
+function completeSavedNextcloud(log = m => console.log(`[channel-backup] ${m}`)) {
+  const cfg = readConfig();
+  const nc = cfg.nextcloud;
+  if (!nc || !nc.url || !nc.user) {
+    return false;
+  }
+  let url;
+  try {
+    url = nextcloudDavUrl(nc.url, nc.user);
+  } catch (error) {
+    return false;
+  }
+  if (url === nc.url) {
+    return false;
+  }
+  cfg.nextcloud = {...nc, url};
+  try {
+    writeConfig(cfg);
+  } catch (error) {
+    log(`could not complete the saved Nextcloud address: ${error.message}`);
+    return false;
+  }
+  log("completed the saved Nextcloud address to its WebDAV form");
+  return true;
+}
+
 // Whether the agent would consider a provider usable (its has_creds).
 function ready(provider, t) {
   if (!t) {
@@ -440,17 +504,19 @@ async function saveProviderNow(provider, input) {
     next = {...emptySftp(), enabled, host, user, port: prt, authType, pass, keyPem, knownHosts, hostKeyFingerprints: fingerprints, hostKeyVerified, path: folder(input.path)};
     needsHostKeyConfirmation = enabled && !hostKeyVerified && Boolean(knownHosts);
   } else if (provider === "nextcloud") {
-    const url = line(input.url, "WebDAV URL");
+    const address = line(input.url, "Nextcloud address");
+    const user = line(input.user, "Nextcloud user");
     // https whenever set, enabled or not: the app password would otherwise
     // travel in clear text, and the agent refuses the whole file anyway.
-    if (url && !/^https:\/\//i.test(url)) {
-      throw new InputError("Nextcloud: the WebDAV URL must start with https://");
+    if (address && !/^https:\/\//i.test(address)) {
+      throw new InputError("Nextcloud: the address must start with https://");
     }
-    if (url) {
-      rejectLocalOrOnion(url, "Nextcloud");
+    if (address) {
+      rejectLocalOrOnion(address, "Nextcloud");
     }
+    const url = address ? nextcloudDavUrl(address, user, prev && prev.user) : "";
     next = {
-      ...emptyNextcloud(), enabled, url, user: line(input.user, "Nextcloud user"),
+      ...emptyNextcloud(), enabled, url, user,
       pass: forget ? null : line(input.pass, "Nextcloud password", MAX_SECRET) || (prev && prev.pass) || null,
       insecureTls: Boolean(input.insecureTls), path: folder(input.path),
     };
@@ -732,5 +798,5 @@ module.exports = {
   status, readState, backupNow, pull, pulledBackup, startWatcher, stopWatcher,
   // for tests
   folder, port, line, normalizeKeyPem, scanHostKeys, validateConfig, rejectLocalOrOnion, hostOf,
-  setPubkeySource, nodePubkey,
+  setPubkeySource, nodePubkey, nextcloudDavUrl, completeSavedNextcloud,
 };
