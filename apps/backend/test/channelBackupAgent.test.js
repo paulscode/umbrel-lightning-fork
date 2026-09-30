@@ -16,14 +16,15 @@ const seen = path.join(dir, "seen");
 const stub = path.join(dir, "agent.sh");
 // Records the arguments and NODE_PUBKEY it ran with, then exits with
 // $STUB_EXIT, or 7 without a pubkey as the real agent does. The watcher form
-// (no arguments) stays up until killed.
+// (no arguments) stays up until killed, with or without a pubkey, as the real
+// one does: it records the missing identity itself after a grace period.
 fs.writeFileSync(stub, `#!/bin/sh
 printf '%s|%s\\n' "$*" "\${NODE_PUBKEY:-}" >> "${seen}"
-[ -n "\${NODE_PUBKEY:-}" ] || exit 7
 if [ -z "$*" ]; then
   trap 'exit 0' TERM
   while :; do sleep 0.05; done
 fi
+[ -n "\${NODE_PUBKEY:-}" ] || exit 7
 [ "$1" = --pull ] && echo '{"retrieved":[],"unreachable":[]}'
 exit "\${STUB_EXIT:-0}"
 `);
@@ -89,7 +90,7 @@ test("a pull with the identity passes it and reads the agent's summary", async (
   assert.deepEqual(runs(), [`--pull|${KEY}`]);
 });
 
-test("the watcher waits for the identity, then runs with it, and follows a change", async () => {
+test("the watcher runs before the identity is known, then with it, and follows a change", async () => {
   reset();
   let key = null;
   cb.setPubkeySource(async () => key);
@@ -97,15 +98,17 @@ test("the watcher waits for the identity, then runs with it, and follows a chang
   cb.startWatcher(m => logs.push(m), {retryMs: 50, checkMs: 50});
   try {
     await new Promise(r => setTimeout(r, 300));
-    assert.deepEqual(runs(), [], "no watcher runs without an identity");
+    // Without the identity it runs anyway, once, and stays up: the agent
+    // records after its grace period that it cannot copy.
+    assert.deepEqual(runs(), ["|"], "one watcher, without an identity");
     assert.ok(logs.some(m => /waiting for LND/.test(m)));
     key = KEY;
-    assert.ok(await until(() => runs().length === 1), "started once the identity is known");
-    assert.deepEqual(runs(), [`|${KEY}`]);
+    assert.ok(await until(() => runs().length === 2), "restarted once the identity is known");
+    assert.equal(runs()[1], `|${KEY}`);
     const other = "02" + "cd".repeat(32);
     key = other;
-    assert.ok(await until(() => runs().length === 2), "restarted for the new identity");
-    assert.equal(runs()[1], `|${other}`);
+    assert.ok(await until(() => runs().length === 3), "restarted for the new identity");
+    assert.equal(runs()[2], `|${other}`);
     assert.ok(logs.some(m => /identity changed/.test(m)));
   } finally {
     cb.stopWatcher();

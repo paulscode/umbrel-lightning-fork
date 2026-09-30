@@ -573,9 +573,16 @@ async function saveProviderNow(provider, input) {
 // exits 7. Null until LND answers getinfo, which needs an unlocked wallet.
 const PUBKEY = /^0[23][0-9a-f]{64}$/;
 let pubkeySource = async () => (await require("services/lnd.js").getInfo()).identityPubkey;
+const PUBKEY_TIMEOUT_MS = 10 * 1000;
 async function nodePubkey() {
   try {
-    const key = String((await pubkeySource()) || "").toLowerCase();
+    // Bounded: a hung LND must not hold up the runs queued behind this.
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error("getinfo timed out")), PUBKEY_TIMEOUT_MS);
+      timer.unref();
+    });
+    const key = String((await Promise.race([pubkeySource(), timeout]).finally(() => clearTimeout(timer))) || "").toLowerCase();
     return PUBKEY.test(key) ? key : null;
   } catch (error) {
     return null;
@@ -742,15 +749,17 @@ function startWatcher(log = m => console.log(`[channel-backup] ${m}`), {retryMs 
     if (!watcherWanted || watcher) {
       return;
     }
-    if (!pubkey) {
-      if (!waiting) {
-        log("waiting for LND to report the node's identity");
-        waiting = true;
-      }
-      setTimeout(launch, retryMs).unref();
-      return;
+    // Started without the identity too: the agent then copies nothing but
+    // records, after its grace period, that it cannot, so the status does
+    // not keep showing an old copy as current. check() restarts it with the
+    // identity once LND reports it.
+    if (!pubkey && !waiting) {
+      log("waiting for LND to report the node's identity");
+      waiting = true;
     }
-    waiting = false;
+    if (pubkey) {
+      waiting = false;
+    }
     const child = spawn("sh", [constants.BACKUP_AGENT], {env: agentEnv(pubkey), stdio: ["ignore", "inherit", "inherit"]});
     child.pubkey = pubkey;
     watcher = child;
