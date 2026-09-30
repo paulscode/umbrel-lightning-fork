@@ -25,6 +25,7 @@ const ONCE_TIMEOUT_MS = 110 * 1000;
 const PULL_TIMEOUT_MS = 180 * 1000;
 const KEYSCAN_TIMEOUT_MS = 40 * 1000;
 const WATCHER_RESTART_MS = 10 * 1000;
+const IDENTITY_CHECK_MS = 60 * 1000;
 const MAX_LINE = 2048;
 const MAX_SECRET = 16384;
 const MAX_KEY = 32768;
@@ -500,13 +501,35 @@ async function saveProviderNow(provider, input) {
 
 // ---------- the agent
 
+// The agent keeps each node's copy in <folder>/<sha256 of its identity
+// pubkey>/, and learns the pubkey from lncli on StartOS. This image has no
+// lncli, so the dashboard hands it over as NODE_PUBKEY; without it the agent
+// exits 7. Null until LND answers getinfo, which needs an unlocked wallet.
+const PUBKEY = /^0[23][0-9a-f]{64}$/;
+let pubkeySource = async () => (await require("services/lnd.js").getInfo()).identityPubkey;
+async function nodePubkey() {
+  try {
+    const key = String((await pubkeySource()) || "").toLowerCase();
+    return PUBKEY.test(key) ? key : null;
+  } catch (error) {
+    return null;
+  }
+}
+// For tests: where the pubkey comes from.
+function setPubkeySource(fn) {
+  pubkeySource = fn;
+}
+
 // Only what the agent needs: the rest of this process's environment holds
 // the wallet password and RPC credentials, which a shell script that runs a
 // large third-party binary has no business seeing.
-function agentEnv() {
+function agentEnv(pubkey) {
   const env = {PATH: process.env.PATH || "/usr/local/bin:/usr/bin:/bin", HOME: process.env.HOME || "/root", LND_DIR: lndDir()};
   if (constants.CHANNEL_BACKUP_FILE) {
     env.CHANNEL_BACKUP_FILE = constants.CHANNEL_BACKUP_FILE;
+  }
+  if (pubkey) {
+    env.NODE_PUBKEY = pubkey;
   }
   return env;
 }
@@ -515,9 +538,10 @@ function runAgent(args, timeoutMs) {
   return running(() => runAgentNow(args, timeoutMs));
 }
 
-function runAgentNow(args, timeoutMs) {
+async function runAgentNow(args, timeoutMs) {
+  const pubkey = await nodePubkey();
   return new Promise(resolve => {
-    const child = spawn("sh", [constants.BACKUP_AGENT, ...args], {env: agentEnv(), stdio: ["ignore", "pipe", "pipe"]});
+    const child = spawn("sh", [constants.BACKUP_AGENT, ...args], {env: agentEnv(pubkey), stdio: ["ignore", "pipe", "pipe"]});
     let stdout = "";
     let stderr = "";
     let timedOut = false;
@@ -578,6 +602,8 @@ async function backupNow() {
       return {ok: false, message: "A backup is already running. Try again in a moment.", state};
     case 6:
       return {ok: false, message: "The backup settings could not be read. Try again in a moment.", state};
+    case 7:
+      return {ok: false, message: "LND has not reported the node's identity yet, which names its folder on each target. Try again once LND is running.", state};
     case 124:
       return {ok: false, message: "The backup did not finish in time. Check that the target is reachable.", state};
     default: {
@@ -598,7 +624,12 @@ async function pull() {
     parsed = null;
   }
   if (!parsed) {
-    return {retrieved: [], unreachable: [], message: r.exitCode === 124 ? "The targets did not answer in time." : "The backup targets could not be consulted."};
+    const message = r.exitCode === 124
+      ? "The targets did not answer in time."
+      : r.exitCode === 7
+        ? "LND has not reported the node's identity yet, which names its folder on each target. Try again once LND is running."
+        : "The backup targets could not be consulted.";
+    return {retrieved: [], unreachable: [], message};
   }
   const retrieved = (Array.isArray(parsed.retrieved) ? parsed.retrieved : []).filter(p => PROVIDERS.includes(p)).map(p => {
     let size = 0;
@@ -627,31 +658,69 @@ function pulledBackup(provider) {
 }
 
 // The watcher: copies channel.backup whenever it or the settings change.
-// Restarted if it ever exits; ended with the process.
+// Started once LND has reported the node's identity, which the agent cannot
+// learn for itself here; restarted if it ever exits, or if the identity
+// changes under it (a wallet created again without restarting the app).
+// Ended with the process.
 let watcher = null;
 let watcherWanted = false;
-function startWatcher(log = m => console.log(`[channel-backup] ${m}`)) {
+let identityTimer = null;
+function startWatcher(log = m => console.log(`[channel-backup] ${m}`), {retryMs = WATCHER_RESTART_MS, checkMs = IDENTITY_CHECK_MS} = {}) {
   watcherWanted = true;
-  const launch = () => {
-    if (!watcherWanted) {
+  let waiting = false;
+  const launch = async () => {
+    if (!watcherWanted || watcher) {
       return;
     }
-    watcher = spawn("sh", [constants.BACKUP_AGENT], {env: agentEnv(), stdio: ["ignore", "inherit", "inherit"]});
-    watcher.on("exit", code => {
-      watcher = null;
+    const pubkey = await nodePubkey();
+    if (!watcherWanted || watcher) {
+      return;
+    }
+    if (!pubkey) {
+      if (!waiting) {
+        log("waiting for LND to report the node's identity");
+        waiting = true;
+      }
+      setTimeout(launch, retryMs).unref();
+      return;
+    }
+    waiting = false;
+    const child = spawn("sh", [constants.BACKUP_AGENT], {env: agentEnv(pubkey), stdio: ["ignore", "inherit", "inherit"]});
+    child.pubkey = pubkey;
+    watcher = child;
+    child.on("exit", code => {
+      if (watcher === child) {
+        watcher = null;
+      }
       if (watcherWanted) {
-        log(`watcher exited (${code}); restarting in ${WATCHER_RESTART_MS / 1000}s`);
-        setTimeout(launch, WATCHER_RESTART_MS).unref();
+        log(`watcher exited (${code}); restarting in ${retryMs / 1000}s`);
+        setTimeout(launch, retryMs).unref();
       }
     });
-    watcher.on("error", error => log(`watcher could not start: ${error.message}`));
+    child.on("error", error => log(`watcher could not start: ${error.message}`));
   };
+  const check = async () => {
+    const running = watcher;
+    if (!running) {
+      return;
+    }
+    const pubkey = await nodePubkey();
+    if (pubkey && pubkey !== running.pubkey && watcher === running) {
+      log("the node's identity changed; restarting the watcher");
+      running.kill("SIGTERM");
+    }
+  };
+  clearInterval(identityTimer);
+  identityTimer = setInterval(check, checkMs);
+  identityTimer.unref();
   launch();
   return stopWatcher;
 }
 
 function stopWatcher() {
   watcherWanted = false;
+  clearInterval(identityTimer);
+  identityTimer = null;
   if (watcher) {
     watcher.kill("SIGTERM");
   }
@@ -663,4 +732,5 @@ module.exports = {
   status, readState, backupNow, pull, pulledBackup, startWatcher, stopWatcher,
   // for tests
   folder, port, line, normalizeKeyPem, scanHostKeys, validateConfig, rejectLocalOrOnion, hostOf,
+  setPubkeySource, nodePubkey,
 };

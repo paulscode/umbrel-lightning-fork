@@ -14,7 +14,8 @@
         <code>channel.backup</code>. Give one place to keep it, and it is copied
         there every time your channels change. The copy is encrypted by LND
         with a key from your seed; the provider sees when it changes, not what
-        it holds.
+        it holds. Each node keeps its copy in a folder of its own inside the
+        one you name, so several nodes can share one account.
       </p>
 
       <!-- Status -->
@@ -67,7 +68,7 @@
           <b-form-group v-else label="OpenSSH private key" :description="(stored.sftp && stored.sftp.hasKey ? 'A key is stored. Leave blank to keep it. ' : '') + 'Without a passphrase; the server must know its public key.'">
             <b-form-textarea v-model="form.keyPem" rows="4" size="sm" class="neu-input font-monospace" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></b-form-textarea>
           </b-form-group>
-          <b-form-group label="Folder" description="Relative to the user's home on the server."><b-form-input v-model="form.path" size="sm" class="neu-input"></b-form-input></b-form-group>
+          <b-form-group label="Folder" description="Relative to the directory an SFTP login starts in: the home directory on most servers, elsewhere on a NAS or a chrooted account. Connect with an SFTP client and run pwd to see it."><b-form-input v-model="form.path" size="sm" class="neu-input"></b-form-input></b-form-group>
           <div v-if="stored.sftp && stored.sftp.hostKeyFingerprints" class="status-box mb-3">
             <small class="d-block font-weight-bold">The server identified itself as</small>
             <small class="d-block pre-wrap font-monospace">{{ stored.sftp.hostKeyFingerprints }}</small>

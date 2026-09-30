@@ -46,7 +46,12 @@ What differs from upstream:
   Umbrel only; StartOS has its own actions for the same agent), with the
   SFTP host-key confirmation and the OAuth code exchange the StartOS action
   has. Secrets stay in `channel-backup.json` beside LND's data and never
-  reach the browser.
+  reach the browser. With an agent from lightning-fork-startos `dde0512`
+  on, each node's copy goes to its own folder,
+  `<folder>/<sha256 of the identity pubkey>/channel.backup`; this image has
+  no lncli, so the backend passes the pubkey from `GetInfo` as
+  `NODE_PUBKEY` and starts the watcher once LND has reported it. A restore
+  also finds a copy an earlier agent left at `<folder>/channel.backup`.
 - Fiat amounts priced for this chain. Upstream asked mempool.space for the
   BTC price, which is the SHA256d coin's. This asks neoxa.exchange, where
   BTCB2 trades (its BTCB2/USDC market), and converts dollars to other
