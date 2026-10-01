@@ -731,10 +731,11 @@ function pulledBackup(provider) {
 }
 
 // The watcher: copies channel.backup whenever it or the settings change.
-// Started once LND has reported the node's identity, which the agent cannot
-// learn for itself here; restarted if it ever exits, or if the identity
-// changes under it (a wallet created again without restarting the app).
-// Ended with the process.
+// Started at once, with the node's identity when LND has reported it and
+// without it otherwise, in which case the agent records after its grace
+// period that it cannot copy; restarted if it ever exits, or when the
+// identity appears or changes under it (a wallet created again without
+// restarting the app). Ended with the process.
 let watcher = null;
 let watcherWanted = false;
 let identityTimer = null;
