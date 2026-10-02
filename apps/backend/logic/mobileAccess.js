@@ -11,7 +11,9 @@
 // app proxy wants an Umbrel login. So the dashboard serves the API alone on
 // a port of its own, MOBILE_TLS_PORT, with a certificate from an authority
 // it makes and keeps (utils/x509.js); the store publishes that port on the
-// LAN as MOBILE_PUBLIC_PORT and gives it an onion, MOBILE_ONION.
+// LAN as MOBILE_PUBLIC_PORT and gives it an onion. The onion is read from
+// Tor's hostname file (MOBILE_ONION_FILE) when it is asked for, since Tor
+// writes it after the app first starts; MOBILE_ONION is the fallback.
 const fs = require("fs");
 const path = require("path");
 const x509 = require("../utils/x509.js");
@@ -125,6 +127,20 @@ function hostOf(hostHeader) {
   return host.replace(/:\d+$/, "");
 }
 
+const ONION_RE = /^[a-z2-7]{56}\.onion$/;
+
+// The onion in front of the API's own listener (Umbrel), or null.
+function ownOnion(env = process.env) {
+  const candidates = [env.MOBILE_ONION_FILE ? readText(env.MOBILE_ONION_FILE) : null, env.MOBILE_ONION];
+  for (const value of candidates) {
+    const onion = String(value || "").trim().toLowerCase();
+    if (ONION_RE.test(onion)) {
+      return onion;
+    }
+  }
+  return null;
+}
+
 const isIpv4 = (host) => /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
 
 function readEndpointsFile(env) {
@@ -162,9 +178,9 @@ function endpoints(req, env = process.env) {
     } else if (requestHost && !requestHost.endsWith(".onion") && requestHost !== "localhost" && requestHost.endsWith(".local")) {
       lanUrl = `https://${requestHost}:${port}`;
     }
-    const onion = (env.MOBILE_ONION || "").trim().toLowerCase();
+    const onion = ownOnion(env);
     return {
-      onionUrl: /^[a-z2-7]{56}\.onion$/.test(onion) ? `https://${onion}` : null,
+      onionUrl: onion ? `https://${onion}` : null,
       lanUrl,
       lanIp,
     };
@@ -217,6 +233,7 @@ module.exports = {
   ensureAuthority,
   ensureServerCert,
   rootCaPem,
+  ownOnion,
   endpoints,
   hostOf,
 };

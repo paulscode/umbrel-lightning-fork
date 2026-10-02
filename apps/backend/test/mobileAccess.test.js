@@ -33,6 +33,23 @@ test("Umbrel: the API's own port on the address the page was opened at", () => {
   assert.equal(viaTor.lanUrl, "https://umbrel.local:7157");
 });
 
+test("Umbrel: the onion is read from Tor's hostname file when asked for", () => {
+  const dir = tmpdir();
+  const file = path.join(dir, "hostname");
+  const env = { MOBILE_TLS_PORT: "3443", MOBILE_PUBLIC_PORT: "7157", MOBILE_ONION_FILE: file, MOBILE_ONION: "" };
+  // Not published yet: the LAN only.
+  assert.equal(access.endpoints({ headers: {} }, env).onionUrl, null);
+  // Tor writes it later; the next pairing has it, with no restart.
+  fs.writeFileSync(file, ONION + "\n");
+  assert.equal(access.endpoints({ headers: {} }, env).onionUrl, `https://${ONION}`);
+  assert.equal(access.ownOnion(env), ONION);
+  // Something else in the file is not an onion; the variable is the fallback.
+  fs.writeFileSync(file, "garbage\n");
+  assert.equal(access.ownOnion(env), null);
+  const other = "c".repeat(56) + ".onion";
+  assert.equal(access.ownOnion({ ...env, MOBILE_ONION: other }), other);
+});
+
 test("StartOS: the package's address list; the page's own address only when it is on it", () => {
   const dir = tmpdir();
   const file = path.join(dir, "endpoints.json");

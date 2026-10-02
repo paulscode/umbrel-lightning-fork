@@ -210,7 +210,7 @@ export default {
     noOnionHint() {
       return this.$store.state.system.platform === "startos"
         ? "This dashboard has no onion address, so the phone can reach your node only on your local network. To use the app anywhere, add an onion address to the dashboard's interface in StartOS, then pair again."
-        : "Your node has no onion address for the app yet, so the phone can reach it only on your local network. Tor publishes one a few minutes after Lightning Fork is installed or updated: then restart Lightning Fork from its menu on the Umbrel home screen, and pair again.";
+        : "Your node has no onion address for the app yet, so the phone can reach it only on your local network. Tor publishes one shortly after Lightning Fork is installed; a phone paired now picks it up the next time it opens at home, or cancel and pair again in a minute.";
     }
   },
   methods: {

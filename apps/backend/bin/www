@@ -96,16 +96,13 @@ if (process.env.MOBILE_TLS_PORT) {
   const access = require("logic/mobileAccess.js");
   // The names a phone is told to use. A client that checks names as well
   // as the pinned root (the app checks the root, and accepts the node's own
-  // addresses) finds them here.
-  const names = [
-    process.env.DEVICE_DOMAIN_NAME,
-    process.env.MOBILE_ONION,
-    process.env.MOBILE_LAN_IP,
-    "localhost",
-  ].filter(Boolean);
+  // addresses) finds them here. The onion is read afresh: Tor publishes it
+  // after the app's first start.
+  const names = () =>
+    [process.env.DEVICE_DOMAIN_NAME, access.ownOnion(), process.env.MOBILE_LAN_IP, "localhost"].filter(Boolean);
   // A problem here costs the phones, not the dashboard.
   try {
-    const tls = access.ensureServerCert(names);
+    const tls = access.ensureServerCert(names());
     mobileServer = https.createServer({ key: tls.key, cert: tls.cert, minVersion: "TLSv1.2" }, require("../mobileApp"));
     // A slow or stalled client may hold a socket only so long.
     mobileServer.requestTimeout = 180000;
@@ -118,16 +115,26 @@ if (process.env.MOBILE_TLS_PORT) {
       console.error("Mobile API listener: " + error.message);
       access.setListenerProblem(error.message);
     });
-    // The server certificate is reissued before it expires, without a
-    // restart; the authority the phones pin stays the same.
-    setInterval(() => {
+    // The server certificate is reissued before it expires, and when the
+    // onion appears, without a restart; the authority the phones pin stays
+    // the same. ensureServerCert reissues only when something changed.
+    const refresh = () => {
       try {
-        const fresh = access.ensureServerCert(names);
+        const fresh = access.ensureServerCert(names());
         mobileServer.setSecureContext({ key: fresh.key, cert: fresh.cert, minVersion: "TLSv1.2" });
       } catch (error) {
         console.error("Mobile API certificate: " + error.message);
       }
-    }, 24 * 60 * 60 * 1000).unref();
+    };
+    let onion = access.ownOnion();
+    setInterval(() => {
+      const now = access.ownOnion();
+      if (now !== onion) {
+        onion = now;
+        refresh();
+      }
+    }, 60 * 1000).unref();
+    setInterval(refresh, 24 * 60 * 60 * 1000).unref();
   } catch (error) {
     console.error("Mobile API not started: " + error.message);
     access.setListenerProblem(error.message);
