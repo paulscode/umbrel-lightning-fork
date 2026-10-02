@@ -131,12 +131,28 @@ function unavailable(error) {
   return code === 14 || code === 4 || /wallet locked|waiting to start|not yet ready|in the process of starting/i.test(detailOf(error));
 }
 
-function failure(error, message) {
+// The answer to a repeat that cannot find out more yet: still uncertain,
+// and asked again next time.
+function stillUncertain() {
+  const unknown = new ValidationError(
+    "Your node can't say yet whether this went through. Check again in a little while, or look at your activity.",
+    504
+  );
+  unknown.uncertain = true;
+  unknown.recheck = true;
+  return unknown;
+}
+
+function failure(error, message, { resume = false } = {}) {
   const code = error && error.error && error.error.code;
   const detail = detailOf(error);
-  // Never got to LND: nothing was sent, and the phone may try again.
+  // Never got to LND: nothing was sent by this call. On a repeat, though,
+  // the first call may have: the answer stays uncertain.
   if (code === 14 && /failed to connect|connect failed|ECONNREFUSED|no connection established|name resolution/i.test(detail)) {
-    return new ValidationError("Your node is not answering. It may be starting up.", 503);
+    return resume ? stillUncertain() : new ValidationError("Your node is not answering. It may be starting up.", 503);
+  }
+  if (/payment is in transition|already in flight/i.test(detail)) {
+    return stillUncertain();
   }
   const cutOff =
     UNCERTAIN_GRPC_CODES.includes(code) ||
@@ -339,9 +355,11 @@ function createMobile({
       warning = warning || "No fee estimate is available yet; these are the lowest rates the network relays.";
       rates = {};
     }
-    const low = Math.max(floor, Math.ceil(num(rates.low) || floor));
-    const medium = Math.max(low, Math.ceil(num(rates.medium) || low));
-    const high = Math.max(medium, Math.ceil(num(rates.high) || medium + (rates.medium ? 0 : 1)));
+    // Never above what a send accepts.
+    const cap = (v) => Math.min(MAX_FEE_RATE, v);
+    const low = cap(Math.max(floor, Math.ceil(num(rates.low) || floor)));
+    const medium = cap(Math.max(low, Math.ceil(num(rates.medium) || low)));
+    const high = cap(Math.max(medium, Math.ceil(num(rates.high) || medium + (rates.medium ? 0 : 1))));
     return {
       source,
       warning,
@@ -673,12 +691,24 @@ function createMobile({
   // second one.
   const sendLabel = (requestId) => `lf-mobile:${requestId}`;
 
-  async function sendOnchain({ address, amountSat, sendAll, satPerVbyte, requestId }) {
+  // `resume`: the phone asks again about a send it sent before (a retry
+  // after an uncertain answer, or a send the app was killed during). The
+  // label then says whether it went out; if LND cannot be asked, the answer
+  // stays uncertain rather than "not sent".
+  async function sendOnchain({ address, amountSat, sendAll, satPerVbyte, requestId, resume = false }) {
     const parsed = checkedAddress(address);
     const rate = feeRate(satPerVbyte);
     const amount = sendAll ? 0 : satAmount(amountSat);
     if (requestId) {
-      const txs = await lnd().getOnChainTransactions();
+      let txs;
+      try {
+        txs = await lnd().getOnChainTransactions();
+      } catch (error) {
+        if (resume) {
+          throw stillUncertain();
+        }
+        throw error;
+      }
       const sent = (txs || []).find((tx) => tx.label === sendLabel(requestId));
       if (sent) {
         return { txid: sent.txHash, satPerVbyte: rate };
@@ -694,7 +724,7 @@ function createMobile({
       });
       return { txid: res.txid, satPerVbyte: rate };
     } catch (error) {
-      throw failure(error, friendlySendError(error));
+      throw failure(error, friendlySendError(error), { resume });
     }
   }
 
@@ -703,13 +733,57 @@ function createMobile({
   // `recheck`: this is the same request asked about again after an uncertain
   // answer; an invoice found paid is then this payment's outcome. A fresh
   // request for an invoice already paid is refused as such.
-  async function payLightning({ request, amountSat, payerNote, recheck = false }) {
-    const target = await decode(request);
+  // `resume` (or `recheck`, the same after an uncertain answer in this
+  // process): the phone asks again about a payment it sent before.
+  // - BOLT 11 and BOLT 12 invoices: the payment is looked up by its hash
+  //   first. Paid: that is the answer. In flight: still uncertain. Not
+  //   found or failed: it never went through, and is paid now.
+  // - Offers: their invoice, and so their hash, is fetched anew each time,
+  //   so they are tracked in the send journal (`journal`) from before the
+  //   payment starts; a resume answers from it, and never pays a second
+  //   invoice. Started without an outcome: uncertain for good.
+  async function payLightning({ request, amountSat, payerNote, recheck = false, resume = false, journal = null }) {
+    const again = recheck || resume;
+    let target;
+    try {
+      target = await decode(request);
+    } catch (error) {
+      if (again && !(error instanceof ValidationError)) {
+        throw stillUncertain();
+      }
+      throw error;
+    }
     if (target.kind === "unsupported") {
       throw bad(target.message);
     }
     if (target.kind === "onchain") {
       throw bad("This is an on-chain address; send it on-chain.");
+    }
+    if (again && target.kind !== "offer" && target.paymentHash) {
+      let found;
+      try {
+        found = await lookPayment(target.paymentHash);
+      } catch (error) {
+        throw stillUncertain();
+      }
+      if (found && found.state === "succeeded") {
+        return found.result;
+      }
+      if (found && found.state === "in_flight") {
+        throw stillUncertain();
+      }
+    }
+    if (again && target.kind === "offer" && journal) {
+      const entry = journal.get();
+      if (entry && entry.state === "done") {
+        return entry.outcome;
+      }
+      if (entry) {
+        const unknown = stillUncertain();
+        // No way to learn more: asking again would only repeat this.
+        unknown.recheck = false;
+        throw unknown;
+      }
     }
     if (target.expired) {
       throw bad("This request has expired.");
@@ -723,20 +797,7 @@ function createMobile({
     }
     try {
       if (target.kind === "bolt11") {
-        let res;
-        try {
-          res = await lnd().sendPayment(target.request, amount || undefined, amount || target.amountSat);
-        } catch (error) {
-          // Asked again about a payment that went through: say so, with
-          // its proof, instead of "already paid" as a failure.
-          if (recheck && /already paid|already succeeded/i.test(detailOf(error))) {
-            const paid = await findPayment(target.paymentHash);
-            if (paid) {
-              return paid;
-            }
-          }
-          throw error;
-        }
+        const res = await lnd().sendPayment(target.request, amount || undefined, amount || target.amountSat);
         return {
           status: "succeeded",
           paymentHash: res.paymentHash,
@@ -745,48 +806,66 @@ function createMobile({
           feeSat: num(res.feeSat),
         };
       }
+      if (target.kind === "offer" && journal) {
+        journal.start();
+      }
       const res = await offers().pay({
         offer: target.kind === "offer" ? target.request : undefined,
         invoice: target.kind === "bolt12-invoice" ? target.request : undefined,
         amountSat: amount || undefined,
         payerNote: payerNote ? String(payerNote).slice(0, 500) : undefined,
       });
-      return {
+      const result = {
         status: "succeeded",
         paymentHash: res.paymentHash,
         preimage: res.paymentPreimage,
         amountSat: Math.round(res.amountSat),
         feeSat: Math.ceil(res.feeSat),
       };
+      if (target.kind === "offer" && journal) {
+        journal.finish(result);
+      }
+      return result;
     } catch (error) {
       if (error instanceof ValidationError) {
         throw error;
       }
-      const result = failure(error, friendlyPayError(error));
-      // An offer's payment has no hash to look up until it is paid: an
-      // uncertain one stays as it is, and is never sent again.
-      if (target.kind !== "bolt11") {
-        result.recheck = false;
+      const result = failure(error, friendlyPayError(error), { resume: again });
+      if (target.kind === "offer") {
+        if (result.uncertain) {
+          // Never sent again: the journal says it started.
+          result.recheck = false;
+        } else if (journal) {
+          // The node refused it: nothing was paid, and a new try may pay.
+          journal.drop();
+        }
       }
       throw result;
     }
   }
 
-  // A payment this node made, by hash, as a pay result; null if not found
-  // or not settled.
-  async function findPayment(paymentHash) {
+  // A payment by hash: {state: "succeeded", result} | {state: "in_flight"}
+  // | {state: "failed"} | null when the node has none.
+  async function lookPayment(paymentHash) {
     const res = await lnd().listRecentPayments(500);
     const p = ((res && res.payments) || []).find((x) => x.paymentHash === paymentHash);
-    if (!p || String(p.status).toUpperCase() !== "SUCCEEDED") {
+    if (!p) {
       return null;
     }
-    return {
-      status: "succeeded",
-      paymentHash: p.paymentHash,
-      preimage: p.paymentPreimage,
-      amountSat: num(p.valueSat),
-      feeSat: num(p.feeSat),
-    };
+    const status = String(p.status).toUpperCase();
+    if (status === "SUCCEEDED") {
+      return {
+        state: "succeeded",
+        result: {
+          status: "succeeded",
+          paymentHash: p.paymentHash,
+          preimage: p.paymentPreimage,
+          amountSat: num(p.valueSat),
+          feeSat: num(p.feeSat),
+        },
+      };
+    }
+    return { state: status === "FAILED" ? "failed" : "in_flight" };
   }
 
   // An address to receive on-chain. The last unused one unless `fresh`.

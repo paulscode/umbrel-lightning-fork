@@ -472,3 +472,76 @@ test("activity: transactions, payments and settled invoices, newest first", asyn
   assert.equal(items[0].description, "tip");
   assert.equal(items.find((i) => i.id === "pay:p1").description, "coffee", "from the paid invoice");
 });
+
+function memoryJournal() {
+  let entry = null;
+  return {
+    get: () => entry,
+    start: () => (entry = { state: "started" }),
+    finish: (outcome) => (entry = { state: "done", outcome }),
+    drop: () => (entry = null),
+    peek: () => entry,
+  };
+}
+
+test("asking again about an on-chain send while LND is away stays uncertain", async () => {
+  const down = new LndError("Unable to list", { code: 14, details: "failed to connect to all addresses" });
+  const { mobile } = harness({ lnd: { getOnChainTransactions: async () => { throw down; } } });
+  const args = { address: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", amountSat: 1000, satPerVbyte: 2, requestId: "req-abcdef12" };
+  await assert.rejects(() => mobile.sendOnchain({ ...args, resume: true }), (e) => e.statusCode === 504 && e.uncertain && e.recheck);
+  // A first attempt with LND away is a plain 503: nothing was sent.
+  await assert.rejects(() => mobile.sendOnchain(args), (e) => e === down);
+});
+
+test("asking again about an invoice looks for the payment first, even past its expiry", async () => {
+  const paid = harness({
+    lnd: {
+      listRecentPayments: async () => ({ payments: [{ paymentHash: "aa".repeat(32), status: "SUCCEEDED", paymentPreimage: "cc".repeat(32), valueSat: "2500", feeSat: "1" }] }),
+      sendPayment: async () => { throw new Error("must not pay again"); },
+    },
+  });
+  const res = await paid.mobile.payLightning({ request: "lnbc1old", resume: true });
+  assert.equal(res.status, "succeeded");
+  const flying = harness({
+    lnd: { listRecentPayments: async () => ({ payments: [{ paymentHash: "aa".repeat(32), status: "IN_FLIGHT" }] }) },
+  });
+  await assert.rejects(() => flying.mobile.payLightning({ request: "lnbc25u1pfoo", resume: true }), (e) => e.statusCode === 504 && e.recheck);
+  // Not found and expired: it never went through.
+  const none = harness({ lnd: { listRecentPayments: async () => ({ payments: [] }) } });
+  await assert.rejects(() => none.mobile.payLightning({ request: "lnbc1old", resume: true }), /expired/);
+});
+
+test("an offer is journalled before paying, and a resume never pays it twice", async () => {
+  let pays = 0;
+  const journal = memoryJournal();
+  const { mobile } = harness({
+    offers: {
+      pay: async () => {
+        pays++;
+        throw new LndError("Unable to pay offer", { code: 14, details: "Connection dropped" });
+      },
+    },
+  });
+  await assert.rejects(() => mobile.payLightning({ request: "lno1qany", amountSat: 5, journal }), (e) => e.uncertain && e.recheck === false);
+  assert.equal(journal.peek().state, "started");
+  await assert.rejects(() => mobile.payLightning({ request: "lno1qany", amountSat: 5, journal, resume: true }), (e) => e.uncertain && e.recheck === false);
+  assert.equal(pays, 1, "not paid again");
+});
+
+test("a journalled offer that went through answers a resume with its outcome; a refused one is dropped", async () => {
+  const journal = memoryJournal();
+  const ok = harness();
+  const first = await ok.mobile.payLightning({ request: "lno1qany", amountSat: 7, journal });
+  const again = await ok.mobile.payLightning({ request: "lno1qany", amountSat: 7, journal, resume: true });
+  assert.deepEqual(again, first);
+  const refused = memoryJournal();
+  const no = harness({ offers: { pay: async () => { throw new LndError("Unable to pay offer", { details: "no route found" }); } } });
+  await assert.rejects(() => no.mobile.payLightning({ request: "lno1qany", amountSat: 7, journal: refused }), /No route/);
+  assert.equal(refused.peek(), null, "nothing was paid: a new try may pay");
+});
+
+test("fee rates never exceed what a send accepts", async () => {
+  const { mobile } = harness({ mempool: { recommendedFees: async () => ({ name: "Mempool", fees: { fastestFee: 5000, halfHourFee: 3000, hourFee: 1500 } }) } });
+  const f = await mobile.fees();
+  assert.deepEqual([f.low.satPerVbyte, f.medium.satPerVbyte, f.high.satPerVbyte], [1000, 1000, 1000]);
+});

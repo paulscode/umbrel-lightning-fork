@@ -14,6 +14,12 @@ const app = express();
 app.set("case sensitive routing", true);
 app.disable("x-powered-by");
 app.use(bodyParser.json({ limit: "64kb" }));
+app.use((error, req, res, next) => {
+  if (error && error.type === "entity.parse.failed") {
+    return res.status(400).json({ error: "The request is not valid JSON" });
+  }
+  return next(error);
+});
 app.use(camelCaseReqMiddleware);
 app.use(morgan(logger.morganConfiguration));
 app.use((req, res, next) => {

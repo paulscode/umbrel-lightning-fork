@@ -51,6 +51,14 @@ const app = express();
 app.set("case sensitive routing", true);
 
 app.use(bodyParser.json());
+// Unreadable JSON sent to the mobile API is answered in its own form,
+// {error}, like every other mobile answer.
+app.use("/api/v1", (error, req, res, next) => {
+  if (error && error.type === "entity.parse.failed") {
+    return res.status(400).json({ error: "The request is not valid JSON" });
+  }
+  return next(error);
+});
 app.use(bodyParser.urlencoded({ extended: true }));
 
 app.use(requestCorrelationMiddleware);

@@ -8,9 +8,11 @@ Everything is JSON (booleans are JSON `true`/`false`; nothing else counts as
 true). Amounts are whole satoshis, times are Unix seconds,
 and every error is `{"error": "<a sentence for the user>"}` with an HTTP
 status: 400 for a request the node refuses (with the reason), 401 for a
-missing, wrong or removed key, 404 for an unknown call or object, 429 after
-repeated bad keys or pairing codes, 503 when LND is not answering or its
-wallet is locked.
+missing, wrong or removed key, 404 for an unknown call or object, 422 for a
+request id reused for a different request, 429 after repeated bad keys or
+pairing codes, 503 when LND is not answering or its wallet is locked
+(nothing was sent), and 504 with `"uncertain": true` when a send was cut off
+and may have gone through (see Request ids).
 
 ## Where it is served
 
@@ -74,6 +76,7 @@ Every other call takes the key as `Authorization: Bearer lf_…`.
 | Call | Body or query | Answer |
 |---|---|---|
 | `GET /bootstrap` | | `{serverId, apiVersion, deviceId, label, node}` |
+| `POST /unpair` | | `{unpaired: true}`; the phone removes itself, its key stops at once |
 | `GET /endpoints` | | `{onionUrl, lanUrl, lanIp, caPem, caSha256}`, the current addresses |
 | `GET /wallet` | | `{onchain: {confirmedSat, unconfirmedSat, lockedSat, reservedSat}, lightning: {outboundSat, inboundSat, pendingOutboundSat}, syncedToChain, blockHeight, updatedAt}` |
 | `GET /fees` | | `{source: {kind, name}, warning, minimumSatPerVbyte, low, medium, high}`, each rate `{satPerVbyte, label, eta}` |
@@ -88,7 +91,7 @@ Every other call takes the key as `Authorization: Bearer lf_…`.
 | `GET /activity` | `?limit=1..100` | `{items: [{id, kind, direction, amountSat, feeSat, timestamp, status, confirmations?, description, reference}]}`, newest first |
 | `GET /price` | `?currency=USD` | `{currency, price}`, BTC in that currency, or `null` |
 | `GET /channels` | | `{channels}`, as the dashboard shows them |
-| `POST /channels/open` | `{pubKey, host?, port?, amountSat, satPerVbyte?, isPrivate?, requestId?}` | LND's answer |
+| `POST /channels/open` | `{pubKey, host?, port?, amountSat, satPerVbyte?, isPrivate?, requestId?}` | `{fundingTxid, outputIndex, opening: true}` |
 | `POST /channels/close` | `{channelPoint, force?, requestId?}` | `{closing: true}` |
 | `GET /peers` | | `{peers}` |
 | `POST /peers/connect` | `{address}` (`pubkey@host:port`) | |
@@ -134,22 +137,31 @@ the same request after a dashboard restart finds the transaction instead
 of making another.
 
 A send cut off before the node answered (the connection to LND dropped,
-or timed out) is a 504 with `"uncertain": true`: the money may have
-moved. Ask again with the same id rather than a new one: for an on-chain
-send or a BOLT 11 payment the node then finds out (by the wallet label, by
-the payment hash) and answers with the outcome. An offer has no way to be
-looked up until it is paid, so its uncertain answer stands for the day the
-id is kept; check the activity. A 503 means LND could not be reached and
-nothing was sent. A client that lost
-the answer resends with the same id; a new attempt after a failure the user
-has seen uses a new one.
+or timed out) is a 504 with `"uncertain": true`: the money may have moved.
+Ask again with the same id and the same body plus `"resume": true` (left
+out of the comparison of bodies), never with a new id. The node then finds
+out, and keeps finding out across its own restarts:
+
+- an on-chain send by the wallet label it was sent with
+  (`lf-mobile:<requestId>`);
+- a BOLT 11 or BOLT 12 invoice by its payment hash, before any check of
+  the invoice's expiry: paid gives the payment's proof, in flight stays
+  504, not found or failed is paid now (it never went through);
+- an offer from a journal written before the payment starts
+  (`mobile-sends.json` beside the dashboard's state, kept a week): a
+  recorded outcome is returned; started without an outcome stays 504 for
+  good, and is never paid again. Check the activity.
+
+While the node cannot be asked (LND restarting), a resume answers 504
+again, not 503: only a first attempt can be told "nothing was sent".
+`resume` without an earlier attempt simply sends.
 
 ## Managing devices (web session)
 
 | Call | |
 |---|---|
 | `GET /v1/devices` | `{devices: [{id, label, status, created, lastUsed, lastTransport, enrollExpires}]}` |
-| `POST /v1/devices` | starts a pairing: `{device, pairing, qr}` |
+| `POST /v1/devices` | starts a pairing: `{device, pairing, qr, expiresInMs}`; 503 while the mobile listener is not serving |
 | `POST /v1/devices/<id>/label` (or `PATCH /v1/devices/<id>`) | `{label}` |
 | `DELETE /v1/devices/<id>` | removes it; its key stops working at once. `?pending=1` removes it only if it has not paired yet |
 

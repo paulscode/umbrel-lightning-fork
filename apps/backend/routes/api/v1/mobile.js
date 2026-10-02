@@ -18,6 +18,7 @@ const priceLogic = require("logic/price.js");
 const { ValidationError, LndError } = require("models/errors.js");
 const { createDeviceAuth, createFailureLimiter } = require("middlewares/deviceAuth.js");
 const { createIdempotency } = require("utils/idempotency.js");
+const { createSendJournal } = require("utils/sendJournal.js");
 const x509 = require("utils/x509.js");
 const logger = require("utils/logger.js");
 
@@ -45,9 +46,26 @@ const yes = (value) => value === true;
 // Runs a money-moving call once per request id. The id is bound to the call
 // and its parameters, so a reused id cannot answer for a different payment.
 function idempotent(req, fn) {
-  const { requestId, ...params } = body(req);
+  // `resume` says the phone is asking again; it is not part of what is sent.
+  const { requestId, resume, ...params } = body(req);
   const fingerprint = req.path + " " + JSON.stringify(params, Object.keys(params).sort());
   return once.run(req.device.id, requestId, fn, fingerprint);
+}
+
+// Offers' payments, kept on disk by request id (utils/sendJournal.js).
+const journal = createSendJournal();
+function journalFor(req) {
+  const { requestId } = body(req);
+  if (!requestId) {
+    return null;
+  }
+  const key = `${req.device.id}:${requestId}`;
+  return {
+    get: () => journal.get(key),
+    start: () => journal.start(key),
+    finish: (outcome) => journal.finish(key, outcome),
+    drop: () => journal.drop(key),
+  };
 }
 
 router.post(
@@ -115,6 +133,15 @@ router.get(
   })
 );
 
+// The phone removing itself (Unpair in the app, or a pairing it stopped).
+router.post(
+  "/unpair",
+  handle(async (req) => {
+    await devices.revoke(req.device.id);
+    return { unpaired: true };
+  })
+);
+
 router.get("/wallet", handle(() => mobile.wallet()));
 router.get("/fees", handle(() => mobile.fees()));
 router.post("/decode", handle((req) => mobile.decode(body(req).input)));
@@ -130,9 +157,9 @@ router.post(
 router.post(
   "/onchain/send",
   handle((req) =>
-    idempotent(req, () => {
-      const { address, amountSat, sendAll, satPerVbyte, requestId } = body(req);
-      return mobile.sendOnchain({ address, amountSat, sendAll: yes(sendAll), satPerVbyte, requestId });
+    idempotent(req, ({ recheck }) => {
+      const { address, amountSat, sendAll, satPerVbyte, requestId, resume } = body(req);
+      return mobile.sendOnchain({ address, amountSat, sendAll: yes(sendAll), satPerVbyte, requestId, resume: yes(resume) || recheck });
     })
   )
 );
@@ -141,8 +168,8 @@ router.post(
   "/lightning/pay",
   handle((req) =>
     idempotent(req, ({ recheck }) => {
-      const { request, amountSat, payerNote } = body(req);
-      return mobile.payLightning({ request, amountSat, payerNote, recheck });
+      const { request, amountSat, payerNote, resume } = body(req);
+      return mobile.payLightning({ request, amountSat, payerNote, recheck, resume: yes(resume), journal: journalFor(req) });
     })
   )
 );
@@ -251,7 +278,8 @@ router.post(
       try {
         await lightningLogic.closeChannel(match[1], Number(match[2]), yes(force));
       } catch (error) {
-        if (error.error && error.error.code === 4) {
+        const code = error.error && error.error.code;
+        if (code === 4 || (code === 14 && !/failed to connect|connect failed/i.test(String(error.error.details)))) {
           const unknown = new ValidationError("Your node did not say whether the channel is closing. Check your channels before trying again.", 504);
           unknown.uncertain = true;
           throw unknown;
