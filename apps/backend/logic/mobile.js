@@ -84,6 +84,23 @@ function btcPerKvbToSatPerVb(value) {
   return Math.round(Number(value) * 1e8) / 1000;
 }
 
+const NOT_UPGRADED =
+  "This request is from a Lightning node that has not upgraded to the BLAKE2b chain's rules, so it can't be paid from here.";
+
+// Whether a decoded invoice sets option_blake2b (bit 512 or 513), which every
+// invoice for this chain does. Unknown (no feature map) counts as set; the
+// node checks again when paying.
+function setsBlake2b(features) {
+  if (!features || typeof features !== "object") {
+    return true;
+  }
+  const bits = Object.keys(features).map(Number);
+  if (!bits.length) {
+    return true;
+  }
+  return bits.includes(512) || bits.includes(513);
+}
+
 function unsupported(message) {
   return { kind: "unsupported", message };
 }
@@ -91,6 +108,7 @@ function unsupported(message) {
 function friendlyPayError(error) {
   const detail = detailOf(error).toLowerCase();
   const rules = [
+    [/option_blake2b/, NOT_UPGRADED],
     [/self-payments not allowed|self payment/, "That request was made by this node."],
     [/invoice expired|expired/, "This request has expired."],
     [/already paid|invoice is already paid|payment.*already.*succeeded/, "This has already been paid."],
@@ -106,7 +124,9 @@ function friendlyPayError(error) {
       return message;
     }
   }
-  return (error && error.message) || "The payment failed.";
+  const raw = String((error && error.error && error.error.details) || "");
+  const base = (error && error.message) || "The payment failed";
+  return raw && !base.includes(raw) ? `${base}: ${raw}` : base;
 }
 
 function friendlySendError(error) {
@@ -285,6 +305,9 @@ function createMobile({
         throw bad("This invoice is for a different network.");
       }
       throw bad("This is not a valid Lightning invoice.");
+    }
+    if (!setsBlake2b(res.features)) {
+      throw bad(NOT_UPGRADED);
     }
     const created = num(res.timestamp);
     const expiry = num(res.expiry) || DEFAULT_INVOICE_EXPIRY;

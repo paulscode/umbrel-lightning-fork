@@ -29,6 +29,7 @@ function harness(overrides = {}) {
         throw lndError("invalid index of 1");
       }
       return {
+        features: pr.includes("stock") ? { 9: { name: "tlv-onion" }, 14: { name: "payment-addr" } } : { 512: { name: "option_blake2b" } },
         destination: pr.includes("self") ? OWN : OTHER,
         paymentHash: "aa".repeat(32),
         numSatoshis: pr.includes("zero") ? "0" : "2500",
@@ -215,6 +216,7 @@ test("decode: BOLT 11 invoices", async () => {
   assert.equal((await mobile.decode("lnbc1old")).expired, true);
   assert.equal((await mobile.decode("lnbc1self")).ours, true);
   await assert.rejects(() => mobile.decode("lnbcrt1x"), /different network/);
+  await assert.rejects(() => mobile.decode("lnbc1stock"), /has not upgraded/);
   await assert.rejects(() => mobile.decode("lnxyz"), /not a valid Lightning invoice/);
 });
 
@@ -277,6 +279,13 @@ test("paying: invoices with and without amounts, offers, and refusals", async ()
   assert.equal(offer.feeSat, 2);
   assert.deepEqual(calls.pop()[1], { offer: "lno1qany", invoice: undefined, amountSat: 1234, payerNote: "thanks" });
   await assert.rejects(() => mobile.payLightning({ request: "lno1qoursany", amountSat: 5 }), /made by this node/);
+});
+
+test("payment failures keep the node's reason when there is no sentence for it", async () => {
+  const odd = harness({ lnd: { sendPayment: async () => { throw new LndError("Unable to send lightning payment", { details: "something new" }); } } });
+  await assert.rejects(() => odd.mobile.payLightning({ request: "lnbc25u1pfoo" }), /Unable to send lightning payment: something new/);
+  const old = harness({ lnd: { sendPayment: async () => { throw new LndError("Unable to send lightning payment", { details: "invoice does not set option_blake2b" }); } } });
+  await assert.rejects(() => old.mobile.payLightning({ request: "lnbc25u1pfoo" }), /has not upgraded/);
 });
 
 test("payment failures read as sentences", async () => {
