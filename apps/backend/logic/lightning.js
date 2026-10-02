@@ -13,6 +13,7 @@ const bitcoindLogic = require("logic/bitcoind.js");
 const constants = require("utils/const.js");
 const convert = require("utils/convert.js");
 const nodeHelpers = require("utils/nodeInfo.js");
+const { towerSessions } = require("utils/watchtower.js");
 
 const UNIMPLEMENTED_CODE = 12;
 
@@ -1018,6 +1019,7 @@ async function listWatchtowers() {
   // translate pubkey of each tower to hex string
   towers.forEach(tower => {
     tower.pubkey = toHexString(tower.pubkey);
+    Object.assign(tower, towerSessions(tower));
   });
 
   return towers.sort((a, b) => a.pubkey.localeCompare(b.pubkey));

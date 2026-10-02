@@ -998,14 +998,15 @@
                     </div>
                   </div>
                   <small class="w-lg-75 d-block text-muted mt-1">
-                    Run a watchtower to help other nodes. A watchtower service
-                    monitors channels of other nodes for breaches and, in the event 
-                    of a breach, sends a complaint transaction to the blockchain 
-                    to claim back the locked funds.
+                    Run a watchtower for other Lightning Fork nodes. A watchtower
+                    monitors their channels for breaches and, in the event of a
+                    breach, broadcasts a justice transaction to claim back the
+                    locked funds.
                     <br/>
-                    If enabled, you will see your watchtower's URI below. This URI
-                    can then be shared with other nodes to allow them to add your
-                    watchtower service to their watchtower client.
+                    If enabled, you will see your watchtower's URI below, an
+                    address on Tor. Share it with other Lightning Fork nodes on
+                    0.21.3-beta-blake2b.14 or later: a stock LND node, or an
+                    earlier release, cannot use it.
                   </small>
                   <!-- if the setting is enabled locally in the UI -->
                   <div v-if="settings['watchtower.active']" class="mt-2">
@@ -1051,11 +1052,12 @@
                     </div>
                   </div>
                   <small class="w-lg-75 d-block text-muted mt-1">
-                    Connect to external watchtower services to protect your
-                    channels. If enabled, you can add external watchtower services
-                    to which your node will send surveillance information of its 
-                    channels so the watchtowers can monitor them and take action in 
-                    case of a breach.
+                    Use watchtowers run by other Lightning Fork nodes to protect
+                    your channels while your node is offline. If enabled, you can
+                    add their URIs below; your node sends them what they need to
+                    act on a breach. They must run 0.21.3-beta-blake2b.14 or
+                    later: a stock LND watchtower, or one on an earlier release,
+                    refuses this node, and shows here with no session.
                   </small>
 
                   <!-- if the setting is enabled locally in the UI -->
@@ -1086,6 +1088,20 @@
                           <b-card-header v-b-toggle="watchtower.pubkey" header-tag="header" class="watchtower-header px-2 py-1 d-flex justify-content-between align-items-center" role="tab">
                             <b-icon class="watchtower-icons when-closed" icon="chevron-right" variant="secondary"></b-icon><b-icon class="watchtower-icons when-open" icon="chevron-down" variant="secondary"></b-icon>
                             <b-form-input class="watchtower-info pl-1" plaintext :value="watchtower.pubkey"></b-form-input>
+                            <b-badge
+                              v-if="watchtower.sessions"
+                              variant="success"
+                              class="ml-2 flex-shrink-0"
+                              pill
+                            >{{ watchtower.sessions }} session{{ watchtower.sessions === 1 ? "" : "s" }}</b-badge>
+                            <b-badge
+                              v-else
+                              v-b-tooltip.hover
+                              title="This tower has not accepted a session. It must run Lightning Fork 0.21.3-beta-blake2b.14 or later; a stock LND tower, or an earlier release, refuses this node. A tower just added may need a minute."
+                              variant="warning"
+                              class="ml-2 flex-shrink-0"
+                              pill
+                            >No session</b-badge>
                             <b-icon class="watchtower-icons ml-2" icon="trash-fill" variant="secondary" @click.stop="removeWatchtower(watchtower.pubkey)"></b-icon>
                           </b-card-header>
                           <b-collapse class="watchtower-body bg-light pl-4 pr-2" :id="watchtower.pubkey" role="tabpanel">

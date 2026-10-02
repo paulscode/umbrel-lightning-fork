@@ -78,6 +78,9 @@
             <b-dropdown-item href="#" v-b-modal.node-id-modal
               >Node ID</b-dropdown-item
             >
+            <b-dropdown-item href="#" v-b-modal.peers-modal
+              >Peers</b-dropdown-item
+            >
             <b-dropdown-item href="#" v-b-modal.offers-modal
               >Lightning offers</b-dropdown-item
             >
@@ -180,12 +183,19 @@
           <div class="px-3 px-lg-4 pb-2">
             <b-row>
               <b-col col cols="6">
-                <stat
-                  title="Connections"
-                  :value="numPeers"
-                  suffix="Peers"
-                  showNumericChange
-                ></stat>
+                <div
+                  v-b-modal.peers-modal
+                  class="peers-stat"
+                  role="button"
+                  title="View peers, or connect to one"
+                >
+                  <stat
+                    title="Connections"
+                    :value="numPeers"
+                    suffix="Peers"
+                    showNumericChange
+                  ></stat>
+                </div>
               </b-col>
               <b-col col cols="6">
                 <stat
@@ -338,6 +348,7 @@
     <advanced-settings-modal v-if="showAdvancedSettingsModal" />
     <node-id-modal />
     <offers-modal />
+    <peers-modal />
     <mempool-modal />
     <secret-words-modal v-if="!isStartOS" />
     <connect-wallet-modal v-if="!isStartOS" />
@@ -363,6 +374,7 @@ import ToggleSwitch from "@/components/Utility/ToggleSwitch";
 import ChannelList from "@/components/Channels/List";
 import ChannelOpen from "@/components/Channels/Open";
 import OffersModal from "@/views/Home/OffersModal";
+import PeersModal from "@/views/Home/PeersModal";
 import MempoolModal from "@/views/Home/MempoolModal";
 import ChannelManage from "@/components/Channels/Manage";
 
@@ -672,6 +684,7 @@ export default {
     ChannelOpen,
     ChannelManage,
     OffersModal,
+    PeersModal,
     MempoolModal,
     AdvancedSettingsModal,
     NodeIdModal,
@@ -685,6 +698,15 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+// The peer count opens the Peers view; say so only on hover.
+.peers-stat {
+  cursor: pointer;
+  border-radius: 0.5rem;
+  &:hover,
+  &:focus {
+    background: rgba(127, 127, 127, 0.08);
+  }
+}
 .app-icon {
   height: 120px;
   width: 120px;

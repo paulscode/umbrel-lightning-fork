@@ -232,6 +232,34 @@ function closeChannel(fundingTxId, index, force) {
   );
 }
 
+// Connects to a peer at a host:port that is already formatted for lnd (an
+// IPv6 host in brackets). Not permanent: lnd forgets a peer it holds no
+// channel with once the connection drops.
+function connectPeer(pubKey, hostPort) {
+  const rpcPayload = {
+    addr: {
+      pubkey: pubKey,
+      host: hostPort,
+    },
+  };
+
+  return initializeRPCClient().then(({ lightning }) =>
+    promiseify(lightning, lightning.ConnectPeer, rpcPayload, "connect to peer")
+  );
+}
+
+// Disconnects from a peer. lnd refuses one it still has channels with.
+function disconnectPeer(pubKey) {
+  return initializeRPCClient().then(({ lightning }) =>
+    promiseify(
+      lightning,
+      lightning.DisconnectPeer,
+      { pub_key: pubKey },
+      "disconnect from peer"
+    )
+  );
+}
+
 // Connects this lnd node to a peer.
 function connectToPeer(pubKey, ip, port) {
   const rpcPayload = {
@@ -846,6 +874,8 @@ module.exports = {
   changePassword,
   closeChannel,
   connectToPeer,
+  connectPeer,
+  disconnectPeer,
   decodePaymentRequest,
   estimateFee,
   getChannelBalance,

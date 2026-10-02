@@ -34,7 +34,7 @@ router.post('/remove-watchtower', safeHandler(async(req, res) => {
 router.post('/remove-watchtower-address', safeHandler(async(req, res) => {
     const {pubkey, address} = req.body;
     try {
-        await lndLogic.removeWatchtower(pubkey, address);
+        await lndLogic.removeWatchtowerAddress(pubkey, address);
         res.json({success: true});
     } catch (error) {
         console.error(error);
