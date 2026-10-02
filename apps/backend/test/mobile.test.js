@@ -68,7 +68,7 @@ function harness(overrides = {}) {
       { txHash: "t2", amount: "20000", totalFees: "0", timeStamp: String(NOW - 50), numConfirmations: 0, label: "" },
     ],
     listRecentPayments: async () => ({
-      payments: [{ paymentHash: "p1", valueSat: "700", feeSat: "1", creationDate: String(NOW - 10), status: "SUCCEEDED" }],
+      payments: [{ paymentHash: "p1", paymentRequest: "lnbc7u1pfoo", valueSat: "700", feeSat: "1", creationDate: String(NOW - 10), status: "SUCCEEDED" }],
     }),
     getInvoices: async () => ({
       invoices: [
@@ -329,4 +329,5 @@ test("activity: transactions, payments and settled invoices, newest first", asyn
   assert.equal(out.feeSat, 500);
   assert.equal(items.find((i) => i.id === "tx:t2").status, "pending");
   assert.equal(items[0].description, "tip");
+  assert.equal(items.find((i) => i.id === "pay:p1").description, "coffee", "from the paid invoice");
 });

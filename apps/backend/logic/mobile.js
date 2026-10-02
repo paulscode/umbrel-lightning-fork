@@ -135,6 +135,30 @@ function createMobile({
   now = () => Math.floor(Date.now() / 1000),
 } = {}) {
   let ownPubkey = null;
+  // Descriptions of paid invoices, by payment hash: a payment does not carry
+  // its invoice's description, so it is read from the invoice once.
+  const descriptions = new Map();
+
+  async function describePayment(p) {
+    const hash = p.paymentHash;
+    if (descriptions.has(hash)) {
+      return descriptions.get(hash);
+    }
+    let text = "";
+    const request = String(p.paymentRequest || "");
+    if (request.toLowerCase().startsWith("ln") && !request.toLowerCase().startsWith("lni")) {
+      try {
+        text = (await lnd().decodePaymentRequest(request)).description || "";
+      } catch (error) {
+        text = "";
+      }
+    }
+    if (descriptions.size > 2000) {
+      descriptions.clear();
+    }
+    descriptions.set(hash, text);
+    return text;
+  }
 
   async function info() {
     const res = await lnd().getInfo();
@@ -680,6 +704,7 @@ function createMobile({
     }
     for (const p of (payments && payments.payments) || []) {
       const status = String(p.status || "").toUpperCase();
+      const description = await describePayment(p);
       items.push({
         id: `pay:${p.paymentHash}`,
         kind: "lightning",
@@ -688,7 +713,7 @@ function createMobile({
         feeSat: num(p.feeSat),
         timestamp: num(p.creationDate) || Math.floor(num(p.creationTimeNs) / 1e9),
         status: status === "SUCCEEDED" ? "complete" : status === "FAILED" ? "failed" : "pending",
-        description: "",
+        description,
         reference: p.paymentHash,
       });
     }

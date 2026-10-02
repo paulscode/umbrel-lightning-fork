@@ -78,6 +78,9 @@
             <b-dropdown-item href="#" v-b-modal.node-id-modal
               >Node ID</b-dropdown-item
             >
+            <b-dropdown-item href="#" v-b-modal.mobile-app-modal
+              >Mobile app</b-dropdown-item
+            >
             <b-dropdown-item href="#" v-b-modal.peers-modal
               >Peers</b-dropdown-item
             >
@@ -349,6 +352,7 @@
     <node-id-modal />
     <offers-modal />
     <peers-modal />
+    <mobile-app-modal />
     <mempool-modal />
     <secret-words-modal v-if="!isStartOS" />
     <connect-wallet-modal v-if="!isStartOS" />
@@ -375,6 +379,7 @@ import ChannelList from "@/components/Channels/List";
 import ChannelOpen from "@/components/Channels/Open";
 import OffersModal from "@/views/Home/OffersModal";
 import PeersModal from "@/views/Home/PeersModal";
+import MobileAppModal from "@/views/Home/MobileAppModal";
 import MempoolModal from "@/views/Home/MempoolModal";
 import ChannelManage from "@/components/Channels/Manage";
 
@@ -685,6 +690,7 @@ export default {
     ChannelManage,
     OffersModal,
     PeersModal,
+    MobileAppModal,
     MempoolModal,
     AdvancedSettingsModal,
     NodeIdModal,

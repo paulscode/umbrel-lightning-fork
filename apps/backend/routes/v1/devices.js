@@ -44,19 +44,20 @@ router.post(
   })
 );
 
-router.patch(
-  "/:id",
-  safeHandler(async (req, res) => {
-    if (!ID.test(req.params.id)) {
-      throw new ValidationError("Not a device id");
-    }
-    const device = await devices.rename(req.params.id, (req.body || {}).label);
-    if (!device) {
-      throw new ValidationError("No such device", 404);
-    }
-    res.json({ device });
-  })
-);
+async function rename(req, res) {
+  if (!ID.test(req.params.id)) {
+    throw new ValidationError("Not a device id");
+  }
+  const device = await devices.rename(req.params.id, (req.body || {}).label);
+  if (!device) {
+    throw new ValidationError("No such device", 404);
+  }
+  res.json({ device });
+}
+
+router.patch("/:id", safeHandler(rename));
+// The dashboard's request helper has no PATCH.
+router.post("/:id/label", safeHandler(rename));
 
 router.delete(
   "/:id",
