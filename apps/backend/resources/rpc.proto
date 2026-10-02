@@ -837,6 +837,9 @@ message Transaction {
 
     /// The raw transaction hex.
     string raw_tx_hex = 9 [ json_name = "raw_tx_hex" ];
+
+    /// The label the wallet gave the transaction.
+    string label = 10;
 }
 message GetTransactionsRequest {
 }

@@ -47,3 +47,14 @@ test("malformed ids are refused and entries expire", async () => {
   await once.run("a", "req-00000004", async () => ++runs);
   assert.equal(runs, 2);
 });
+
+test("a reused id with different parameters is refused", async () => {
+  const once = createIdempotency();
+  let runs = 0;
+  await once.run("dev", "req-00000005", async () => ++runs, "/lightning/pay {\"request\":\"a\"}");
+  await assert.rejects(
+    () => once.run("dev", "req-00000005", async () => ++runs, "/lightning/pay {\"request\":\"b\"}"),
+    (e) => e.statusCode === 422
+  );
+  assert.equal(runs, 1);
+});

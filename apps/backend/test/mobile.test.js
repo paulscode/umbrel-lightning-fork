@@ -238,9 +238,9 @@ test("decode: offers, BOLT 12 invoices and what is not supported", async () => {
 test("on-chain estimate scales the node's size to the chosen rate; a sweep counts every coin", async () => {
   const { mobile } = harness();
   const est = await mobile.estimateOnchain({ address: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", amountSat: 10000, satPerVbyte: 5 });
-  // 1410 sat at 10 sat/vB is 141 vB; at 5 sat/vB, 705.
-  assert.equal(est.feeSat, 705);
-  assert.equal(est.totalSat, 10705);
+  // Largest coin first: 10.5 + 31 + 68, and a 43 vB change output, at 5.
+  assert.equal(est.feeSat, 763);
+  assert.equal(est.totalSat, 10763);
   const sweep = await mobile.estimateOnchain({ address: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", sendAll: true, satPerVbyte: 2 });
   // 10.5 + 31 + 68 + 57.5 = 167 vB.
   assert.equal(sweep.feeSat, 334);
@@ -248,6 +248,62 @@ test("on-chain estimate scales the node's size to the chosen rate; a sweep count
   await assert.rejects(() => mobile.estimateOnchain({ address: "nope", amountSat: 1, satPerVbyte: 1 }), /not valid/);
   await assert.rejects(() => mobile.estimateOnchain({ address: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", amountSat: 1.5, satPerVbyte: 1 }), /whole number/);
   await assert.rejects(() => mobile.estimateOnchain({ address: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", amountSat: 1, satPerVbyte: 0 }), /fee rate/);
+});
+
+test("an estimate keeps the anchor reserve back and needs enough coins", async () => {
+  const { mobile } = harness({ lnd: { getWalletBalance: async () => ({ confirmedBalance: "150000", reservedBalanceAnchorChan: "10000" }) } });
+  const sweep = await mobile.estimateOnchain({ address: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", sendAll: true, satPerVbyte: 2 });
+  // 167 vB plus the change that keeps the reserve.
+  assert.equal(sweep.feeSat, 420);
+  assert.equal(sweep.amountSat, 150000 - 420 - 10000);
+  await assert.rejects(
+    () => mobile.estimateOnchain({ address: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", amountSat: 149000, satPerVbyte: 2 }),
+    /Not enough confirmed on-chain funds/
+  );
+});
+
+test("an on-chain send with a request id is labelled, and found again instead of repeated", async () => {
+  const sent = [];
+  const txs = [];
+  const { mobile } = harness({
+    lnd: {
+      sendCoinsAtRate: async (args) => {
+        sent.push(args);
+        txs.push({ txHash: "cc".repeat(32), label: args.label, amount: "-1000" });
+        return { txid: "cc".repeat(32) };
+      },
+      getOnChainTransactions: async () => txs,
+    },
+  });
+  const args = { address: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", amountSat: 1000, satPerVbyte: 2, requestId: "req-abcdef12" };
+  const first = await mobile.sendOnchain(args);
+  const second = await mobile.sendOnchain(args);
+  assert.equal(sent.length, 1, "one transaction");
+  assert.equal(sent[0].label, "lf-mobile:req-abcdef12");
+  assert.equal(second.txid, first.txid);
+});
+
+test("a send cut off before the node answered is uncertain, not failed", async () => {
+  const { mobile } = harness({
+    lnd: {
+      sendPayment: async () => {
+        throw new LndError("Unable to send lightning payment", { code: 14, details: "Connection dropped" });
+      },
+      sendCoinsAtRate: async () => {
+        throw new LndError("Unable to send coins", { code: 4, details: "Deadline Exceeded" });
+      },
+    },
+  });
+  await assert.rejects(() => mobile.payLightning({ request: "lnbc25u1pfoo" }), (e) => e.statusCode === 504 && e.uncertain === true);
+  await assert.rejects(
+    () => mobile.sendOnchain({ address: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", amountSat: 1000, satPerVbyte: 2 }),
+    (e) => e.statusCode === 504 && e.uncertain === true
+  );
+});
+
+test("a malformed bitcoin: URI is a 400, not a crash", async () => {
+  const { mobile } = harness();
+  await assert.rejects(() => mobile.decode("bitcoin:%E0%A4%A"), (e) => e.statusCode === 400);
 });
 
 test("on-chain send passes the rate and turns node errors into sentences", async () => {

@@ -4,7 +4,8 @@ The dashboard's API for the Lightning Fork Android app, and for anything
 else that should use the node the way the dashboard does without a web
 session. Version 1.
 
-Everything is JSON. Amounts are whole satoshis, times are Unix seconds,
+Everything is JSON (booleans are JSON `true`/`false`; nothing else counts as
+true). Amounts are whole satoshis, times are Unix seconds,
 and every error is `{"error": "<a sentence for the user>"}` with an HTTP
 status: 400 for a request the node refuses (with the reason), 401 for a
 missing, wrong or removed key, 404 for an unknown call or object, 429 after
@@ -41,7 +42,9 @@ The web page (menu → **Mobile app** → **Pair a phone**) calls
 ```
 
 That is the QR code's text (`exp` in epoch milliseconds; fields without a
-value are left out). The code works once and for five minutes. The page also
+value are left out). The code works for five minutes; once claimed, the
+same code can be claimed again for two minutes (an answer lost on the way
+to the phone), which issues a new key and voids the first. The page also
 offers it as `lightningfork://pair?c=<base64url of the JSON>` for a phone
 that opened the dashboard itself.
 
@@ -66,8 +69,8 @@ Every other call takes the key as `Authorization: Bearer lf_…`.
 | `GET /wallet` | | `{onchain: {confirmedSat, unconfirmedSat, lockedSat, reservedSat}, lightning: {outboundSat, inboundSat, pendingOutboundSat}, syncedToChain, blockHeight, updatedAt}` |
 | `GET /fees` | | `{source: {kind, name}, warning, minimumSatPerVbyte, low, medium, high}`, each rate `{satPerVbyte, label, eta}` |
 | `POST /decode` | `{input}` | a payment target, below |
-| `POST /onchain/estimate` | `{address, amountSat \| sendAll, satPerVbyte}` | `{amountSat, feeSat, satPerVbyte, totalSat, sendAll}` |
-| `POST /onchain/send` | `{address, amountSat \| sendAll, satPerVbyte, label?, requestId?}` | `{txid, satPerVbyte}` |
+| `POST /onchain/estimate` | `{address, amountSat \| sendAll, satPerVbyte}` | `{amountSat, feeSat, satPerVbyte, totalSat, sendAll, reservedSat?}`; sized by choosing coins largest first, as the node does; a sweep keeps back the anchor-channel reserve |
+| `POST /onchain/send` | `{address, amountSat \| sendAll, satPerVbyte, requestId?}` | `{txid, satPerVbyte}` |
 | `POST /lightning/pay` | `{request, amountSat?, payerNote?, requestId?}` | `{status, paymentHash, preimage, amountSat, feeSat}` |
 | `POST /receive/address` | `{fresh?}` | `{address, type, uri}`; the last unused address unless `fresh` |
 | `POST /receive/invoice` | `{amountSat?, memo?, expirySeconds?}` | `{paymentRequest, paymentHash, amountSat, memo, createdAt, expiresAt, uri}` |
@@ -112,10 +115,18 @@ address of another network is named as such).
 ### Request ids
 
 `/onchain/send`, `/lightning/pay`, `/channels/open` and `/channels/close`
-take an optional `requestId` (8–64 letters, digits, `-` or `_`). The first
+take an optional `requestId` (8–64 letters, digits, `-` or `_`). The id is
+bound to the call and its parameters: the same id with different parameters
+is refused with 422. The first
 call with an id runs; a repeat by the same device within a day returns the
 first outcome, success or failure, without acting again. Ids are kept in
-memory: a restart of the dashboard forgets them. A client that lost
+memory; an on-chain send is also labelled with its id in the wallet, so
+the same request after a dashboard restart finds the transaction instead
+of making another.
+
+A send cut off before the node answered (the connection to LND dropped,
+or timed out) is a 504 with `"uncertain": true`: the money may have
+moved. Ask again with the same id rather than a new one. A client that lost
 the answer resends with the same id; a new attempt after a failure the user
 has seen uses a new one.
 

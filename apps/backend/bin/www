@@ -99,15 +99,21 @@ if (process.env.MOBILE_TLS_PORT) {
     process.env.MOBILE_ONION,
     "localhost",
   ].filter(Boolean);
-  const tls = access.ensureServerCert(names);
-  mobileServer = https.createServer({ key: tls.key, cert: tls.cert, minVersion: "TLSv1.2" }, require("../mobileApp"));
-  mobileServer.listen(normalizePort(process.env.MOBILE_TLS_PORT));
-  mobileServer.on("listening", () => {
-    console.log("Mobile API listening on port " + process.env.MOBILE_TLS_PORT);
-  });
-  mobileServer.on("error", (error) => {
-    console.error("Mobile API listener: " + error.message);
-  });
+  // A problem here costs the phones, not the dashboard.
+  try {
+    const tls = access.ensureServerCert(names);
+    mobileServer = https.createServer({ key: tls.key, cert: tls.cert, minVersion: "TLSv1.2" }, require("../mobileApp"));
+    mobileServer.listen(normalizePort(process.env.MOBILE_TLS_PORT));
+    mobileServer.on("listening", () => {
+      console.log("Mobile API listening on port " + process.env.MOBILE_TLS_PORT);
+    });
+    mobileServer.on("error", (error) => {
+      console.error("Mobile API listener: " + error.message);
+    });
+  } catch (error) {
+    console.error("Mobile API not started: " + error.message);
+    mobileServer = undefined;
+  }
 }
 
 /**

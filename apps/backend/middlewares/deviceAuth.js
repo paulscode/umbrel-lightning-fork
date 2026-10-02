@@ -1,10 +1,10 @@
 // The mobile API's door: a paired device's key as a bearer token.
 //
 // A valid key always gets in. Failures are counted per source address, and
-// a source with many recent failures is refused for a while before its key
-// is even looked at, which slows guessing without ever locking out a phone
-// that holds a real key. The keys are 256-bit random, so the count is about
-// noise, not about the odds.
+// a source with many recent failures gets 429 instead of 401 for a while, so
+// a client hammering with a bad key is told to back off without a phone that
+// holds a real key ever being locked out. The keys are 256-bit random: this
+// is about noise, not about the odds of a guess.
 function createFailureLimiter({ max = 20, windowMs = 5 * 60 * 1000, now = Date.now } = {}) {
   const failures = new Map();
 

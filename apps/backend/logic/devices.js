@@ -23,6 +23,10 @@ const KEY_PREFIX = "lf_";
 const LAST_USED_WRITE_MS = 60 * 1000;
 const MAX_LABEL = 64;
 const MAX_DEVICES = 50;
+// A code whose answer was lost on the way to the phone can be claimed again
+// this long after, for a new key; the first is never usable by anyone else
+// since only the phone holding the code ever saw it.
+const RECLAIM_MS = 2 * 60 * 1000;
 
 function sha256(text) {
   return crypto.createHash("sha256").update(text).digest("hex");
@@ -105,6 +109,11 @@ function createDevices({
 
   // Pending devices whose code has expired are dropped when anything looks.
   function sweep() {
+    for (const d of state.devices) {
+      if (d.status === "active" && d.enrollHash && (!d.claimedAt || now() - d.claimedAt >= RECLAIM_MS)) {
+        d.enrollHash = null;
+      }
+    }
     const before = state.devices.length;
     state.devices = state.devices.filter(
       (d) => d.status !== "pending" || (d.enrollExpires && d.enrollExpires > now())
@@ -178,7 +187,9 @@ function createDevices({
       }
       const hash = sha256(enrollCode);
       const device = state.devices.find(
-        (d) => d.status === "pending" && sameHash(d.enrollHash, hash)
+        (d) =>
+          sameHash(d.enrollHash, hash) &&
+          (d.status === "pending" || (d.status === "active" && d.claimedAt && now() - d.claimedAt < RECLAIM_MS))
       );
       if (!device) {
         return null;
@@ -186,8 +197,10 @@ function createDevices({
       const apiKey = `${KEY_PREFIX}${device.id}_${random(32).toString("base64url")}`;
       device.status = "active";
       device.keyHash = sha256(apiKey);
-      device.enrollHash = null;
+      // Kept briefly so a lost answer can be claimed again; then dropped.
+      device.enrollHash = hash;
       device.enrollExpires = null;
+      device.claimedAt = device.claimedAt || now();
       const name = cleanLabel(label);
       if (name) {
         device.label = name;

@@ -38,8 +38,15 @@ const handle = (fn) => async (req, res, next) => {
 
 const body = (req) => req.body || {};
 
+// A JSON true, and nothing else: "false" in a form body is not true.
+const yes = (value) => value === true;
+
+// Runs a money-moving call once per request id. The id is bound to the call
+// and its parameters, so a reused id cannot answer for a different payment.
 function idempotent(req, fn) {
-  return once.run(req.device.id, body(req).requestId, fn);
+  const { requestId, ...params } = body(req);
+  const fingerprint = req.path + " " + JSON.stringify(params, Object.keys(params).sort());
+  return once.run(req.device.id, requestId, fn, fingerprint);
 }
 
 router.post(
@@ -113,7 +120,7 @@ router.post(
   "/onchain/estimate",
   handle((req) => {
     const { address, amountSat, sendAll, satPerVbyte } = body(req);
-    return mobile.estimateOnchain({ address, amountSat, sendAll: Boolean(sendAll), satPerVbyte });
+    return mobile.estimateOnchain({ address, amountSat, sendAll: yes(sendAll), satPerVbyte });
   })
 );
 
@@ -121,8 +128,8 @@ router.post(
   "/onchain/send",
   handle((req) =>
     idempotent(req, () => {
-      const { address, amountSat, sendAll, satPerVbyte, label } = body(req);
-      return mobile.sendOnchain({ address, amountSat, sendAll: Boolean(sendAll), satPerVbyte, label });
+      const { address, amountSat, sendAll, satPerVbyte, requestId } = body(req);
+      return mobile.sendOnchain({ address, amountSat, sendAll: yes(sendAll), satPerVbyte, requestId });
     })
   )
 );
@@ -137,7 +144,7 @@ router.post(
   )
 );
 
-router.post("/receive/address", handle((req) => mobile.receiveAddress({ fresh: Boolean(body(req).fresh) })));
+router.post("/receive/address", handle((req) => mobile.receiveAddress({ fresh: yes(body(req).fresh) })));
 
 router.post(
   "/receive/invoice",
@@ -184,18 +191,26 @@ router.post(
         throw new ValidationError("Not a node public key");
       }
       const amount = Number(amountSat);
-      if (!Number.isInteger(amount) || amount < 20000) {
+      if (!Number.isInteger(amount) || amount < 20000 || amount > 21e14) {
         throw new ValidationError("A channel needs at least 20,000 sats");
+      }
+      const rate = satPerVbyte === undefined || satPerVbyte === null ? undefined : Number(satPerVbyte);
+      if (rate !== undefined && (!Number.isFinite(rate) || rate < 1 || rate > 10000)) {
+        throw new ValidationError("The fee rate must be between 1 and 10000 sat/vB");
+      }
+      const p = port === undefined || port === null ? 9735 : Number(port);
+      if (!Number.isInteger(p) || p < 1 || p > 65535) {
+        throw new ValidationError("The port must be between 1 and 65535");
       }
       return lightningLogic.openChannel(
         pubKey,
-        host || "",
-        port || 9735,
+        String(host || ""),
+        p,
         amount,
-        satPerVbyte ? Math.ceil(Number(satPerVbyte)) : undefined,
+        rate === undefined ? undefined : Math.ceil(rate),
         "",
         "",
-        Boolean(isPrivate)
+        yes(isPrivate)
       );
     })
   )
@@ -210,7 +225,7 @@ router.post(
       if (!match) {
         throw new ValidationError("Not a channel point (txid:index)");
       }
-      await lightningLogic.closeChannel(match[1], Number(match[2]), Boolean(force));
+      await lightningLogic.closeChannel(match[1], Number(match[2]), yes(force));
       return { closing: true };
     })
   )
@@ -259,7 +274,7 @@ router.use((error, req, res, next) => {
   if (status >= 500) {
     logger.error(message, `mobile ${req.method} ${req.path}`, error.stack);
   }
-  res.status(status).json({ error: message });
+  res.status(status).json(error.uncertain ? { error: message, uncertain: true } : { error: message });
 });
 
 module.exports = router;

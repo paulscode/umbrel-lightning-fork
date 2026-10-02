@@ -29,12 +29,26 @@ test("a code pairs once and its key then authenticates", async () => {
   const claimed = await devices.claim(enrollCode, "Pixel 8");
   assert.match(claimed.apiKey, new RegExp(`^lf_${device.id}_[A-Za-z0-9_-]{43}$`));
   assert.equal(claimed.label, "Pixel 8");
-  assert.equal(await devices.claim(enrollCode, "again"), null, "a code works once");
   assert.deepEqual(devices.verify(claimed.apiKey, "lan"), { id: device.id, label: "Pixel 8" });
   // Neither the key nor the code is stored, only hashes.
   const text = JSON.stringify(stored());
   assert.ok(!text.includes(claimed.apiKey));
   assert.ok(!text.includes(enrollCode));
+});
+
+test("a code whose answer was lost can be claimed again briefly, for a new key", async () => {
+  const { devices, tick } = harness();
+  const { enrollCode } = await devices.createPending("");
+  const first = await devices.claim(enrollCode, "Phone");
+  tick(30_000);
+  const again = await devices.claim(enrollCode, "Phone");
+  assert.equal(again.id, first.id, "the same device");
+  assert.notEqual(again.apiKey, first.apiKey);
+  assert.equal(devices.verify(first.apiKey), null, "the first key is replaced");
+  assert.ok(devices.verify(again.apiKey));
+  tick(3 * 60_000);
+  assert.equal(await devices.claim(enrollCode, "x"), null, "and then the code is spent");
+  assert.equal((await devices.list()).length, 1);
 });
 
 test("a wrong or malformed key is refused", async () => {

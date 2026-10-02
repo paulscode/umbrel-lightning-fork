@@ -227,6 +227,10 @@ export default {
       await this.refresh();
     },
     close() {
+      // An unused code stops working when the screen closes.
+      if (this.pairing) {
+        this.cancelPairing();
+      }
       this.stopPairing();
       this.editing = "";
       this.confirmId = "";

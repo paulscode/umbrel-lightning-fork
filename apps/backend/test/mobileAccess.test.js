@@ -91,3 +91,11 @@ test("an expiring server certificate is reissued", () => {
   const later = access.ensureServerCert(["umbrel.local"], dir, new Date(Date.now() + 710 * 24 * 3600 * 1000));
   assert.notEqual(later.cert, first.cert);
 });
+
+test("half an authority is not silently replaced", () => {
+  const dir = tmpdir();
+  access.ensureAuthority(dir);
+  fs.unlinkSync(path.join(dir, "mobile-ca.pem"));
+  assert.throws(() => access.ensureAuthority(dir), /missing/);
+  assert.ok(fs.existsSync(path.join(dir, "mobile-ca.key")), "the key is kept");
+});

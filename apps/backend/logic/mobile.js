@@ -19,6 +19,12 @@ const MAX_FEE_RATE = 10000;
 const INPUT_VBYTES = { p2wkh: 68, np2wkh: 91, p2tr: 57.5, unknown: 68 };
 const OUTPUT_VBYTES = { p2wpkh: 31, p2wsh: 43, p2tr: 43, segwit: 43, p2sh: 32, p2pkh: 34 };
 const TX_OVERHEAD_VBYTES = 10.5;
+// The node's change output (P2TR).
+const CHANGE_VBYTES = 43;
+const DUST_SAT = 546;
+// gRPC codes after which a send may or may not have happened: the call was
+// cut off, not answered.
+const UNCERTAIN_GRPC_CODES = [1, 4, 14];
 
 function bad(message) {
   return new ValidationError(message);
@@ -99,6 +105,27 @@ function setsBlake2b(features) {
     return true;
   }
   return bits.includes(512) || bits.includes(513);
+}
+
+// A send's failure as the phone should see it: a 400 with a sentence when the
+// node said no, a 504 marked uncertain when the call was cut off and the
+// money may have moved, so that the phone does not offer to try again as if
+// nothing had happened.
+function failure(error, message) {
+  const code = error && error.error && error.error.code;
+  const detail = detailOf(error);
+  const cutOff =
+    UNCERTAIN_GRPC_CODES.includes(code) ||
+    /no final payment status|stream removed|connection (reset|closed)|socket hang up|ECONNRESET|deadline/i.test(detail);
+  if (cutOff) {
+    const unknown = new ValidationError(
+      "Your node did not say whether this went through. Check your activity before trying again.",
+      504
+    );
+    unknown.uncertain = true;
+    return unknown;
+  }
+  return bad(message);
 }
 
 function unsupported(message) {
@@ -396,7 +423,12 @@ function createMobile({
   async function decodeBip21(text) {
     const rest = text.slice("bitcoin:".length);
     const q = rest.indexOf("?");
-    const addressPart = decodeURIComponent(q < 0 ? rest : rest.slice(0, q));
+    let addressPart;
+    try {
+      addressPart = decodeURIComponent(q < 0 ? rest : rest.slice(0, q));
+    } catch (error) {
+      throw bad("This payment request is not valid.");
+    }
     const params = new URLSearchParams(q < 0 ? "" : rest.slice(q + 1));
     const get = (name) => {
       for (const [k, v] of params) {
@@ -503,22 +535,45 @@ function createMobile({
     return parsed;
   }
 
-  async function sweepVbytes(destinationType) {
-    const coins = await lnd().listUnspent();
-    const utxos = (coins && coins.utxos) || coins || [];
-    if (!utxos.length) {
-      return { vbytes: 0, totalSat: 0 };
-    }
-    let vbytes = TX_OVERHEAD_VBYTES + (OUTPUT_VBYTES[destinationType] || 43);
+  function inputVbytes(utxo) {
+    // By the script, which old and new nodes report alike.
+    const script = String(utxo.pkScript || "");
+    const key = script.startsWith("5120") ? "p2tr" : script.startsWith("a914") ? "np2wkh" : script.startsWith("0014") ? "p2wkh" : "unknown";
+    return INPUT_VBYTES[key];
+  }
+
+  // The confirmed coins and what the node keeps back for anchor channels'
+  // fee bumps, which no send may spend.
+  async function spendable() {
+    const [coins, balance] = await Promise.all([lnd().listUnspent(), lnd().getWalletBalance()]);
+    const utxos = ((coins && coins.utxos) || coins || []).slice();
+    utxos.sort((a, b) => num(b.amountSat) - num(a.amountSat));
+    return { utxos, reserve: num(balance && balance.reservedBalanceAnchorChan) };
+  }
+
+  // The size and fee of sending `amount` at `rate`, choosing coins largest
+  // first as the node does, with a change output when one is worth having.
+  // Sized here rather than from the node's estimate, whose rate comes back
+  // rounded down to whole sat/vB (1.9 reads as 1, nearly doubling the size).
+  function planSend(utxos, reserve, amount, rate, destinationType) {
+    const base = TX_OVERHEAD_VBYTES + (OUTPUT_VBYTES[destinationType] || 43);
+    let vbytes = base;
     let total = 0;
     for (const utxo of utxos) {
-      // By the script, which old and new nodes report alike.
-      const script = String(utxo.pkScript || "");
-      const key = script.startsWith("5120") ? "p2tr" : script.startsWith("a914") ? "np2wkh" : script.startsWith("0014") ? "p2wkh" : "unknown";
-      vbytes += INPUT_VBYTES[key];
+      vbytes += inputVbytes(utxo);
       total += num(utxo.amountSat);
+      const withChange = Math.ceil((vbytes + CHANGE_VBYTES) * rate);
+      const change = total - amount - withChange;
+      if (change >= Math.max(DUST_SAT, reserve)) {
+        return { feeSat: withChange, vbytes: Math.ceil(vbytes + CHANGE_VBYTES) };
+      }
+      const noChange = total - amount;
+      if (reserve === 0 && noChange >= Math.ceil(vbytes * rate)) {
+        // The remainder is too small to keep and goes to the fee.
+        return { feeSat: noChange, vbytes: Math.ceil(vbytes) };
+      }
     }
-    return { vbytes: Math.ceil(vbytes), totalSat: total };
+    throw bad("Not enough confirmed on-chain funds for this amount and fee.");
   }
 
   // {amountSat, feeSat, satPerVbyte, totalSat}: what a send would cost, and
@@ -526,46 +581,59 @@ function createMobile({
   async function estimateOnchain({ address, amountSat, sendAll, satPerVbyte }) {
     const parsed = checkedAddress(address);
     const rate = feeRate(satPerVbyte);
+    const { utxos, reserve } = await spendable();
+    const totalSat = utxos.reduce((sum, u) => sum + num(u.amountSat), 0);
     if (sendAll) {
-      const { vbytes, totalSat } = await sweepVbytes(parsed.type);
       if (!totalSat) {
         throw bad("There are no confirmed on-chain funds to send.");
       }
+      let vbytes = TX_OVERHEAD_VBYTES + (OUTPUT_VBYTES[parsed.type] || 43);
+      for (const utxo of utxos) {
+        vbytes += inputVbytes(utxo);
+      }
+      // With anchor channels the node keeps their reserve back as change.
+      if (reserve > 0) {
+        vbytes += CHANGE_VBYTES;
+      }
       const feeSat = Math.ceil(vbytes * rate);
-      if (totalSat - feeSat <= 546) {
+      const amount = totalSat - feeSat - reserve;
+      if (amount <= DUST_SAT) {
         throw bad("The fee would take the whole balance at this rate.");
       }
-      return { amountSat: totalSat - feeSat, feeSat, satPerVbyte: rate, totalSat, sendAll: true };
+      return { amountSat: amount, feeSat, satPerVbyte: rate, totalSat: amount + feeSat, sendAll: true, reservedSat: reserve };
     }
     const amount = satAmount(amountSat);
-    let res;
-    try {
-      res = await lnd().estimateFee(parsed.address, amount, 6);
-    } catch (error) {
-      throw bad(friendlySendError(error));
-    }
-    const nodeFee = num(res.feeSat);
-    const nodeRate = num(res.satPerVbyte) || num(res.feerateSatPerByte) || 1;
-    const vbytes = nodeFee / nodeRate;
-    const feeSat = Math.ceil(vbytes * rate);
-    return { amountSat: amount, feeSat, satPerVbyte: rate, totalSat: amount + feeSat, sendAll: false };
+    const plan = planSend(utxos, reserve, amount, rate, parsed.type);
+    return { amountSat: amount, feeSat: plan.feeSat, satPerVbyte: rate, totalSat: amount + plan.feeSat, sendAll: false };
   }
 
-  async function sendOnchain({ address, amountSat, sendAll, satPerVbyte, label }) {
+  // The label a send made for request id `requestId` carries, so that the
+  // same request after a restart finds the transaction instead of making a
+  // second one.
+  const sendLabel = (requestId) => `lf-mobile:${requestId}`;
+
+  async function sendOnchain({ address, amountSat, sendAll, satPerVbyte, requestId }) {
     const parsed = checkedAddress(address);
     const rate = feeRate(satPerVbyte);
     const amount = sendAll ? 0 : satAmount(amountSat);
+    if (requestId) {
+      const txs = await lnd().getOnChainTransactions();
+      const sent = (txs || []).find((tx) => tx.label === sendLabel(requestId));
+      if (sent) {
+        return { txid: sent.txHash, satPerVbyte: rate };
+      }
+    }
     try {
       const res = await lnd().sendCoinsAtRate({
         address: parsed.address,
         amountSat: amount,
         satPerVbyte: rate,
         sendAll: Boolean(sendAll),
-        label: label ? String(label).slice(0, 100) : "",
+        label: requestId ? sendLabel(requestId) : "",
       });
       return { txid: res.txid, satPerVbyte: rate };
     } catch (error) {
-      throw bad(friendlySendError(error));
+      throw failure(error, friendlySendError(error));
     }
   }
 
@@ -617,9 +685,7 @@ function createMobile({
       if (error instanceof ValidationError) {
         throw error;
       }
-      const wrapped = bad(friendlyPayError(error));
-      wrapped.statusCode = 400;
-      throw wrapped;
+      throw failure(error, friendlyPayError(error));
     }
   }
 

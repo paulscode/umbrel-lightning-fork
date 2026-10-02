@@ -18,8 +18,10 @@ function createIdempotency({ ttlMs = 24 * 60 * 60 * 1000, max = 1000, now = Date
     }
   }
 
-  // `scope` keeps one device's ids apart from another's.
-  function run(scope, requestId, fn) {
+  // `scope` keeps one device's ids apart from another's; `fingerprint` (the
+  // call and its parameters) keeps an id from answering for a different
+  // request: a reused id with other parameters is refused.
+  function run(scope, requestId, fn, fingerprint = "") {
     if (requestId === undefined || requestId === null || requestId === "") {
       return fn();
     }
@@ -32,10 +34,15 @@ function createIdempotency({ ttlMs = 24 * 60 * 60 * 1000, max = 1000, now = Date
     const key = `${scope}:${requestId}`;
     const hit = entries.get(key);
     if (hit) {
+      if (hit.fingerprint !== fingerprint) {
+        const error = new Error("This request id was already used for a different request.");
+        error.statusCode = 422;
+        return Promise.reject(error);
+      }
       return hit.promise;
     }
     const promise = Promise.resolve().then(fn);
-    entries.set(key, { at: now(), promise });
+    entries.set(key, { at: now(), promise, fingerprint });
     // Keep the failure too, but do not let it count as unhandled here.
     promise.catch(() => {});
     return promise;

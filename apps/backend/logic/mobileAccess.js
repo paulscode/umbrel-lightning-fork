@@ -47,6 +47,11 @@ function ensureAuthority(dir = dataDir()) {
   if (certPem && keyPem) {
     return { certPem, keyPem };
   }
+  // Half an authority is not replaced: every paired phone pins the old one,
+  // and a new one would cut them all off without a word.
+  if (certPem || keyPem) {
+    throw new Error(`${certPem ? keyFile : certFile} is missing; restore it, or remove ${certPem ? certFile : keyFile} as well to start a new authority (phones then pair again)`);
+  }
   const authority = x509.createAuthority();
   writeSecret(keyFile, authority.keyPem);
   writeSecret(certFile, authority.certPem);
