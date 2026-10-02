@@ -57,6 +57,9 @@ for (const signal of ["SIGTERM", "SIGINT"]) {
     if (typeof server !== "undefined") {
       server.close();
     }
+    if (mobileServer) {
+      mobileServer.close();
+    }
     setTimeout(() => process.exit(0), 500).unref();
   });
 }
@@ -81,6 +84,31 @@ var server = http.createServer(app);
 server.listen(port);
 server.on("error", onError);
 server.on("listening", onListening);
+
+/**
+ * The mobile API's own TLS listener, where no proxy in front of the app
+ * terminates TLS (Umbrel). It serves the mobile API and nothing else.
+ */
+
+var mobileServer;
+if (process.env.MOBILE_TLS_PORT) {
+  const https = require("https");
+  const access = require("logic/mobileAccess.js");
+  const names = [
+    process.env.DEVICE_DOMAIN_NAME,
+    process.env.MOBILE_ONION,
+    "localhost",
+  ].filter(Boolean);
+  const tls = access.ensureServerCert(names);
+  mobileServer = https.createServer({ key: tls.key, cert: tls.cert, minVersion: "TLSv1.2" }, require("../mobileApp"));
+  mobileServer.listen(normalizePort(process.env.MOBILE_TLS_PORT));
+  mobileServer.on("listening", () => {
+    console.log("Mobile API listening on port " + process.env.MOBILE_TLS_PORT);
+  });
+  mobileServer.on("error", (error) => {
+    console.error("Mobile API listener: " + error.message);
+  });
+}
 
 /**
  * Normalize a port into a number, string, or false.

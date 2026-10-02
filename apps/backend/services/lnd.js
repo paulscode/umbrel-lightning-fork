@@ -648,6 +648,75 @@ function sendPayment(paymentRequest, amt, paymentAmount) {
   );
 }
 
+// The mobile API's calls. They take what the phone sends, already checked.
+
+// An address of `type` (0: a new P2WKH, 2: the last P2WKH not yet used, so
+// opening the receive screen twice does not use up two).
+function newAddress(type) {
+  return initializeRPCClient().then(({ lightning }) =>
+    promiseify(lightning, lightning.NewAddress, { type }, "generate address")
+  );
+}
+
+// Sends on-chain at a fee rate in sat/vB. sat_per_byte is read by lnd as
+// sat/vB; the field the dashboard's proto knows.
+function sendCoinsAtRate({ address, amountSat, satPerVbyte, sendAll, label }) {
+  const rpcPayload = {
+    addr: address,
+    amount: sendAll ? 0 : amountSat,
+    send_all: Boolean(sendAll),
+    sat_per_byte: satPerVbyte,
+  };
+  if (label) {
+    rpcPayload.label = label;
+  }
+  return initializeRPCClient().then(({ lightning }) =>
+    promiseify(lightning, lightning.SendCoins, rpcPayload, "send coins")
+  );
+}
+
+function lookupInvoice(paymentHashHex) {
+  return initializeRPCClient().then(({ lightning }) =>
+    promiseify(
+      lightning,
+      lightning.LookupInvoice,
+      { r_hash_str: paymentHashHex },
+      "look up invoice"
+    )
+  );
+}
+
+// The newest payments, newest last as lnd lists them.
+function listRecentPayments(maxPayments) {
+  return initializeRPCClient().then(({ lightning }) =>
+    promiseify(
+      lightning,
+      lightning.ListPayments,
+      { include_incomplete: true, max_payments: maxPayments, reversed: true },
+      "get payments"
+    )
+  );
+}
+
+// Creates an invoice for `amount` sat (0: the payer chooses), valid for
+// `expiry` seconds, with route hints when every channel is private.
+async function addInvoiceWithExpiry(amount, memo, expiry) {
+  const channels = await getOpenChannels();
+  const rpcPayload = {
+    value: amount,
+    memo,
+    expiry,
+    private: channels.length > 0 && channels.every(channel => channel.private),
+  };
+  const conn = await initializeRPCClient();
+  return promiseify(
+    conn.lightning,
+    conn.lightning.addInvoice,
+    rpcPayload,
+    "create new invoice"
+  );
+}
+
 function unlockWallet(password) {
   const passwordBuff = Buffer.from(password, "utf8");
 
@@ -862,6 +931,11 @@ function listOfferInvoices(offerIdHex) {
 }
 
 module.exports = {
+  newAddress,
+  sendCoinsAtRate,
+  lookupInvoice,
+  listRecentPayments,
+  addInvoiceWithExpiry,
   createOffer,
   listOffers,
   disableOffer,

@@ -1031,6 +1031,9 @@ message EstimateFeeResponse {
 
     /// The fee rate in satoshi/byte.
     int64 feerate_sat_per_byte = 2 [json_name = "feerate_sat_per_byte"];
+
+    /// The fee rate in satoshi per vbyte.
+    uint64 sat_per_vbyte = 3;
 }
 
 message SendManyRequest {
@@ -1067,6 +1070,9 @@ message SendCoinsRequest {
     address.
     */
     bool send_all = 6; 
+
+    /// A label for the transaction, as the node's wallet stores it.
+    string label = 7;
 }
 message SendCoinsResponse {
     /// The transaction ID of the transaction
@@ -1730,6 +1736,23 @@ message ChannelBalanceResponse {
 
     /// Sum of channels pending balances denominated in satoshis
     int64 pending_open_balance = 2 [json_name = "pending_open_balance"];
+
+    /// The sum of the channels' local balances: what can be sent.
+    Amount local_balance = 3;
+
+    /// The sum of the channels' remote balances: what can be received.
+    Amount remote_balance = 4;
+
+    /// The local balance in channels still opening.
+    Amount pending_open_local_balance = 7;
+}
+
+message Amount {
+    /// Value denominated in satoshis.
+    uint64 sat = 1;
+
+    /// Value denominated in milli-satoshis.
+    uint64 msat = 2;
 }
 
 message QueryRoutesRequest {
@@ -2414,6 +2437,15 @@ message ListPaymentsRequest {
     field is set to True.
     */
     bool include_incomplete = 1;
+
+    /// The index of a payment to start from, exclusive.
+    uint64 index_offset = 2;
+
+    /// The most payments to return.
+    uint64 max_payments = 3;
+
+    /// Count back from index_offset, newest first.
+    bool reversed = 4;
 }
 
 message ListPaymentsResponse {

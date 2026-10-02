@@ -42,6 +42,8 @@ const system = require("routes/v1/system/index.js");
 const widgets = require("routes/v1/lnd/widgets.js");
 const external = require("routes/v1/external.js");
 const ping = require("routes/ping.js");
+const devicesRoutes = require("routes/v1/devices.js");
+const mobileApi = require("routes/api/v1/mobile.js");
 const app = express();
 
 // Exact-case paths only: the sign-in gate and the routers must never
@@ -54,6 +56,13 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use(requestCorrelationMiddleware);
 app.use(camelCaseReqMiddleware);
 app.use(morgan(logger.morganConfiguration));
+
+// The companion app's API, behind device keys of its own rather than the
+// sign-in (routes/api/v1/mobile.js).
+app.use("/api/v1", (req, res, next) => {
+  res.set("Cache-Control", "no-store");
+  next();
+}, mobileApi);
 
 // The sign-in gate, whenever a password source is configured (StartOS mode
 // insists on one, see bin/www): StartOS puts nothing in front of the
@@ -86,6 +95,7 @@ app.use("/v1/pages", pages);
 app.use("/v1/system", system);
 app.use("/v1/external", external);
 app.use("/v1/channel-backup", channelBackupRoutes);
+app.use("/v1/devices", devicesRoutes);
 app.use("/ping", ping);
 
 // Umbrel only. StartOS owns lnd.conf and restarts LND itself, and has no

@@ -137,6 +137,18 @@ function getMempoolInfo() {
   return promiseify(rpcClient, rpcClient.getMemPoolInfo, "get mempool info");
 }
 
+// The node's own fee estimate for confirming within `blocks`, in BTC/kvB
+// (`feerate`), or `errors` when it has too little data yet.
+function estimateSmartFee(blocks) {
+  return promiseifyParamTwo(
+    rpcClient,
+    rpcClient.estimateSmartFee,
+    blocks,
+    "CONSERVATIVE",
+    "fee estimate"
+  );
+}
+
 function getNetworkInfo() {
   return promiseify(rpcClient, rpcClient.getNetworkInfo, "network info");
 }
@@ -166,6 +178,7 @@ module.exports = {
   getBlockCount,
   getPeerInfo,
   getMempoolInfo,
+  estimateSmartFee,
   getNetworkInfo,
   help,
 };
