@@ -143,23 +143,24 @@ function first(list, predicate) {
 }
 
 // {onionUrl, lanUrl, lanIp}: where the phone can reach the API. `req` is
-// the web page's request for the pairing, whose Host is one address that
-// demonstrably works.
+// the web page's request for the pairing (or the phone's own request for
+// its addresses).
 function endpoints(req, env = process.env) {
   const requestHost = hostOf(req && req.headers && req.headers.host);
   const requestHostPort = String((req && req.headers && req.headers.host) || "").toLowerCase();
   if (ownTlsEnabled(env)) {
+    // Umbrel: the API's own port, on the server's LAN name and IP. The IP
+    // comes from the host (exports.sh), since a phone may not resolve a
+    // .local name; the page's own host is used when it is one of the two.
     const port = env.MOBILE_PUBLIC_PORT || env.MOBILE_TLS_PORT;
     const domain = (env.DEVICE_DOMAIN_NAME || "").toLowerCase();
-    let lanUrl = null;
-    let lanIp = null;
+    const hostIp = (env.MOBILE_LAN_IP || "").trim();
+    let lanUrl = domain ? `https://${domain}:${port}` : null;
+    let lanIp = isIpv4(hostIp) ? `https://${hostIp}:${port}` : null;
     if (requestHost && isIpv4(requestHost)) {
       lanIp = `https://${requestHost}:${port}`;
-    } else if (requestHost && !requestHost.endsWith(".onion") && requestHost !== "localhost") {
+    } else if (requestHost && !requestHost.endsWith(".onion") && requestHost !== "localhost" && requestHost.endsWith(".local")) {
       lanUrl = `https://${requestHost}:${port}`;
-    }
-    if (!lanUrl && domain) {
-      lanUrl = `https://${domain}:${port}`;
     }
     const onion = (env.MOBILE_ONION || "").trim().toLowerCase();
     return {
@@ -168,25 +169,50 @@ function endpoints(req, env = process.env) {
       lanIp,
     };
   }
-  const file = readEndpointsFile(env) || {};
-  let onionUrl = first(file.onion, (u) => /\.onion(:\d+)?\/?$/.test(u));
-  let lanUrl = first(file.lan, (u) => u.startsWith("https://"));
-  let lanIp = first(file.ip, (u) => u.startsWith("https://") && isIpv4(hostOf(u.replace(/^https:\/\//, "").split("/")[0])));
-  if (requestHost.endsWith(".onion")) {
-    onionUrl = onionUrl || `http://${requestHostPort}`;
-  } else if (requestHost && requestHost !== "localhost") {
-    // The address the page was opened at works; prefer it over the list's.
-    const url = `https://${requestHostPort}`;
-    if (isIpv4(requestHost)) {
-      lanIp = url;
-    } else {
-      lanUrl = url;
+  // StartOS: the addresses the package lists. The page's own address is
+  // preferred only when it is one of them: a page opened at a domain with
+  // its own certificate, or over the plain-HTTP port, would hand the phone
+  // an address its pinned root does not serve.
+  const file = readEndpointsFile(env);
+  if (!file) {
+    // No list (an older package): the page's own address, when it was
+    // reached over HTTPS (StartOS's proxy says so) or is an onion.
+    const proto = String((req && req.headers && req.headers["x-forwarded-proto"]) || "").toLowerCase();
+    if (requestHost.endsWith(".onion")) {
+      return { onionUrl: `http://${requestHostPort}`, lanUrl: null, lanIp: null };
     }
+    if (proto === "https" && requestHost && requestHost !== "localhost") {
+      const url = `https://${requestHostPort}`;
+      return isIpv4(requestHost) ? { onionUrl: null, lanUrl: null, lanIp: url } : { onionUrl: null, lanUrl: url, lanIp: null };
+    }
+    return { onionUrl: null, lanUrl: null, lanIp: null };
   }
+  const lanList = (Array.isArray(file.lan) ? file.lan : []).filter((u) => typeof u === "string" && u.startsWith("https://"));
+  const ipList = (Array.isArray(file.ip) ? file.ip : []).filter(
+    (u) => typeof u === "string" && u.startsWith("https://") && isIpv4(hostOf(u.replace(/^https:\/\//, "").split("/")[0]))
+  );
+  const onions = (Array.isArray(file.onion) ? file.onion : []).filter((u) => typeof u === "string" && /\.onion(:\d+)?\/?$/.test(u));
+  // An http onion needs no certificate: Tor authenticates the node.
+  const onionUrl = onions.find((u) => u.startsWith("http://")) || onions[0] || null;
+  const own = `https://${requestHostPort}`;
+  const lanUrl = lanList.includes(own) ? own : lanList[0] || null;
+  const lanIp = ipList.includes(own) ? own : ipList[0] || null;
   return { onionUrl, lanUrl, lanIp };
 }
 
+// The mobile listener's state where the dashboard runs one (Umbrel): null
+// when fine, else why it is not serving, for the pairing screen to say.
+let listenerProblem = null;
+function setListenerProblem(problem) {
+  listenerProblem = problem || null;
+}
+function getListenerProblem(env = process.env) {
+  return ownTlsEnabled(env) ? listenerProblem : null;
+}
+
 module.exports = {
+  setListenerProblem,
+  getListenerProblem,
   ownTlsEnabled,
   ensureAuthority,
   ensureServerCert,

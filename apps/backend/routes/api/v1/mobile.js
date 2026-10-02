@@ -11,6 +11,7 @@ const devices = require("logic/devices.js");
 const mobile = require("logic/mobile.js");
 const access = require("logic/mobileAccess.js");
 const lightningLogic = require("logic/lightning.js");
+const lndService = require("services/lnd.js");
 const peersLogic = require("logic/peers.js");
 const offersLogic = require("logic/offers.js");
 const priceLogic = require("logic/price.js");
@@ -53,8 +54,10 @@ router.post(
   "/pair",
   handle(async (req, res) => {
     const source = req.socket.remoteAddress || "?";
-    const { enrollCode, label } = body(req);
-    const claimed = await devices.claim(enrollCode, label);
+    const { enrollCode, label, claimNonce } = body(req);
+    // A valid code always pairs; a source that keeps failing is told to
+    // back off (the codes are 192-bit random, so this is about noise).
+    const claimed = await devices.claim(enrollCode, label, claimNonce);
     if (!claimed) {
       if (pairLimiter.blocked(source)) {
         res.status(429);
@@ -173,8 +176,9 @@ router.get(
     if (!/^[A-Z]{3,5}$/.test(currency)) {
       throw new ValidationError("Not a currency code");
     }
+    // getPrice gives the number, or null while no feed answers.
     const price = await priceLogic.getPrice(currency);
-    return { currency, price: price[currency] || null };
+    return { currency, price: typeof price === "number" && price > 0 ? price : null };
   })
 );
 
@@ -202,16 +206,35 @@ router.post(
       if (!Number.isInteger(p) || p < 1 || p > 65535) {
         throw new ValidationError("The port must be between 1 and 65535");
       }
-      return lightningLogic.openChannel(
-        pubKey,
-        String(host || ""),
-        p,
-        amount,
-        rate === undefined ? undefined : Math.ceil(rate),
-        "",
-        "",
-        yes(isPrivate)
-      );
+      // Connect first when given an address; already connected is fine.
+      if (host) {
+        try {
+          await lndService.connectToPeer(pubKey, String(host), p);
+        } catch (error) {
+          if (!/already connected/i.test(String((error.error && error.error.details) || error.message))) {
+            throw error;
+          }
+        }
+      }
+      // Once OpenChannelSync answers the channel is funded; nothing after it
+      // may fail the call (a repeat with a new id would open a second one).
+      try {
+        const res = await lndService.openChannel(pubKey, amount, rate === undefined ? undefined : Math.ceil(rate), yes(isPrivate));
+        // A ChannelPoint: the txid as a string, or as bytes in reverse order.
+        let fundingTxid = (res && res.fundingTxidStr) || null;
+        if (!fundingTxid && res && res.fundingTxidBytes) {
+          fundingTxid = Buffer.from(Object.values(res.fundingTxidBytes)).reverse().toString("hex");
+        }
+        return { fundingTxid, outputIndex: res ? Number(res.outputIndex || 0) : null, opening: true };
+      } catch (error) {
+        const code = error.error && error.error.code;
+        if (code === 4 || (code === 14 && !/failed to connect|connect failed/i.test(String(error.error.details)))) {
+          const unknown = new ValidationError("Your node did not say whether the channel was opened. Check your channels before trying again.", 504);
+          unknown.uncertain = true;
+          throw unknown;
+        }
+        throw error;
+      }
     })
   )
 );
@@ -225,7 +248,16 @@ router.post(
       if (!match) {
         throw new ValidationError("Not a channel point (txid:index)");
       }
-      await lightningLogic.closeChannel(match[1], Number(match[2]), yes(force));
+      try {
+        await lightningLogic.closeChannel(match[1], Number(match[2]), yes(force));
+      } catch (error) {
+        if (error.error && error.error.code === 4) {
+          const unknown = new ValidationError("Your node did not say whether the channel is closing. Check your channels before trying again.", 504);
+          unknown.uncertain = true;
+          throw unknown;
+        }
+        throw error;
+      }
       return { closing: true };
     })
   )
@@ -260,11 +292,18 @@ router.use((error, req, res, next) => {
     if (detail === WALLET_LOCKED) {
       status = 503;
       message = "The node's wallet is locked.";
-    } else if (/connect|unavailable|ECONNREFUSED/i.test(String(detail || error.error && error.error.code))) {
+    } else if (
+      (error.error && (error.error.code === 14 || error.error.code === 4)) ||
+      /failed to connect|ECONNREFUSED|waiting to start|in the process of starting/i.test(String(detail || ""))
+    ) {
       status = 503;
       message = "The node is not answering. It may be starting up.";
-    } else if (detail) {
-      message = `${message}: ${detail}`;
+    } else {
+      // LND refused: the request, not the server, is at fault.
+      status = error.statusCode || 400;
+      if (detail) {
+        message = `${message}: ${detail}`;
+      }
     }
   }
   if (error.type === "entity.parse.failed") {

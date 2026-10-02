@@ -36,18 +36,21 @@ test("a code pairs once and its key then authenticates", async () => {
   assert.ok(!text.includes(enrollCode));
 });
 
-test("a code whose answer was lost can be claimed again briefly, for a new key", async () => {
+test("a code whose answer was lost can be claimed again briefly, by the same phone, for a new key", async () => {
   const { devices, tick } = harness();
   const { enrollCode } = await devices.createPending("");
-  const first = await devices.claim(enrollCode, "Phone");
+  const nonce = "n".repeat(32);
+  const first = await devices.claim(enrollCode, "Phone", nonce);
   tick(30_000);
-  const again = await devices.claim(enrollCode, "Phone");
+  assert.equal(await devices.claim(enrollCode, "Thief"), null, "without the nonce: no");
+  assert.equal(await devices.claim(enrollCode, "Thief", "x".repeat(32)), null, "another nonce: no");
+  const again = await devices.claim(enrollCode, "Phone", nonce);
   assert.equal(again.id, first.id, "the same device");
   assert.notEqual(again.apiKey, first.apiKey);
   assert.equal(devices.verify(first.apiKey), null, "the first key is replaced");
   assert.ok(devices.verify(again.apiKey));
   tick(3 * 60_000);
-  assert.equal(await devices.claim(enrollCode, "x"), null, "and then the code is spent");
+  assert.equal(await devices.claim(enrollCode, "x", nonce), null, "and then the code is spent");
   assert.equal((await devices.list()).length, 1);
 });
 
@@ -128,4 +131,21 @@ test("parallel pairings each land in the file", async () => {
   const { devices, stored } = harness();
   await Promise.all([devices.createPending("a"), devices.createPending("b"), devices.createPending("c")]);
   assert.equal(stored().devices.length, 3);
+});
+
+test("a claim without a nonce can't be repeated", async () => {
+  const { devices } = harness();
+  const { enrollCode } = await devices.createPending("");
+  assert.ok(await devices.claim(enrollCode, "Old phone"));
+  assert.equal(await devices.claim(enrollCode, "Old phone"), null);
+});
+
+test("closing the pairing screen removes only a device that has not paired", async () => {
+  const { devices } = harness();
+  const pending = await devices.createPending("");
+  const paired = await devices.createPending("");
+  const { apiKey } = await devices.claim(paired.enrollCode, "Phone");
+  assert.equal(await devices.revoke(paired.device.id, { pendingOnly: true }), false);
+  assert.ok(devices.verify(apiKey), "the phone that just paired keeps working");
+  assert.equal(await devices.revoke(pending.device.id, { pendingOnly: true }), true);
 });

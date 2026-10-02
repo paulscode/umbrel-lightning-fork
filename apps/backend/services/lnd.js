@@ -215,15 +215,26 @@ function closeChannel(fundingTxId, index, force) {
       new Promise((resolve, reject) => {
         try {
           const call = lightning.CloseChannel(rpcPayload);
+          let done = false;
 
           call.on("data", (chan) => {
             if (chan.update === "close_pending") {
+              done = true;
               resolve();
             }
           });
 
           call.on("error", (error) => {
+            done = true;
             reject(new LndError("Unable to close channel", error));
+          });
+
+          // A stream that ends without saying the close is pending must not
+          // leave the caller waiting forever.
+          call.on("end", () => {
+            if (!done) {
+              reject(new LndError("Unable to close channel", { code: 4, details: "the node ended the request without an answer" }));
+            }
           });
         } catch (error) {
           reject(error);

@@ -256,10 +256,74 @@ test("an estimate keeps the anchor reserve back and needs enough coins", async (
   // 167 vB plus the change that keeps the reserve.
   assert.equal(sweep.feeSat, 420);
   assert.equal(sweep.amountSat, 150000 - 420 - 10000);
+  // Enough coins, but what stays (580 sats of change) is under the reserve:
+  // lnd refuses that, so the estimate does.
   await assert.rejects(
     () => mobile.estimateOnchain({ address: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", amountSat: 149000, satPerVbyte: 2 }),
+    /keeps on-chain to close its channels/
+  );
+  await assert.rejects(
+    () => mobile.estimateOnchain({ address: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", amountSat: 151000, satPerVbyte: 2 }),
     /Not enough confirmed on-chain funds/
   );
+  // Within the reserve's limits it goes through.
+  const ok = await mobile.estimateOnchain({ address: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", amountSat: 100000, satPerVbyte: 2 });
+  assert.ok(ok.feeSat > 0);
+});
+
+test("change under dust goes to the fee; dust amounts and new segwit versions are refused", async () => {
+  const { mobile } = harness();
+  // 100000-sat coin, P2WPKH out: 109.5 vB + 43 change at 5 = 763 with change.
+  const est = await mobile.estimateOnchain({ address: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", amountSat: 100000 - 763 - 100, satPerVbyte: 5 });
+  assert.equal(est.feeSat, 863, "the 100 sats of change join the fee");
+  await assert.rejects(
+    () => mobile.estimateOnchain({ address: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", amountSat: 200, satPerVbyte: 5 }),
+    /too small/
+  );
+  await assert.rejects(() => mobile.decode("bc1zw508d6qejxtdg4y5r3zarvaryvaxxpcs"), /newer kind of output/);
+});
+
+test("a payment asked about again after it went through comes back as paid", async () => {
+  const { mobile } = harness({
+    lnd: {
+      sendPayment: async () => {
+        throw new LndError("Unable to send lightning payment", { details: "invoice is already paid" });
+      },
+      listRecentPayments: async () => ({
+        payments: [{ paymentHash: "aa".repeat(32), status: "SUCCEEDED", paymentPreimage: "bb".repeat(32), valueSat: "2500", feeSat: "2" }],
+      }),
+    },
+  });
+  const res = await mobile.payLightning({ request: "lnbc25u1pfoo" });
+  assert.equal(res.status, "succeeded");
+  assert.equal(res.preimage, "bb".repeat(32));
+});
+
+test("LND unreachable is a 503, not a bad request or an uncertain send", async () => {
+  const down = new LndError("Unable to decode payment request", { code: 14, details: "failed to connect to all addresses" });
+  const { mobile } = harness({
+    lnd: {
+      decodePaymentRequest: async () => { throw down; },
+      sendCoinsAtRate: async () => { throw new LndError("Unable to send coins", { code: 14, details: "failed to connect to all addresses" }); },
+      getOnChainTransactions: async () => { throw down; },
+      listRecentPayments: async () => { throw down; },
+      getInvoices: async () => { throw down; },
+    },
+  });
+  await assert.rejects(() => mobile.decode("lnbc25u1pfoo"), (e) => e === down);
+  await assert.rejects(
+    () => mobile.sendOnchain({ address: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", amountSat: 1000, satPerVbyte: 2 }),
+    (e) => e.statusCode === 503 && !e.uncertain
+  );
+  await assert.rejects(() => mobile.activity({}), (e) => e === down);
+});
+
+test("memos are cut by bytes, not characters", () => {
+  const { clip } = require("../logic/mobile.js");
+  const long = "€".repeat(400);
+  const out = clip(long);
+  assert.ok(Buffer.byteLength(out) <= 639);
+  assert.equal(out, "€".repeat(213));
 });
 
 test("an on-chain send with a request id is labelled, and found again instead of repeated", async () => {
@@ -294,7 +358,12 @@ test("a send cut off before the node answered is uncertain, not failed", async (
       },
     },
   });
-  await assert.rejects(() => mobile.payLightning({ request: "lnbc25u1pfoo" }), (e) => e.statusCode === 504 && e.uncertain === true);
+  await assert.rejects(() => mobile.payLightning({ request: "lnbc25u1pfoo" }), (e) => e.statusCode === 504 && e.uncertain === true && e.recheck === true);
+  await assert.rejects(
+    () => harness({ offers: { pay: async () => { throw new LndError("Unable to pay offer", { code: 14, details: "Connection dropped" }); } } }).mobile.payLightning({ request: "lno1qany", amountSat: 5 }),
+    (e) => e.statusCode === 504 && e.uncertain === true && e.recheck === false,
+    "an offer is never re-asked: a new invoice would be a second payment"
+  );
   await assert.rejects(
     () => mobile.sendOnchain({ address: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", amountSat: 1000, satPerVbyte: 2 }),
     (e) => e.statusCode === 504 && e.uncertain === true

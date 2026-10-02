@@ -16,7 +16,7 @@ wallet is locked.
 
 | Platform | Address | TLS |
 |---|---|---|
-| StartOS | the **Dashboard** interface, LAN and onion, under `/api/v1` | the server's own, signed by its root CA |
+| StartOS | the **Dashboard** interface, LAN and onion, under `/api/v1` | LAN: the server's own, signed by its root CA; onion: plain HTTP is offered when StartOS serves it (Tor authenticates the node), else HTTPS from the same root |
 | Umbrel | port `7157` on the LAN, and an onion of its own on port 443 | the dashboard's own authority (below) |
 | Both | the dashboard's own port, behind its sign-in or the app proxy | — |
 
@@ -25,6 +25,12 @@ dashboard, so the dashboard serves this API alone on a listener of its own
 (`MOBILE_TLS_PORT`), with a certificate from an authority it makes once and
 keeps (`mobile-ca.pem` in its data directory). The server certificate is
 reissued when the names change or it nears expiry; the authority is not.
+
+The certificate names the addresses the pairing code gives where they are
+known, but an address the server cannot know (an IP, a name it was opened
+at) need not be among them: a client verifies the pinned root, and should
+accept the node's own addresses from pairing as names. That is what the
+app does.
 
 A client pins the root: the last certificate of the chain the server
 presents, accepted only if its SHA-256 (the whole certificate, as
@@ -51,12 +57,15 @@ that opened the dashboard itself.
 ### `POST /api/v1/pair` (no key)
 
 ```json
-{"enrollCode": "e_…", "label": "Pixel 8"}
+{"enrollCode": "e_…", "label": "Pixel 8", "claimNonce": "<16-128 random characters>"}
 ```
 
 → `{apiKey, deviceId, label, serverId, apiVersion, caPem, caSha256, node}`.
 `apiKey` (`lf_<id>_<secret>`) is shown this once; the node keeps only its
-SHA-256. A used, expired or unknown code is 401.
+SHA-256. A used, expired or unknown code is 401. If the answer is lost on
+its way, the same code with the same `claimNonce` can be claimed again for
+two minutes, for a new key that voids the first; without the nonce (anyone
+else who saw the QR code), it cannot.
 
 Every other call takes the key as `Authorization: Bearer lf_…`.
 
@@ -126,7 +135,12 @@ of making another.
 
 A send cut off before the node answered (the connection to LND dropped,
 or timed out) is a 504 with `"uncertain": true`: the money may have
-moved. Ask again with the same id rather than a new one. A client that lost
+moved. Ask again with the same id rather than a new one: for an on-chain
+send or a BOLT 11 payment the node then finds out (by the wallet label, by
+the payment hash) and answers with the outcome. An offer has no way to be
+looked up until it is paid, so its uncertain answer stands for the day the
+id is kept; check the activity. A 503 means LND could not be reached and
+nothing was sent. A client that lost
 the answer resends with the same id; a new attempt after a failure the user
 has seen uses a new one.
 
@@ -137,7 +151,7 @@ has seen uses a new one.
 | `GET /v1/devices` | `{devices: [{id, label, status, created, lastUsed, lastTransport, enrollExpires}]}` |
 | `POST /v1/devices` | starts a pairing: `{device, pairing, qr}` |
 | `POST /v1/devices/<id>/label` (or `PATCH /v1/devices/<id>`) | `{label}` |
-| `DELETE /v1/devices/<id>` | removes it; its key stops working at once |
+| `DELETE /v1/devices/<id>` | removes it; its key stops working at once. `?pending=1` removes it only if it has not paired yet |
 
 Devices are kept in `devices.json` beside the dashboard's state, so they are
 in its backups.
@@ -149,6 +163,7 @@ in its backups.
 | `MOBILE_TLS_PORT` | serve the API alone over TLS on this port (Umbrel) |
 | `MOBILE_PUBLIC_PORT` | the port that listener is published on, for the pairing code |
 | `MOBILE_ONION` | the onion address in front of that listener |
+| `MOBILE_LAN_IP` | the server's LAN IP, offered beside its name (Umbrel; a phone may not resolve `.local`) |
 | `MOBILE_ENDPOINTS_FILE` | a JSON file `{onion: [urls], lan: [urls], ip: [urls]}` of where the dashboard is reached (StartOS) |
 | `MOBILE_CA_FILE` | a certificate chain whose last certificate is the root to pin (StartOS: LND's chain, issued by the server's root CA) |
 | `DEVICE_DOMAIN_NAME` | the server's LAN name (Umbrel) |

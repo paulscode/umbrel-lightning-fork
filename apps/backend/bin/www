@@ -94,24 +94,43 @@ var mobileServer;
 if (process.env.MOBILE_TLS_PORT) {
   const https = require("https");
   const access = require("logic/mobileAccess.js");
+  // The names a phone is told to use. A client that checks names as well
+  // as the pinned root (the app checks the root, and accepts the node's own
+  // addresses) finds them here.
   const names = [
     process.env.DEVICE_DOMAIN_NAME,
     process.env.MOBILE_ONION,
+    process.env.MOBILE_LAN_IP,
     "localhost",
   ].filter(Boolean);
   // A problem here costs the phones, not the dashboard.
   try {
     const tls = access.ensureServerCert(names);
     mobileServer = https.createServer({ key: tls.key, cert: tls.cert, minVersion: "TLSv1.2" }, require("../mobileApp"));
+    // A slow or stalled client may hold a socket only so long.
+    mobileServer.requestTimeout = 180000;
+    mobileServer.headersTimeout = 30000;
     mobileServer.listen(normalizePort(process.env.MOBILE_TLS_PORT));
     mobileServer.on("listening", () => {
       console.log("Mobile API listening on port " + process.env.MOBILE_TLS_PORT);
     });
     mobileServer.on("error", (error) => {
       console.error("Mobile API listener: " + error.message);
+      access.setListenerProblem(error.message);
     });
+    // The server certificate is reissued before it expires, without a
+    // restart; the authority the phones pin stays the same.
+    setInterval(() => {
+      try {
+        const fresh = access.ensureServerCert(names);
+        mobileServer.setSecureContext({ key: fresh.key, cert: fresh.cert, minVersion: "TLSv1.2" });
+      } catch (error) {
+        console.error("Mobile API certificate: " + error.message);
+      }
+    }, 24 * 60 * 60 * 1000).unref();
   } catch (error) {
     console.error("Mobile API not started: " + error.message);
+    access.setListenerProblem(error.message);
     mobileServer = undefined;
   }
 }

@@ -1727,6 +1727,12 @@ message WalletBalanceResponse {
     /// The unconfirmed balance of a wallet(with 0 confirmations)
     int64 unconfirmed_balance = 3 [json_name = "unconfirmed_balance"];
 
+    /// Coins leased or locked by the wallet, not spendable.
+    int64 locked_balance = 5;
+
+    /// What the wallet keeps back to fee-bump anchor channel closes.
+    int64 reserved_balance_anchor_chan = 6;
+
     /// Coinbase outputs not yet deep enough for a spend of them to relay.
     int64 immature_coinbase_balance = 1001 [json_name = "immature_coinbase_balance"];
 }

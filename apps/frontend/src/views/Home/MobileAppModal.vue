@@ -164,6 +164,9 @@ export default {
       notice: "",
       starting: false,
       pairing: null,
+      // When the code expires by this browser's clock: the server says how
+      // long it lasts, so a skewed clock does not cut it short.
+      expiresAt: 0,
       now: Date.now(),
       timer: null,
       poller: null,
@@ -178,7 +181,7 @@ export default {
       if (!this.pairing) {
         return "";
       }
-      const left = Math.max(0, Math.round((this.pairing.pairing.exp - this.now) / 1000));
+      const left = Math.max(0, Math.round((this.expiresAt - this.now) / 1000));
       return `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
     },
     // The pairing code for a dashboard opened on the phone itself, which
@@ -207,7 +210,7 @@ export default {
     noOnionHint() {
       return this.$store.state.system.platform === "startos"
         ? "This dashboard has no onion address, so the phone can reach your node only on your local network. To use the app anywhere, add an onion address to the dashboard's interface in StartOS, then pair again."
-        : "Your node has no onion address for the app yet, so the phone can reach it only on your local network.";
+        : "Your node has no onion address for the app yet, so the phone can reach it only on your local network. Tor publishes one a few minutes after Lightning Fork is installed or updated: then restart Lightning Fork from its menu on the Umbrel home screen, and pair again.";
     }
   },
   methods: {
@@ -254,9 +257,10 @@ export default {
         const res = await API.post(`${process.env.VUE_APP_API_BASE_URL}/v1/devices`, {});
         this.pairing = res.data;
         this.now = Date.now();
+        this.expiresAt = this.now + (res.data.expiresInMs || this.pairing.pairing.exp - this.now);
         this.timer = setInterval(() => {
           this.now = Date.now();
-          if (this.pairing && this.now > this.pairing.pairing.exp) {
+          if (this.pairing && this.now > this.expiresAt) {
             this.stopPairing();
             this.refresh();
           }
@@ -288,9 +292,10 @@ export default {
     cancelPairing() {
       const id = this.pairing && this.pairing.device.id;
       this.stopPairing();
-      // The unused code stops working at once.
+      // The unused code stops working at once; a phone that paired in the
+      // meantime is kept (pending=1 removes only an unpaired device).
       if (id) {
-        API.delete(`${process.env.VUE_APP_API_BASE_URL}/v1/devices/${id}`).finally(this.refresh);
+        API.delete(`${process.env.VUE_APP_API_BASE_URL}/v1/devices/${id}?pending=1`).finally(this.refresh);
       }
     },
     stopPairing() {
@@ -334,6 +339,9 @@ export default {
     }
   },
   beforeDestroy() {
+    if (this.pairing) {
+      this.cancelPairing();
+    }
     this.stopPairing();
   }
 };

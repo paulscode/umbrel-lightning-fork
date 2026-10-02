@@ -157,3 +157,9 @@ This app is built upon the work done by [Casa](https://github.com/casa) on its o
 [![License](https://img.shields.io/github/license/getumbrel/umbrel-lightning?color=%235351FB)](https://github.com/getumbrel/umbrel-lightning/blob/master/LICENSE.md)
 
 [umbrel.com](https://umbrel.com)
+
+## Mobile app
+
+Phones pair with the dashboard from its menu (**Mobile app**) and use the
+companion app for Android to see balances, send and receive. The API it
+uses is described in [docs/mobile-api.md](docs/mobile-api.md).

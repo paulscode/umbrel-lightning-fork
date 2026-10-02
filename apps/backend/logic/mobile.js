@@ -9,10 +9,20 @@ const { parseAddress, otherNetwork } = require("../utils/bitcoinAddress.js");
 
 const DEFAULT_INVOICE_EXPIRY = 3600;
 const MAX_INVOICE_EXPIRY = 7 * 24 * 3600;
-const MAX_MEMO = 640;
+// lnd allows 639 bytes of BOLT 11 description; count bytes, not characters.
+const MAX_MEMO_BYTES = 639;
+
+function clip(text, maxBytes = MAX_MEMO_BYTES) {
+  let out = String(text || "");
+  while (Buffer.byteLength(out, "utf8") > maxBytes) {
+    out = Array.from(out).slice(0, -1).join("");
+  }
+  return out;
+}
 const MAX_INPUT = 4096;
 const MAX_SAT = 21e6 * 1e8;
-const MAX_FEE_RATE = 10000;
+// The node's sweeper refuses rates above 1000 sat/vB by default.
+const MAX_FEE_RATE = 1000;
 
 // Virtual sizes, for the fee of a sweep, where every confirmed coin is spent
 // and the size is known before the node builds the transaction.
@@ -21,7 +31,11 @@ const OUTPUT_VBYTES = { p2wpkh: 31, p2wsh: 43, p2tr: 43, segwit: 43, p2sh: 32, p
 const TX_OVERHEAD_VBYTES = 10.5;
 // The node's change output (P2TR).
 const CHANGE_VBYTES = 43;
-const DUST_SAT = 546;
+// The dust limit of the node's P2TR change at the relay floor; change below
+// it goes to the fee.
+const CHANGE_DUST_SAT = 330;
+// The smallest amount worth sending to any address type.
+const MIN_SEND_SAT = 546;
 // gRPC codes after which a send may or may not have happened: the call was
 // cut off, not answered.
 const UNCERTAIN_GRPC_CODES = [1, 4, 14];
@@ -70,7 +84,7 @@ function satAmount(value, { allowZero = false } = {}) {
 function feeRate(value) {
   const n = Number(value);
   if (!Number.isFinite(n) || n < 1 || n > MAX_FEE_RATE) {
-    throw bad("The fee rate must be between 1 and 10000 sat/vB");
+    throw bad("The fee rate must be between 1 and 1000 sat/vB");
   }
   return Math.ceil(n);
 }
@@ -111,9 +125,19 @@ function setsBlake2b(features) {
 // node said no, a 504 marked uncertain when the call was cut off and the
 // money may have moved, so that the phone does not offer to try again as if
 // nothing had happened.
+// LND did not answer (down, starting, wallet locked): not the input's fault.
+function unavailable(error) {
+  const code = error && error.error && error.error.code;
+  return code === 14 || code === 4 || /wallet locked|waiting to start|not yet ready|in the process of starting/i.test(detailOf(error));
+}
+
 function failure(error, message) {
   const code = error && error.error && error.error.code;
   const detail = detailOf(error);
+  // Never got to LND: nothing was sent, and the phone may try again.
+  if (code === 14 && /failed to connect|connect failed|ECONNREFUSED|no connection established|name resolution/i.test(detail)) {
+    return new ValidationError("Your node is not answering. It may be starting up.", 503);
+  }
   const cutOff =
     UNCERTAIN_GRPC_CODES.includes(code) ||
     /no final payment status|stream removed|connection (reset|closed)|socket hang up|ECONNRESET|deadline/i.test(detail);
@@ -123,6 +147,8 @@ function failure(error, message) {
       504
     );
     unknown.uncertain = true;
+    // Asking again re-checks rather than replaying this answer.
+    unknown.recheck = true;
     return unknown;
   }
   return bad(message);
@@ -158,6 +184,9 @@ function friendlyPayError(error) {
 
 function friendlySendError(error) {
   const detail = detailOf(error).toLowerCase();
+  if (/reserved wallet balance/.test(detail)) {
+    return "That would leave less than your node keeps on-chain to close its channels safely. Send less.";
+  }
   if (/insufficient funds/.test(detail)) {
     return "Not enough confirmed on-chain funds for this amount and fee.";
   }
@@ -197,7 +226,8 @@ function createMobile({
       try {
         text = (await lnd().decodePaymentRequest(request)).description || "";
       } catch (error) {
-        text = "";
+        // Not remembered: a node that was briefly away is asked again.
+        return "";
       }
     }
     if (descriptions.size > 2000) {
@@ -328,6 +358,9 @@ function createMobile({
       res = await lnd().decodePaymentRequest(request);
     } catch (error) {
       const detail = detailOf(error);
+      if (unavailable(error)) {
+        throw error;
+      }
       if (/network/i.test(detail)) {
         throw bad("This invoice is for a different network.");
       }
@@ -362,6 +395,9 @@ function createMobile({
     try {
       res = await offers().decode(text);
     } catch (error) {
+      if (unavailable(error)) {
+        throw error;
+      }
       throw bad("This is not a valid offer.");
     }
     if (!res.forThisChain) {
@@ -407,6 +443,9 @@ function createMobile({
     const parsed = parseAddress(text, network());
     if (!parsed) {
       return null;
+    }
+    if (parsed.type === "segwit") {
+      throw bad("This address uses a newer kind of output your node can't send to yet.");
     }
     return {
       kind: "onchain",
@@ -542,36 +581,50 @@ function createMobile({
     return INPUT_VBYTES[key];
   }
 
-  // The confirmed coins and what the node keeps back for anchor channels'
-  // fee bumps, which no send may spend.
+  // The confirmed coins, the wallet's whole balance (unconfirmed coins
+  // count toward the reserve check), and what the node keeps back for
+  // anchor channels' fee bumps.
   async function spendable() {
     const [coins, balance] = await Promise.all([lnd().listUnspent(), lnd().getWalletBalance()]);
     const utxos = ((coins && coins.utxos) || coins || []).slice();
     utxos.sort((a, b) => num(b.amountSat) - num(a.amountSat));
-    return { utxos, reserve: num(balance && balance.reservedBalanceAnchorChan) };
+    return {
+      utxos,
+      reserve: num(balance && balance.reservedBalanceAnchorChan),
+      walletTotal: num(balance && balance.confirmedBalance) + num(balance && balance.unconfirmedBalance),
+    };
   }
 
-  // The size and fee of sending `amount` at `rate`, choosing coins largest
-  // first as the node does, with a change output when one is worth having.
+  function reserveRefusal(reserve, unit) {
+    return bad(
+      `That would leave less than the ${reserve} ${unit} your node keeps on-chain to close its channels safely. Send less.`
+    );
+  }
+
+  // The size and fee of sending `amount` at `rate`, as the node builds it:
+  // coins largest first until they cover the amount and a fee that assumes
+  // a change output; change below dust goes to the fee. Then lnd's reserve
+  // check: what stays in the wallet (every other coin, unconfirmed too, plus
+  // the change) must cover the anchor reserve, or the send is refused.
   // Sized here rather than from the node's estimate, whose rate comes back
   // rounded down to whole sat/vB (1.9 reads as 1, nearly doubling the size).
-  function planSend(utxos, reserve, amount, rate, destinationType) {
-    const base = TX_OVERHEAD_VBYTES + (OUTPUT_VBYTES[destinationType] || 43);
-    let vbytes = base;
+  function planSend({ utxos, reserve, walletTotal }, amount, rate, destinationType) {
+    let vbytes = TX_OVERHEAD_VBYTES + (OUTPUT_VBYTES[destinationType] || 43);
     let total = 0;
     for (const utxo of utxos) {
       vbytes += inputVbytes(utxo);
       total += num(utxo.amountSat);
       const withChange = Math.ceil((vbytes + CHANGE_VBYTES) * rate);
       const change = total - amount - withChange;
-      if (change >= Math.max(DUST_SAT, reserve)) {
-        return { feeSat: withChange, vbytes: Math.ceil(vbytes + CHANGE_VBYTES) };
+      if (change < 0) {
+        continue;
       }
-      const noChange = total - amount;
-      if (reserve === 0 && noChange >= Math.ceil(vbytes * rate)) {
-        // The remainder is too small to keep and goes to the fee.
-        return { feeSat: noChange, vbytes: Math.ceil(vbytes) };
+      const keptChange = change >= CHANGE_DUST_SAT ? change : 0;
+      const feeSat = keptChange ? withChange : total - amount;
+      if (reserve > 0 && walletTotal - total + keptChange < reserve) {
+        throw reserveRefusal(reserve, "sats");
       }
+      return { feeSat, vbytes: Math.ceil(vbytes + (keptChange ? CHANGE_VBYTES : 0)) };
     }
     throw bad("Not enough confirmed on-chain funds for this amount and fee.");
   }
@@ -581,7 +634,8 @@ function createMobile({
   async function estimateOnchain({ address, amountSat, sendAll, satPerVbyte }) {
     const parsed = checkedAddress(address);
     const rate = feeRate(satPerVbyte);
-    const { utxos, reserve } = await spendable();
+    const wallet = await spendable();
+    const { utxos, reserve } = wallet;
     const totalSat = utxos.reduce((sum, u) => sum + num(u.amountSat), 0);
     if (sendAll) {
       if (!totalSat) {
@@ -597,13 +651,16 @@ function createMobile({
       }
       const feeSat = Math.ceil(vbytes * rate);
       const amount = totalSat - feeSat - reserve;
-      if (amount <= DUST_SAT) {
+      if (amount <= MIN_SEND_SAT) {
         throw bad("The fee would take the whole balance at this rate.");
       }
       return { amountSat: amount, feeSat, satPerVbyte: rate, totalSat: amount + feeSat, sendAll: true, reservedSat: reserve };
     }
     const amount = satAmount(amountSat);
-    const plan = planSend(utxos, reserve, amount, rate, parsed.type);
+    if (amount < MIN_SEND_SAT) {
+      throw bad(`That amount is too small to send on-chain (the least is ${MIN_SEND_SAT} sats).`);
+    }
+    const plan = planSend(wallet, amount, rate, parsed.type);
     return { amountSat: amount, feeSat: plan.feeSat, satPerVbyte: rate, totalSat: amount + plan.feeSat, sendAll: false };
   }
 
@@ -659,7 +716,20 @@ function createMobile({
     }
     try {
       if (target.kind === "bolt11") {
-        const res = await lnd().sendPayment(target.request, amount || undefined, amount || target.amountSat);
+        let res;
+        try {
+          res = await lnd().sendPayment(target.request, amount || undefined, amount || target.amountSat);
+        } catch (error) {
+          // Asked again about a payment that went through: say so, with
+          // its proof, instead of "already paid" as a failure.
+          if (/already paid|already succeeded/i.test(detailOf(error))) {
+            const paid = await findPayment(target.paymentHash);
+            if (paid) {
+              return paid;
+            }
+          }
+          throw error;
+        }
         return {
           status: "succeeded",
           paymentHash: res.paymentHash,
@@ -685,8 +755,31 @@ function createMobile({
       if (error instanceof ValidationError) {
         throw error;
       }
-      throw failure(error, friendlyPayError(error));
+      const result = failure(error, friendlyPayError(error));
+      // An offer's payment has no hash to look up until it is paid: an
+      // uncertain one stays as it is, and is never sent again.
+      if (target.kind !== "bolt11") {
+        result.recheck = false;
+      }
+      throw result;
     }
+  }
+
+  // A payment this node made, by hash, as a pay result; null if not found
+  // or not settled.
+  async function findPayment(paymentHash) {
+    const res = await lnd().listRecentPayments(500);
+    const p = ((res && res.payments) || []).find((x) => x.paymentHash === paymentHash);
+    if (!p || String(p.status).toUpperCase() !== "SUCCEEDED") {
+      return null;
+    }
+    return {
+      status: "succeeded",
+      paymentHash: p.paymentHash,
+      preimage: p.paymentPreimage,
+      amountSat: num(p.valueSat),
+      feeSat: num(p.feeSat),
+    };
   }
 
   // An address to receive on-chain. The last unused one unless `fresh`.
@@ -701,7 +794,7 @@ function createMobile({
     if (!Number.isInteger(expiry) || expiry < 60 || expiry > MAX_INVOICE_EXPIRY) {
       throw bad("The expiry must be between a minute and a week");
     }
-    const text = String(memo || "").slice(0, MAX_MEMO);
+    const text = clip(memo);
     const res = await lnd().addInvoiceWithExpiry(amount, text, expiry);
     const created = now();
     return {
@@ -747,7 +840,7 @@ function createMobile({
   }
 
   async function createOffer({ description, amountSat }) {
-    const text = String(description || "").trim().slice(0, MAX_MEMO);
+    const text = clip(String(description || "").trim());
     const amount = satAmount(amountSat, { allowZero: true });
     if (amount && !text) {
       throw bad("An offer with an amount needs a description");
@@ -767,11 +860,27 @@ function createMobile({
   // invoices, newest first.
   async function activity({ limit = 30 } = {}) {
     const max = Math.max(1, Math.min(100, Number(limit) || 30));
-    const [txs, payments, invoices] = await Promise.all([
-      lnd().getOnChainTransactions().catch(() => []),
-      lnd().listRecentPayments(max).catch(() => ({ payments: [] })),
-      lnd().getInvoices().catch(() => ({ invoices: [] })),
+    const settled = await Promise.allSettled([
+      lnd().getOnChainTransactions(),
+      lnd().listRecentPayments(max),
+      lnd().getInvoices(),
     ]);
+    // If LND answered none of them, that is an error, not an empty history.
+    if (settled.every((r) => r.status === "rejected")) {
+      throw settled[0].reason;
+    }
+    const value = (i, fallback) => (settled[i].status === "fulfilled" ? settled[i].value : fallback);
+    const txs = value(0, []);
+    const payments = value(1, { payments: [] });
+    const invoices = value(2, { invoices: [] });
+    // Descriptions, a few at a time.
+    const paymentList = (payments && payments.payments) || [];
+    const descriptionsByHash = new Map();
+    for (let i = 0; i < paymentList.length; i += 8) {
+      const chunk = paymentList.slice(i, i + 8);
+      const texts = await Promise.all(chunk.map((p) => describePayment(p)));
+      chunk.forEach((p, k) => descriptionsByHash.set(p.paymentHash, texts[k]));
+    }
     const items = [];
     for (const tx of txs || []) {
       const amount = num(tx.amount);
@@ -793,7 +902,7 @@ function createMobile({
     }
     for (const p of (payments && payments.payments) || []) {
       const status = String(p.status || "").toUpperCase();
-      const description = await describePayment(p);
+      const description = descriptionsByHash.get(p.paymentHash) || "";
       items.push({
         id: `pay:${p.paymentHash}`,
         kind: "lightning",
@@ -845,6 +954,7 @@ function createMobile({
 
 module.exports = {
   createMobile,
+  clip,
   btcToSat,
   friendlyPayError,
   friendlySendError,

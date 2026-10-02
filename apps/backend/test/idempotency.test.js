@@ -58,3 +58,21 @@ test("a reused id with different parameters is refused", async () => {
   );
   assert.equal(runs, 1);
 });
+
+test("an outcome marked recheck is asked anew; others are kept", async () => {
+  const once = createIdempotency();
+  let runs = 0;
+  const cut = () =>
+    once.run("dev", "req-00000006", async () => {
+      runs++;
+      const e = new Error("cut off");
+      e.recheck = runs === 1;
+      throw e;
+    });
+  await assert.rejects(cut);
+  await new Promise((r) => setImmediate(r));
+  await assert.rejects(cut);
+  await new Promise((r) => setImmediate(r));
+  await assert.rejects(cut);
+  assert.equal(runs, 2, "re-asked once, then the second (not recheck) outcome is kept");
+});

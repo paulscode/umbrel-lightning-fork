@@ -24,6 +24,11 @@ router.get(
 router.post(
   "/",
   safeHandler(async (req, res) => {
+    // A code for a listener that is not serving would only fail on the phone.
+    const problem = access.getListenerProblem();
+    if (problem) {
+      throw new ValidationError(`The mobile API is not running: ${problem}`, 503);
+    }
     const { device, enrollCode, enrollExpires } = await devices.createPending((req.body || {}).label);
     const where = access.endpoints(req);
     const caPem = access.rootCaPem();
@@ -40,7 +45,8 @@ router.post(
     if (caPem) {
       pairing.ca = x509.fingerprint(caPem);
     }
-    res.status(201).json({ device, pairing, qr: JSON.stringify(pairing) });
+    // expiresInMs: for the page's countdown, whatever its own clock says.
+    res.status(201).json({ device, pairing, qr: JSON.stringify(pairing), expiresInMs: enrollExpires - Date.now() });
   })
 );
 
@@ -65,7 +71,13 @@ router.delete(
     if (!ID.test(req.params.id)) {
       throw new ValidationError("Not a device id");
     }
-    if (!(await devices.revoke(req.params.id))) {
+    // ?pending=1: the pairing screen closing, which must not remove a phone
+    // that paired in the meantime.
+    const pendingOnly = req.query.pending === "1";
+    if (!(await devices.revoke(req.params.id, { pendingOnly }))) {
+      if (pendingOnly) {
+        return res.json({ revoked: false });
+      }
       throw new ValidationError("No such device", 404);
     }
     res.json({ revoked: true });

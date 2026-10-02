@@ -25,21 +25,23 @@ test("Umbrel: the API's own port on the address the page was opened at", () => {
     lanUrl: "https://umbrel.local:7157",
     lanIp: "https://192.168.1.20:7157",
   });
+  // A page opened at some other name does not become the LAN address.
+  assert.equal(access.endpoints({ headers: { host: "my-node.example:7156" } }, env).lanUrl, "https://umbrel.local:7157");
   // A page opened over the app's onion: no LAN host from the request.
   const viaTor = access.endpoints({ headers: { host: "b".repeat(56) + ".onion" } }, { ...env, MOBILE_ONION: "not-an-onion" });
   assert.equal(viaTor.onionUrl, null);
   assert.equal(viaTor.lanUrl, "https://umbrel.local:7157");
 });
 
-test("StartOS: the package's address list, with the page's own address preferred", () => {
+test("StartOS: the package's address list; the page's own address only when it is on it", () => {
   const dir = tmpdir();
   const file = path.join(dir, "endpoints.json");
   fs.writeFileSync(
     file,
     JSON.stringify({
-      onion: [`http://${ONION}`],
-      lan: ["https://quiet-otter.local:49152"],
-      ip: ["https://192.168.1.9:49152"],
+      onion: [`https://${ONION}`, `http://${ONION}`],
+      lan: ["http://quiet-otter.local:3006", "https://quiet-otter.local:49152"],
+      ip: ["https://192.168.1.9:49152", "https://10.8.0.2:49152"],
     })
   );
   const env = { MOBILE_ENDPOINTS_FILE: file };
@@ -47,13 +49,27 @@ test("StartOS: the package's address list, with the page's own address preferred
     onionUrl: `http://${ONION}`,
     lanUrl: "https://quiet-otter.local:49152",
     lanIp: "https://192.168.1.9:49152",
-  });
-  assert.equal(access.endpoints({ headers: { host: "192.168.1.9:49153" } }, env).lanIp, "https://192.168.1.9:49153");
-  // Without the file, the page's address alone.
-  assert.deepEqual(access.endpoints({ headers: { host: "quiet-otter.local:49152" } }, {}), {
+  }, "the http onion is preferred: Tor authenticates the node");
+  assert.equal(access.endpoints({ headers: { host: "10.8.0.2:49152" } }, env).lanIp, "https://10.8.0.2:49152", "the page's own IP, being listed");
+  // A page opened at the plain-HTTP port, or at a domain of its own, does not
+  // replace the listed addresses.
+  assert.equal(access.endpoints({ headers: { host: "quiet-otter.local:3006" } }, env).lanUrl, "https://quiet-otter.local:49152");
+  assert.equal(access.endpoints({ headers: { host: "node.example.com" } }, env).lanUrl, "https://quiet-otter.local:49152");
+  // Without the file, the page's own address, only if reached over HTTPS.
+  assert.deepEqual(access.endpoints({ headers: { host: "quiet-otter.local:49152", "x-forwarded-proto": "https" } }, {}), {
     onionUrl: null,
     lanUrl: "https://quiet-otter.local:49152",
     lanIp: null,
+  });
+  assert.equal(access.endpoints({ headers: { host: "quiet-otter.local:3006" } }, {}).lanUrl, null);
+});
+
+test("Umbrel: the server's LAN IP is always offered beside its name", () => {
+  const env = { MOBILE_TLS_PORT: "3443", MOBILE_PUBLIC_PORT: "7157", DEVICE_DOMAIN_NAME: "umbrel.local", MOBILE_LAN_IP: "192.168.1.30" };
+  assert.deepEqual(access.endpoints({ headers: { host: "umbrel.local:7156" } }, env), {
+    onionUrl: null,
+    lanUrl: "https://umbrel.local:7157",
+    lanIp: "https://192.168.1.30:7157",
   });
 });
 

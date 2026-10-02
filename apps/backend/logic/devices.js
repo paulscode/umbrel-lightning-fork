@@ -24,8 +24,9 @@ const LAST_USED_WRITE_MS = 60 * 1000;
 const MAX_LABEL = 64;
 const MAX_DEVICES = 50;
 // A code whose answer was lost on the way to the phone can be claimed again
-// this long after, for a new key; the first is never usable by anyone else
-// since only the phone holding the code ever saw it.
+// this long after, for a new key, by the same phone only: the first claim
+// carries a random nonce, and a re-claim must carry it too. Anyone else who
+// saw the QR code has the code but not the nonce.
 const RECLAIM_MS = 2 * 60 * 1000;
 
 function sha256(text) {
@@ -112,6 +113,7 @@ function createDevices({
     for (const d of state.devices) {
       if (d.status === "active" && d.enrollHash && (!d.claimedAt || now() - d.claimedAt >= RECLAIM_MS)) {
         d.enrollHash = null;
+        d.claimNonceHash = null;
       }
     }
     const before = state.devices.length;
@@ -178,7 +180,7 @@ function createDevices({
   }
 
   // {apiKey, id, label} for a valid code, which is used up; null otherwise.
-  function claim(enrollCode, label) {
+  function claim(enrollCode, label, claimNonce) {
     return serial(() => {
       load();
       sweep();
@@ -186,10 +188,17 @@ function createDevices({
         return null;
       }
       const hash = sha256(enrollCode);
+      const nonce = typeof claimNonce === "string" && claimNonce.length >= 16 && claimNonce.length <= 128 ? claimNonce : null;
       const device = state.devices.find(
         (d) =>
           sameHash(d.enrollHash, hash) &&
-          (d.status === "pending" || (d.status === "active" && d.claimedAt && now() - d.claimedAt < RECLAIM_MS))
+          (d.status === "pending" ||
+            (d.status === "active" &&
+              d.claimedAt &&
+              now() - d.claimedAt < RECLAIM_MS &&
+              nonce &&
+              d.claimNonceHash &&
+              sameHash(d.claimNonceHash, sha256(nonce))))
       );
       if (!device) {
         return null;
@@ -201,6 +210,7 @@ function createDevices({
       device.enrollHash = hash;
       device.enrollExpires = null;
       device.claimedAt = device.claimedAt || now();
+      device.claimNonceHash = device.claimNonceHash || (nonce ? sha256(nonce) : null);
       const name = cleanLabel(label);
       if (name) {
         device.label = name;
@@ -243,16 +253,21 @@ function createDevices({
     return { id: found.id, label: found.label };
   }
 
-  function revoke(id) {
+  // Removes a device. With `pendingOnly`, only one that has not paired yet:
+  // closing the pairing screen must not cut off a phone that just paired.
+  function revoke(id, { pendingOnly = false } = {}) {
     return serial(() => {
       load();
-      const device = state.devices.find((d) => d.id === id && d.status !== "revoked");
+      const device = state.devices.find(
+        (d) => d.id === id && d.status !== "revoked" && (!pendingOnly || d.status === "pending")
+      );
       if (!device) {
         return false;
       }
       device.status = "revoked";
       device.keyHash = null;
       device.enrollHash = null;
+      device.claimNonceHash = null;
       device.enrollExpires = null;
       device.revokedAt = now();
       save();

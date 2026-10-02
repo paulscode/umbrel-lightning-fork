@@ -43,8 +43,14 @@ function createIdempotency({ ttlMs = 24 * 60 * 60 * 1000, max = 1000, now = Date
     }
     const promise = Promise.resolve().then(fn);
     entries.set(key, { at: now(), promise, fingerprint });
-    // Keep the failure too, but do not let it count as unhandled here.
-    promise.catch(() => {});
+    // Keep the outcome, failures too, so that a repeat does not act again;
+    // except an outcome marked `recheck` (the call was cut off and the
+    // function can find out what happened), which a repeat asks anew.
+    promise.catch((error) => {
+      if (error && error.recheck && entries.get(key) && entries.get(key).promise === promise) {
+        entries.delete(key);
+      }
+    });
     return promise;
   }
 
