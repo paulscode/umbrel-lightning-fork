@@ -140,9 +140,9 @@ router.post(
 router.post(
   "/lightning/pay",
   handle((req) =>
-    idempotent(req, () => {
+    idempotent(req, ({ recheck }) => {
       const { request, amountSat, payerNote } = body(req);
-      return mobile.payLightning({ request, amountSat, payerNote });
+      return mobile.payLightning({ request, amountSat, payerNote, recheck });
     })
   )
 );

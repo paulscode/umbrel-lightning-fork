@@ -76,3 +76,22 @@ test("an outcome marked recheck is asked anew; others are kept", async () => {
   await assert.rejects(cut);
   assert.equal(runs, 2, "re-asked once, then the second (not recheck) outcome is kept");
 });
+
+test("the re-run after a recheck is told it is one", async () => {
+  const once = createIdempotency();
+  const seen = [];
+  const call = () =>
+    once.run("dev", "req-00000007", async ({ recheck }) => {
+      seen.push(recheck);
+      if (seen.length === 1) {
+        const e = new Error("cut off");
+        e.recheck = true;
+        throw e;
+      }
+      return "paid";
+    }, "fp");
+  await assert.rejects(call);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(await call(), "paid");
+  assert.deepEqual(seen, [false, true]);
+});

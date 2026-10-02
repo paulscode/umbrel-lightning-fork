@@ -645,16 +645,20 @@ function createMobile({
       for (const utxo of utxos) {
         vbytes += inputVbytes(utxo);
       }
-      // With anchor channels the node keeps their reserve back as change.
-      if (reserve > 0) {
+      // A sweep spends the confirmed coins. With anchor channels, lnd keeps
+      // their reserve back as change only if what stays (the unconfirmed
+      // coins) does not already cover it.
+      const keepReserve = reserve > 0 && wallet.walletTotal - totalSat < reserve;
+      if (keepReserve) {
         vbytes += CHANGE_VBYTES;
       }
       const feeSat = Math.ceil(vbytes * rate);
-      const amount = totalSat - feeSat - reserve;
+      const kept = keepReserve ? reserve : 0;
+      const amount = totalSat - feeSat - kept;
       if (amount <= MIN_SEND_SAT) {
         throw bad("The fee would take the whole balance at this rate.");
       }
-      return { amountSat: amount, feeSat, satPerVbyte: rate, totalSat: amount + feeSat, sendAll: true, reservedSat: reserve };
+      return { amountSat: amount, feeSat, satPerVbyte: rate, totalSat: amount + feeSat, sendAll: true, reservedSat: kept };
     }
     const amount = satAmount(amountSat);
     if (amount < MIN_SEND_SAT) {
@@ -696,7 +700,10 @@ function createMobile({
 
   // Pays an invoice or an offer. An amount is needed only when the request
   // leaves it to the payer.
-  async function payLightning({ request, amountSat, payerNote }) {
+  // `recheck`: this is the same request asked about again after an uncertain
+  // answer; an invoice found paid is then this payment's outcome. A fresh
+  // request for an invoice already paid is refused as such.
+  async function payLightning({ request, amountSat, payerNote, recheck = false }) {
     const target = await decode(request);
     if (target.kind === "unsupported") {
       throw bad(target.message);
@@ -722,7 +729,7 @@ function createMobile({
         } catch (error) {
           // Asked again about a payment that went through: say so, with
           // its proof, instead of "already paid" as a failure.
-          if (/already paid|already succeeded/i.test(detailOf(error))) {
+          if (recheck && /already paid|already succeeded/i.test(detailOf(error))) {
             const paid = await findPayment(target.paymentHash);
             if (paid) {
               return paid;

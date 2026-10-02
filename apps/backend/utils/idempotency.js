@@ -6,6 +6,9 @@ const ID = /^[A-Za-z0-9_-]{8,64}$/;
 
 function createIdempotency({ ttlMs = 24 * 60 * 60 * 1000, max = 1000, now = Date.now } = {}) {
   const entries = new Map();
+  // Ids whose first outcome was uncertain and dropped for a recheck: their
+  // next run is told so, to find out what happened rather than act anew.
+  const rechecking = new Map();
 
   function prune() {
     const cutoff = now() - ttlMs;
@@ -23,7 +26,7 @@ function createIdempotency({ ttlMs = 24 * 60 * 60 * 1000, max = 1000, now = Date
   // request: a reused id with other parameters is refused.
   function run(scope, requestId, fn, fingerprint = "") {
     if (requestId === undefined || requestId === null || requestId === "") {
-      return fn();
+      return fn({ recheck: false });
     }
     if (!ID.test(String(requestId))) {
       const error = new Error("requestId must be 8 to 64 letters, digits, - or _");
@@ -41,7 +44,9 @@ function createIdempotency({ ttlMs = 24 * 60 * 60 * 1000, max = 1000, now = Date
       }
       return hit.promise;
     }
-    const promise = Promise.resolve().then(fn);
+    const recheck = rechecking.get(key) === fingerprint;
+    rechecking.delete(key);
+    const promise = Promise.resolve().then(() => fn({ recheck }));
     entries.set(key, { at: now(), promise, fingerprint });
     // Keep the outcome, failures too, so that a repeat does not act again;
     // except an outcome marked `recheck` (the call was cut off and the
@@ -49,6 +54,10 @@ function createIdempotency({ ttlMs = 24 * 60 * 60 * 1000, max = 1000, now = Date
     promise.catch((error) => {
       if (error && error.recheck && entries.get(key) && entries.get(key).promise === promise) {
         entries.delete(key);
+        rechecking.set(key, fingerprint);
+        if (rechecking.size > max) {
+          rechecking.delete(rechecking.keys().next().value);
+        }
       }
     });
     return promise;

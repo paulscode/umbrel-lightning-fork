@@ -256,6 +256,11 @@ test("an estimate keeps the anchor reserve back and needs enough coins", async (
   // 167 vB plus the change that keeps the reserve.
   assert.equal(sweep.feeSat, 420);
   assert.equal(sweep.amountSat, 150000 - 420 - 10000);
+  // With unconfirmed coins that cover the reserve, lnd sweeps everything.
+  const covered = harness({ lnd: { getWalletBalance: async () => ({ confirmedBalance: "150000", unconfirmedBalance: "20000", reservedBalanceAnchorChan: "10000" }) } });
+  const all = await covered.mobile.estimateOnchain({ address: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", sendAll: true, satPerVbyte: 2 });
+  assert.equal(all.feeSat, 334);
+  assert.equal(all.amountSat, 150000 - 334);
   // Enough coins, but what stays (580 sats of change) is under the reserve:
   // lnd refuses that, so the estimate does.
   await assert.rejects(
@@ -294,9 +299,11 @@ test("a payment asked about again after it went through comes back as paid", asy
       }),
     },
   });
-  const res = await mobile.payLightning({ request: "lnbc25u1pfoo" });
+  const res = await mobile.payLightning({ request: "lnbc25u1pfoo", recheck: true });
   assert.equal(res.status, "succeeded");
   assert.equal(res.preimage, "bb".repeat(32));
+  // A new request for the same invoice is told it is already paid.
+  await assert.rejects(() => mobile.payLightning({ request: "lnbc25u1pfoo" }), /already been paid/);
 });
 
 test("LND unreachable is a 503, not a bad request or an uncertain send", async () => {
