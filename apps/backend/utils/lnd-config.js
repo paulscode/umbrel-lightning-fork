@@ -36,6 +36,8 @@ const generate = (configObject) => {
     if (formattedKey === "alias" && value === "") continue;
     // externalip guard clause here is to not write an empty externalip line to the umbrel-lnd.conf (which will cause lnd to fail to start)
     if (formattedKey === "externalip" && value.length === 0) continue;
+    // likewise the watchtower's: empty means Tor only
+    if (formattedKey === "watchtower.externalip" && !value) continue;
     if (Array.isArray(value)) {
       for (const item of value) {
         lndConfigString += `\n${formattedKey}=${item}`;

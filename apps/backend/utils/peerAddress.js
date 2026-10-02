@@ -83,4 +83,49 @@ function parsePeerAddress(input) {
   return { pubKey, host, port, hostPort };
 }
 
-module.exports = { parsePeerAddress, DEFAULT_PORT };
+// host[:port] as lnd takes it for an external address setting: a host name,
+// IPv4 address or bracketed IPv6 address, the port 1-65535 if given.
+function isHostPort(value) {
+  if (typeof value !== "string" || value.length > 300) {
+    return false;
+  }
+  let host = value;
+  let port;
+  if (value.startsWith("[")) {
+    const close = value.indexOf("]");
+    if (close < 0) {
+      return false;
+    }
+    host = value.slice(1, close);
+    const after = value.slice(close + 1);
+    if (after) {
+      if (!after.startsWith(":")) {
+        return false;
+      }
+      port = after.slice(1);
+    }
+    if (!IPV6.test(host) || !host.includes(":")) {
+      return false;
+    }
+  } else {
+    const colon = value.indexOf(":");
+    if (colon >= 0) {
+      host = value.slice(0, colon);
+      port = value.slice(colon + 1);
+    }
+    if (!NAME.test(host)) {
+      return false;
+    }
+  }
+  if (port === undefined) {
+    return true;
+  }
+  try {
+    parsePort(port);
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+module.exports = { parsePeerAddress, isHostPort, DEFAULT_PORT };

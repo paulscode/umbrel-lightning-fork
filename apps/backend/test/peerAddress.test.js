@@ -46,3 +46,13 @@ test("anything else is refused with a reason", () => {
     assert.throws(() => parsePeerAddress(bad), why, bad);
   }
 });
+
+test("the watchtower address setting takes host[:port] only", () => {
+  const { isHostPort } = require("../utils/peerAddress.js");
+  for (const ok of ["192.168.1.20:9913", "192.168.1.20", "tower.example.com:9913", "[2001:db8::1]:9913", "[2001:db8::1]", "umbrel.local"]) {
+    assert.ok(isHostPort(ok), ok);
+  }
+  for (const bad of ["", "host:0", "host:65536", "host:abc", "a b", "http://x", "host;rm", "[2001:db8::1", "[x]:1", "-x.example", "a:b:c", 9913, null]) {
+    assert.ok(!isHostPort(bad), String(bad));
+  }
+});

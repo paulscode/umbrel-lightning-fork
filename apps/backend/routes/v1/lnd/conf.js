@@ -8,6 +8,7 @@ const configLogic = require('logic/config');
 const safeHandler = require("utils/safeHandler");
 const lndConfMap = require("utils/lndConfMap");
 const DEFAULT_CONFIG = require("utils/defaultConfig");
+const { isHostPort } = require("utils/peerAddress");
 
 router.get('/lnd-config', safeHandler(async(req, res) => {
     const settings = await diskService.readJsonFile(constants.JSON_SETTINGS_FILE);
@@ -200,6 +201,14 @@ function validateSettings(settings) {
 
     // WTCLIENT
 
+    // watchtower.externalip (address others reach the watchtower at)
+    // Empty for Tor only; otherwise host[:port], the host a name, an IPv4
+    // address or a bracketed IPv6 one.
+    const watchtowerExternalip = settings["watchtower.externalip"];
+    if (watchtowerExternalip !== undefined && watchtowerExternalip !== "" &&
+        !isHostPort(watchtowerExternalip)) {
+        errors.push("Watchtower Address must be a host or IP address, optionally with :port, such as 192.168.1.20:9913");
+    }
     // wtclient.active (watchtower client)
     const wtclientActive = settings["wtclient.active"];
     if (typeof wtclientActive !== "boolean") {

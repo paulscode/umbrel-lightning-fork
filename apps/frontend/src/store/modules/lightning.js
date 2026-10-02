@@ -69,6 +69,7 @@ const state = () => ({
     progress: 0
   },
   watchtowerServiceUri: "",
+  watchtowerServiceUris: [],
   watchtowers: []
 });
 
@@ -176,6 +177,10 @@ const mutations = {
 
   setWatchtowerServiceUri(state, uri) {
     state.watchtowerServiceUri = uri;
+  },
+
+  setWatchtowerServiceUris(state, uris) {
+    state.watchtowerServiceUris = uris;
   },
 
   setWatchtowers(state, towers) {
@@ -494,6 +499,7 @@ const actions = {
     );
     if (info && info.uris) {
       commit("setWatchtowerServiceUri", info.uris[0]);
+      commit("setWatchtowerServiceUris", info.uris);
     }
   },
 

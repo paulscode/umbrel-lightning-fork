@@ -1003,20 +1003,43 @@
                     breach, broadcasts a justice transaction to claim back the
                     locked funds.
                     <br/>
-                    If enabled, you will see your watchtower's URI below, an
-                    address on Tor. Share it with other Lightning Fork nodes on
+                    If enabled, you will see your watchtower's URIs below: one
+                    on Tor, and one for the address you give, if any. Share
+                    them with other Lightning Fork nodes on
                     0.21.3-beta-blake2b.14 or later: a stock LND node, or an
                     earlier release, cannot use it.
                   </small>
                   <!-- if the setting is enabled locally in the UI -->
                   <div v-if="settings['watchtower.active']" class="mt-2">
+                    <label class="mb-1 d-block" for="watchtower-externalip"
+                      ><small class="font-weight-bold">Address others reach it at (optional)</small></label
+                    >
+                    <b-form-input
+                      id="watchtower-externalip"
+                      class="advanced-settings-input mb-1"
+                      size="sm"
+                      autocomplete="off"
+                      spellcheck="false"
+                      placeholder="e.g. 192.168.1.20:9913"
+                      :value="settings['watchtower.externalip'] || ''"
+                      @input="value => (settings['watchtower.externalip'] = value.trim())"
+                    ></b-form-input>
+                    <small class="d-block text-muted mb-2">
+                      Your Umbrel's LAN address, or a public host name forwarded
+                      to it, with port 9913. Leave empty to be reached over Tor
+                      only.
+                    </small>
                     <!-- if the setting is not yet saved -->
                     <div v-if="!lndConfig['watchtower.active']">
                       <input-copy class="bg-white" size="sm" value="Your watchtower service URI will appear here after you save and restart"></input-copy>
                     </div>
-                    <!-- if the setting's saved and the URI has been fetched -->
-                    <div v-else-if="watchtowerServiceUri">
-                      <input-copy class="bg-white" size="sm" :value="watchtowerServiceUri"></input-copy>
+                    <!-- if the setting's saved and the URIs have been fetched:
+                         the Tor one, and one for the address below if set -->
+                    <div v-else-if="watchtowerServiceUris.length">
+                      <div v-for="uri in watchtowerServiceUris" :key="uri" class="mb-1">
+                        <small class="text-muted">{{ uri.includes(".onion") ? "Tor" : "Address" }}</small>
+                        <input-copy class="bg-white" size="sm" :value="uri"></input-copy>
+                      </div>
                     </div>
                     <!-- if the setting's saved but the URI hasn't been fetched yet -->
                     <span
@@ -1602,6 +1625,7 @@ export default {
     ...mapState({
       lndConfig: state => state.user.lndConfig,
       watchtowerServiceUri: state => state.lightning.watchtowerServiceUri,
+      watchtowerServiceUris: state => state.lightning.watchtowerServiceUris,
       watchtowers: state => state.lightning.watchtowers,
       alias: state => state.lightning.alias,
     }),

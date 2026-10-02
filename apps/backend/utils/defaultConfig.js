@@ -29,6 +29,7 @@ module.exports = {
   'tor.streamisolation': false,
 // watchtower
   'watchtower.active': false,
+  'watchtower.externalip': '',
 // wtclient
   'wtclient.active': false,
   'wtclient.sweep-fee-rate': 10,
