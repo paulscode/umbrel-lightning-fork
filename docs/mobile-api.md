@@ -339,6 +339,7 @@ credential), so they are in its backups.
 | `MOBILE_PUBLIC_PORT` | the port that listener is published on, for the pairing code |
 | `MOBILE_ONION_FILE` | Tor's `hostname` file for the onion in front of that listener, read when needed (Umbrel; Tor writes it after the first start) |
 | `MOBILE_ONION` | that onion address, if there is no file to read |
+| `ONION_PROXY_IP`, `ONION_PROXY_PORT` | a Tor SOCKS proxy used only to reach a service for paying Bitcoin invoices at an onion address (StartOS; Umbrel uses `TOR_PROXY_*`) |
 | `MOBILE_LAN_IP` | the server's LAN IP, offered beside its name (Umbrel; a phone may not resolve `.local`) |
 | `MOBILE_ENDPOINTS_FILE` | a JSON file `{onion: [urls], lan: [urls], ip: [urls]}` of where the dashboard is reached (StartOS) |
 | `MOBILE_CA_FILE` | a certificate chain whose last certificate is the root to pin (StartOS: LND's chain, issued by the server's root CA) |

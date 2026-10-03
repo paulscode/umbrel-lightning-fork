@@ -91,9 +91,19 @@ function fingerprintOf(der) {
   return hex.match(/../g).join(":");
 }
 
-// The node's Tor proxy, as the price feeds use it.
+// The node's Tor proxy, for a service at an onion address: Umbrel's, which
+// the price feeds use too, or ONION_PROXY_*, which StartOS passes for onions
+// only. Kept apart there because the proxy is the Tor package's, which may not
+// be installed, and routing the price feeds through it would break them on a
+// server that has none.
 function torProxy(env = process.env) {
-  return env.TOR_PROXY_IP && env.TOR_PROXY_PORT ? `socks5h://${env.TOR_PROXY_IP}:${env.TOR_PROXY_PORT}` : null;
+  if (env.TOR_PROXY_IP && env.TOR_PROXY_PORT) {
+    return `socks5h://${env.TOR_PROXY_IP}:${env.TOR_PROXY_PORT}`;
+  }
+  if (env.ONION_PROXY_IP && env.ONION_PROXY_PORT) {
+    return `socks5h://${env.ONION_PROXY_IP}:${env.ONION_PROXY_PORT}`;
+  }
+  return null;
 }
 
 let torAgent;

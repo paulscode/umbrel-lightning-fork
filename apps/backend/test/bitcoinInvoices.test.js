@@ -824,3 +824,12 @@ test("what is not a payable Bitcoin invoice is refused before the service is ask
     await none.close();
   }
 });
+
+test("an onion service is reached through Umbrel's Tor proxy, or the onion-only one StartOS passes", () => {
+  const { torProxy } = require("../logic/bitcoinBridge.js");
+  assert.equal(torProxy({}), null);
+  assert.equal(torProxy({ TOR_PROXY_IP: "10.21.21.11", TOR_PROXY_PORT: "9050" }), "socks5h://10.21.21.11:9050");
+  assert.equal(torProxy({ ONION_PROXY_IP: "10.0.3.1", ONION_PROXY_PORT: "9050" }), "socks5h://10.0.3.1:9050");
+  // Umbrel's wins where both are set.
+  assert.equal(torProxy({ TOR_PROXY_IP: "a", TOR_PROXY_PORT: "1", ONION_PROXY_IP: "b", ONION_PROXY_PORT: "2" }), "socks5h://a:1");
+});
