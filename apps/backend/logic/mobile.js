@@ -219,6 +219,15 @@ function friendlyPayError(error) {
   const detail = detailOf(error).toLowerCase();
   const rules = [
     [/option_blake2b/, NOT_UPGRADED],
+    // Paying an offer: getting an invoice from the node that made it.
+    [/no invoice arrived in time/, "The offer's node did not answer in time. It may be offline or hard to reach; try again later."],
+    [/issuer refused/, "The offer's node refused to give an invoice for this payment."],
+    [/names no way to reach/, "This offer gives no way to reach the node that made it."],
+    [/destination is unreachable/, "The offer's node cannot be reached right now. It may be offline; try again later."],
+    [/below the offer's amount/, "That is less than this offer asks for."],
+    [/offer has no amount/, "This offer has no amount. Enter how much to pay."],
+    [/offer does not take a quantity|offer needs a quantity|above the offer's maximum/, "This offer's quantity does not fit this payment."],
+    [/unsupported chain|names no chain|not a supported chain/, "This offer is for a different network."],
     [/self-payments not allowed|self payment/, "That request was made by this node."],
     [/invoice expired|expired/, "This request has expired."],
     [/already paid|invoice is already paid|payment.*already.*succeeded/, "This has already been paid."],

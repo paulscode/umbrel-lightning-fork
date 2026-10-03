@@ -3,6 +3,7 @@
 // node in millisatoshis; ids and hashes are hex over HTTP and bytes at the
 // node.
 const lndService = require("services/lnd.js");
+const { offerFailure } = require("utils/offerFailure.js");
 
 const MSAT_PER_SAT = 1000;
 
@@ -119,13 +120,18 @@ async function decode(bolt12) {
 }
 
 async function fetchInvoice({ offer, amountSat, quantity, payerNote, timeoutSeconds }) {
-  const res = await lndService.fetchOfferInvoice({
-    offer,
-    amountMsat: satToMsat(amountSat),
-    quantity,
-    payerNote,
-    timeoutSeconds,
-  });
+  let res;
+  try {
+    res = await lndService.fetchOfferInvoice({
+      offer,
+      amountMsat: satToMsat(amountSat),
+      quantity,
+      payerNote,
+      timeoutSeconds,
+    });
+  } catch (error) {
+    throw offerFailure(error);
+  }
   return {
     bolt12: res.bolt12,
     invoice: presentInvoiceInfo(res.invoice),
@@ -134,14 +140,19 @@ async function fetchInvoice({ offer, amountSat, quantity, payerNote, timeoutSeco
 }
 
 async function pay({ offer, invoice, amountSat, quantity, payerNote, timeoutSeconds }) {
-  const res = await lndService.payOffer({
-    offer,
-    invoice,
-    amountMsat: satToMsat(amountSat),
-    quantity,
-    payerNote,
-    timeoutSeconds,
-  });
+  let res;
+  try {
+    res = await lndService.payOffer({
+      offer,
+      invoice,
+      amountMsat: satToMsat(amountSat),
+      quantity,
+      payerNote,
+      timeoutSeconds,
+    });
+  } catch (error) {
+    throw offerFailure(error);
+  }
   return {
     bolt12: res.bolt12,
     paymentHash: toHex(res.paymentHash),

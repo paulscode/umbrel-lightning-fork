@@ -945,9 +945,7 @@
     </div>
 
     <!-- Error message -->
-    <div class="wallet-error d-block w-100 mb-2">
-      <small class="text-danger error px-3 px-lg-4">{{ error }}</small>
-    </div>
+    <wallet-error :message="error" @dismiss="error = ''" />
 
     <!-- Wallet buttons -->
     <div class="wallet-buttons">
@@ -1090,6 +1088,7 @@ import {
 } from "@/helpers/bitcoin-invoices";
 
 import CountUp from "@/components/Utility/CountUp";
+import WalletError from "@/components/Utility/WalletError.vue";
 import CardWidget from "@/components/CardWidget";
 import InputCopy from "@/components/Utility/InputCopy";
 import QrCode from "@/components/Utility/QrCode.vue";
@@ -1947,6 +1946,7 @@ export default {
     this.$root.$off("bitcoin-invoices-changed", this.onBitcoinInvoicesChanged);
   },
   components: {
+    WalletError,
     CardWidget,
     CountUp,
     QrCode,
