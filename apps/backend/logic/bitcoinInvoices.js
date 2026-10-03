@@ -1,4 +1,4 @@
-// Paying Bitcoin invoices (the SHA256 chain's) from this node, through a
+// Paying SHA256 invoices (the SHA256 chain's) from this node, through a
 // service someone else runs: the service answers with an invoice on this
 // chain for the same payment hash, held until it has paid the Bitcoin
 // invoice. It can only collect by paying, and the preimage this node gets
@@ -42,8 +42,8 @@ const MAX_RECORDS = 500;
 const ENDED_STATES = ["failed", "aborted", "expired"];
 const WAITING_STATES = ["quoted", "offered"];
 
-const NO_SERVICE = "To pay Bitcoin invoices, add a service in the dashboard's settings, under Paying Bitcoin invoices.";
-const NO_AMOUNT = "This Bitcoin invoice does not say how much to pay. Only Bitcoin invoices with an amount can be paid from here; ask for one with an amount.";
+const NO_SERVICE = "To pay SHA256 invoices, add a service in the dashboard's settings, under Paying SHA256 invoices.";
+const NO_AMOUNT = "This SHA256 invoice does not say how much to pay. Only SHA256 invoices with an amount can be paid from here; ask for one with an amount.";
 const INVALID_HOLD = "The service returned an invalid payment request, so nothing was paid. Do not use this service again until its operator has looked into it.";
 
 function dataDir() {
@@ -285,7 +285,7 @@ function createBitcoinInvoices({
     return out;
   }
 
-  // What paying a Bitcoin invoice of `amountMsat` would cost, for the
+  // What paying a SHA256 invoice of `amountMsat` would cost, for the
   // payment screen: {estimate, reference, referenceError, message}, where
   // `message` says why it can't be paid now, if it can't.
   async function describe({ amountMsat, expired }) {
@@ -367,11 +367,11 @@ function createBitcoinInvoices({
     const outcome = beforePaying ? "so it can't be paid from here" : "so nothing was paid";
     return refuse(
       "rate",
-      `The service's price is ${percent(over)} above the market rate, more than the ${percent(premium() + ref.volatility)} allowed, ${outcome}. You can change what is allowed in the dashboard's settings, under Paying Bitcoin invoices.`
+      `The service's price is ${percent(over)} above the market rate, more than the ${percent(premium() + ref.volatility)} allowed, ${outcome}. You can change what is allowed in the dashboard's settings, under Paying SHA256 invoices.`
     );
   }
 
-  // Asks the service to pay a Bitcoin invoice: {holdInvoice, expiresAt,
+  // Asks the service to pay a SHA256 invoice: {holdInvoice, expiresAt,
   // incomingMsat, outgoingMsat, hash}. The answer is not trusted for
   // anything; checkHold decides.
   async function quote(request) {
@@ -426,7 +426,7 @@ function createBitcoinInvoices({
   }
 
   // The checks a request from the service must pass before a sat of it is
-  // paid, against the Bitcoin invoice `x` and the request `y`, both as this
+  // paid, against the SHA256 invoice `x` and the request `y`, both as this
   // node decoded them:
   // - the same payment hash, so the service can only collect by paying x;
   // - payable to the service's own node key, from the code;
@@ -484,7 +484,7 @@ function createBitcoinInvoices({
     return reference.get();
   }
 
-  // The attempts, by the Bitcoin invoice's payment hash.
+  // The attempts, by the SHA256 invoice's payment hash.
   function loadRecords() {
     if (!records) {
       const data = read(name(paymentsFile));

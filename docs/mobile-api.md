@@ -13,7 +13,7 @@ request id reused for a different request, 429 after repeated bad keys or
 pairing codes, 503 when LND is not answering or its wallet is locked
 (nothing was sent), and 504 with `"uncertain": true` when a send was cut off
 and may have gone through (see Request ids). Refusals a client may want to
-branch on also carry a stable `"code"` (see Paying Bitcoin invoices); 409
+branch on also carry a stable `"code"` (see Paying SHA256 invoices); 409
 and 429 come with some of those.
 
 ## Where it is served
@@ -86,7 +86,7 @@ Every other call takes the key as `Authorization: Bearer lf_…`.
 | `POST /onchain/estimate` | `{address, amountSat \| sendAll, satPerVbyte}` | `{amountSat, feeSat, satPerVbyte, totalSat, sendAll, reservedSat?}`; sized by choosing coins largest first, as the node does; a sweep keeps back the anchor-channel reserve |
 | `POST /onchain/send` | `{address, amountSat \| sendAll, satPerVbyte, requestId?}` | `{txid, satPerVbyte}` |
 | `POST /lightning/pay` | `{request, amountSat?, payerNote?, requestId?}` | `{status, paymentHash, preimage, amountSat, feeSat}` |
-| `POST /pay/bitcoin-invoice` | `{request, maxIncomingSat, requestId?}` | `{status, paymentHash, preimage, amountSat, feeSat, bitcoinInvoice: {amountSat, description, paymentHash}}`, see Paying Bitcoin invoices |
+| `POST /pay/bitcoin-invoice` | `{request, maxIncomingSat, requestId?}` | `{status, paymentHash, preimage, amountSat, feeSat, bitcoinInvoice: {amountSat, description, paymentHash}}`, see Paying SHA256 invoices |
 | `POST /receive/address` | `{fresh?}` | `{address, type, uri}`; the last unused address unless `fresh` |
 | `POST /receive/invoice` | `{amountSat?, memo?, expirySeconds?}` | `{paymentRequest, paymentHash, amountSat, memo, createdAt, expiresAt, uri}` |
 | `GET /receive/invoice/<paymentHash>` | | `{state, amountSat, amountPaidSat, settledAt, expiresAt}`; `state` is `open`, `settled`, `canceled`, `accepted` or `expired` |
@@ -129,7 +129,7 @@ address of another network is named as such).
 
 An invoice from a Lightning node that has not upgraded to the BLAKE2b
 chain's rules (one without feature bit 512/513, `option_blake2b`) is, in
-practice, a Bitcoin invoice: both chains' invoices start with `lnbc`. It is
+practice, a SHA256 invoice: both chains' invoices start with `lnbc`. It is
 a 400 saying so, unless the client declares that it can show one (below).
 
 ### Capabilities
@@ -139,20 +139,20 @@ A client declares the kinds it can show beyond those above in the
 
 | Capability | |
 |---|---|
-| `bitcoin-invoice` | a Bitcoin invoice comes back as `kind: "bitcoin-invoice"` instead of a 400 |
+| `bitcoin-invoice` | a SHA256 invoice comes back as `kind: "bitcoin-invoice"` instead of a 400 |
 
 A client that sends nothing gets exactly what it always got. The header is
 the opt-in because an older client treats every kind but `onchain` as an
 ordinary Lightning invoice, and must never be handed one it would pay
 that way.
 
-### Paying Bitcoin invoices
+### Paying SHA256 invoices
 
-A Bitcoin invoice can be paid from this node through a service someone
-else runs, set up in the dashboard's settings (**Paying Bitcoin invoices**,
+A SHA256 invoice can be paid from this node through a service someone
+else runs, set up in the dashboard's settings (**Paying SHA256 invoices**,
 from a code the service's operator gives out). The service answers with an
 invoice on this chain for the **same payment hash**, held until it has paid
-the Bitcoin invoice: it can only collect by paying, and the preimage the
+the SHA256 invoice: it can only collect by paying, and the preimage the
 node gets back is the proof. The node pays nothing the service sends
 without checking it first (below).
 
@@ -172,7 +172,7 @@ without checking it first (below).
  "referenceError": "…when there is no market rate"}
 ```
 
-- `amountSat` is the Bitcoin invoice's amount (rounded up from msat), or
+- `amountSat` is the SHA256 invoice's amount (rounded up from msat), or
   `null` when it names none; those cannot be paid yet.
 - `estimate.incomingSat` is what the service would charge now, in BTCB2
   sats, if nothing moves before the payment: `ceil(out_msat / rate * (1 +
@@ -196,7 +196,7 @@ resume?}`, `maxIncomingSat` being the `estimate.maxIncomingSat` the user
 agreed to. It asks the service for its invoice at that moment and pays it
 only if, decoded by the node:
 
-1. its payment hash is the Bitcoin invoice's;
+1. its payment hash is the SHA256 invoice's;
 2. it is payable to the node key in the service's code;
 3. it is an invoice of this chain (`option_blake2b`);
 4. it asks no more than `maxIncomingSat`;
@@ -218,7 +218,7 @@ goes on, and asking again (`resume`, the same id) finds it:
 
 - the node's own payment for the hash comes first: paid gives the proof,
   in flight stays 504;
-- there is one attempt at a time per Bitcoin invoice, whatever the request
+- there is one attempt at a time per SHA256 invoice, whatever the request
   id or the device, recorded on disk before its payment starts
   (`bitcoin-invoice-payments.json` beside the dashboard's state). An
   attempt recorded as started, with no payment on the node, is resolved
@@ -238,7 +238,7 @@ Refusals carry a `code`. Nothing was paid after any of them.
 | `code` | Status | |
 |---|---|---|
 | `no_service` | 400 | no service is set up |
-| `no_amount` | 400 | the Bitcoin invoice names no amount |
+| `no_amount` | 400 | the SHA256 invoice names no amount |
 | `not_bitcoin_invoice` | 400 | the invoice is this chain's; pay it with `/lightning/pay` |
 | `already_paid` | 409 | the invoice has been paid (a repeat with `resume` gets the payment instead, when it was this node's) |
 | `in_progress` | 409 | the service is still busy with an earlier attempt, or still holding its last price; the sentence says how long when it can |
@@ -255,10 +255,10 @@ Refusals carry a `code`. Nothing was paid after any of them.
 | `not_authorized` | 400 | the service did not accept its code |
 | `disabled`, `too_small`, `too_large`, `expires_soon`, `route_budget`, `no_liquidity`, `price_unavailable`, `chain_unmeasured`, `self_payment`, `invalid_invoice`, `no_direction`, `refused` | 400 | the service refused, for the reason the sentence gives |
 
-In `/activity`, a payment that paid a Bitcoin invoice keeps `kind:
+In `/activity`, a payment that paid a SHA256 invoice keeps `kind:
 "lightning"` (its `amountSat` and `feeSat` are what it cost here) and adds
 `bitcoinInvoice: {amountSat, description, state}` (`paid`, `pending` or
-`returned`), with the Bitcoin invoice's description as `description`, and
+`returned`), with the SHA256 invoice's description as `description`, and
 `preimage` once paid.
 
 ### Request ids
@@ -305,7 +305,7 @@ again, not 503: only a first attempt can be told "nothing was sent".
 Devices are kept in `devices.json` beside the dashboard's state, so they are
 in its backups.
 
-## Paying Bitcoin invoices (web session)
+## Paying SHA256 invoices (web session)
 
 The same logic, for the dashboard's page. Answers and errors in this API's
 form (`{error, code?, uncertain?}`).
@@ -339,11 +339,11 @@ credential), so they are in its backups.
 | `MOBILE_PUBLIC_PORT` | the port that listener is published on, for the pairing code |
 | `MOBILE_ONION_FILE` | Tor's `hostname` file for the onion in front of that listener, read when needed (Umbrel; Tor writes it after the first start) |
 | `MOBILE_ONION` | that onion address, if there is no file to read |
-| `ONION_PROXY_IP`, `ONION_PROXY_PORT` | a Tor SOCKS proxy used only to reach a service for paying Bitcoin invoices at an onion address (StartOS; Umbrel uses `TOR_PROXY_*`) |
+| `ONION_PROXY_IP`, `ONION_PROXY_PORT` | a Tor SOCKS proxy used only to reach a service for paying SHA256 invoices at an onion address (StartOS; Umbrel uses `TOR_PROXY_*`) |
 | `MOBILE_LAN_IP` | the server's LAN IP, offered beside its name (Umbrel; a phone may not resolve `.local`) |
 | `MOBILE_ENDPOINTS_FILE` | a JSON file `{onion: [urls], lan: [urls], ip: [urls]}` of where the dashboard is reached (StartOS) |
 | `MOBILE_CA_FILE` | a certificate chain whose last certificate is the root to pin (StartOS: LND's chain, issued by the server's root CA) |
 | `DEVICE_DOMAIN_NAME` | the server's LAN name (Umbrel) |
 | `DEVICES_FILE` | where devices are kept, default `devices.json` beside `JSON_STORE_FILE` |
-| `BITCOIN_INVOICES_FILE` | where the service for paying Bitcoin invoices is kept, default `bitcoin-invoices.json` beside `JSON_STORE_FILE` |
+| `BITCOIN_INVOICES_FILE` | where the service for paying SHA256 invoices is kept, default `bitcoin-invoices.json` beside `JSON_STORE_FILE` |
 | `TOR_PROXY_IP`, `TOR_PROXY_PORT` | the Tor proxy for a service on an onion, and for the market rate |

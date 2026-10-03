@@ -91,7 +91,7 @@
               >Mempool app</b-dropdown-item
             >
             <b-dropdown-item href="#" v-b-modal.bitcoin-invoices-modal
-              >Paying Bitcoin invoices</b-dropdown-item
+              >Paying SHA256 invoices</b-dropdown-item
             >
             <!-- On StartOS the service's interfaces, actions and backups
                  cover these, so the dashboard keeps to the node itself. -->

@@ -9,7 +9,7 @@
   >
     <template v-slot:modal-header="{ close }">
       <div class="px-2 px-sm-3 pt-2 d-flex justify-content-between w-100">
-        <h3>Paying Bitcoin invoices</h3>
+        <h3>Paying SHA256 invoices</h3>
         <a href="#" class="align-self-center" v-on:click.stop.prevent="close">
           <svg
             width="18"
@@ -145,7 +145,7 @@
                 <span>{{ percent(status.terms.spread) }}</span>
               </div>
               <div class="d-flex justify-content-between small py-1">
-                <span class="text-muted">Bitcoin invoices it pays</span>
+                <span class="text-muted">SHA256 invoices it pays</span>
                 <span class="text-right ml-3">
                   {{ Number(status.terms.minSat).toLocaleString() }} to
                   {{ sats(status.terms.maxSat) }}
@@ -250,7 +250,7 @@ import {
 
 const toPercent = fraction => Math.round(Number(fraction) * 10000) / 100;
 
-// The service Bitcoin invoices are paid through, and how far above the
+// The service SHA256 invoices are paid through, and how far above the
 // market rate a payment may cost. Both are kept on the node.
 export default {
   data() {
@@ -348,7 +348,7 @@ export default {
       };
     },
     changed() {
-      // The Lightning wallet looks at a pasted Bitcoin invoice again.
+      // The Lightning wallet looks at a pasted SHA256 invoice again.
       this.$root.$emit("bitcoin-invoices-changed");
     },
     async addService() {
@@ -363,7 +363,7 @@ export default {
         this.useSettings(res.data);
         this.status = res.data.terms ? { terms: res.data.terms } : null;
         this.notice =
-          "Service added. You can now pay Bitcoin invoices from the Lightning wallet.";
+          "Service added. You can now pay SHA256 invoices from the Lightning wallet.";
         this.changed();
         this.loadStatus();
       } catch (error) {

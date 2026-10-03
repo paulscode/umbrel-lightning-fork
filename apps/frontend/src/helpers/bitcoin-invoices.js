@@ -1,4 +1,4 @@
-// Shared wording and numbers for paying Bitcoin invoices: the settings
+// Shared wording and numbers for paying SHA256 invoices: the settings
 // screen and the Lightning wallet's send screen show them the same way.
 
 const BASE = () => `${process.env.VUE_APP_API_BASE_URL}/v1/bitcoin-invoices`;
@@ -9,7 +9,7 @@ export function bitcoinInvoicesUrl(path = "") {
 
 // The dashboard says this whenever it explains what the feature is.
 export const BITCOIN_INVOICES_EXPLAINED =
-  "Pay invoices from Bitcoin's Lightning network. A service pays them for you; you pay it on this chain, and your payment only completes if the Bitcoin invoice is paid.";
+  "Pay invoices from the SHA256 chain's Lightning network. A service pays them for you; you pay it on this chain, and your payment only completes if the SHA256 invoice is paid.";
 
 // A fraction as a percentage, e.g. 0.0525 -> "5.25%".
 export function percent(fraction) {
@@ -34,7 +34,7 @@ export function rateText(rate) {
   }
   return `1 BTCB2 = ${r.toLocaleString(undefined, {
     maximumSignificantDigits: 6
-  })} BTC`;
+  })} BTC (SHA256)`;
 }
 
 // The same rate the other way round, which is easier to picture.
@@ -43,7 +43,7 @@ export function costPerBitcoinSat(rate) {
   if (!(r > 0)) {
     return "";
   }
-  return `1 Bitcoin sat costs about ${(1 / r).toLocaleString(undefined, {
+  return `1 SHA256 sat costs about ${(1 / r).toLocaleString(undefined, {
     maximumFractionDigits: 2
   })} BTCB2 sats`;
 }
@@ -86,7 +86,7 @@ export function newRequestId() {
 
 // Whether an invoice LND decoded is from a node without the BLAKE2b
 // chain's rules (feature bit 512/513), which in practice makes it a
-// Bitcoin invoice. Without any features it is not judged.
+// SHA256 invoice. Without any features it is not judged.
 export function looksLikeBitcoinInvoice(decoded) {
   const features = decoded && decoded.features;
   if (!features || typeof features !== "object") {

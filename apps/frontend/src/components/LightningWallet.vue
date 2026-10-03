@@ -276,12 +276,12 @@
             :disabled="send.isSending"
           ></b-input>
 
-          <!-- An invoice from Bitcoin's Lightning network, paid through a service -->
+          <!-- An invoice from the SHA256 chain's Lightning network, paid through a service -->
           <div
             v-if="send.kind === 'bitcoin-invoice' && send.bitcoin"
             class="bitcoin-invoice-details"
           >
-            <span class="bitcoin-chip mb-2">Bitcoin invoice</span>
+            <span class="bitcoin-chip mb-2">SHA256 invoice</span>
             <div v-if="send.bitcoin.estimate" class="d-flex justify-content-between align-items-center mb-1">
               <div>
                 <small class="d-block text-muted mb-1">Paying</small>
@@ -306,7 +306,7 @@
 
             <div class="small">
               <div class="d-flex justify-content-between py-1">
-                <span class="text-muted">Bitcoin invoice for</span>
+                <span class="text-muted">SHA256 invoice for</span>
                 <span class="text-right ml-3">{{
                   send.bitcoin.amountSat ? `${Number(send.bitcoin.amountSat).toLocaleString()} sats` : "No amount"
                 }}</span>
@@ -338,7 +338,7 @@
               size="sm"
               class="mt-2"
               v-b-modal.bitcoin-invoices-modal
-              >Settings for paying Bitcoin invoices</b-button
+              >Settings for paying SHA256 invoices</b-button
             >
             <small v-if="send.bitcoinNotice" class="d-block text-warning mt-2">
               {{ send.bitcoinNotice }}
@@ -458,7 +458,7 @@
           </p>
         </div>
 
-        <!-- SCREEN/MODE: A Bitcoin invoice's payment on its way -->
+        <!-- SCREEN/MODE: A SHA256 invoice's payment on its way -->
         <div
           class="px-3 px-lg-4 mode-sent wallet-mode"
           v-else-if="mode === 'bitcoin-waiting'"
@@ -485,10 +485,10 @@
               Back
             </a>
           </div>
-          <span class="bitcoin-chip mb-3">Bitcoin invoice</span>
+          <span class="bitcoin-chip mb-3">SHA256 invoice</span>
           <h4 class="mb-3" :class="{ blink: !send.waitingLong }">On its way</h4>
           <p v-if="!send.waitingLong" class="text-muted mb-2">
-            The service is paying the Bitcoin invoice. Your payment completes
+            The service is paying the SHA256 invoice. Your payment completes
             only once it has, which can take a minute or two.
           </p>
           <p v-else class="text-muted mb-2">
@@ -508,7 +508,7 @@
           >
         </div>
 
-        <!-- SCREEN/MODE: A Bitcoin invoice paid -->
+        <!-- SCREEN/MODE: A SHA256 invoice paid -->
         <div
           class="px-3 px-lg-4 mode-sent wallet-mode"
           v-else-if="mode === 'bitcoin-sent'"
@@ -537,7 +537,7 @@
           </div>
           <circular-checkmark class="mb-3" success></circular-checkmark>
           <p class="text-center mb-2">
-            Paid a Bitcoin invoice of
+            Paid a SHA256 invoice of
             <b>{{ bitcoinPaid.bitcoinAmountSat | localize }} sats</b>
             <span v-if="bitcoinPaid.description">
               for
@@ -1095,7 +1095,7 @@ import QrCode from "@/components/Utility/QrCode.vue";
 import CircularCheckmark from "@/components/Utility/CircularCheckmark.vue";
 import SatsBtcSwitch from "@/components/Utility/SatsBtcSwitch";
 
-// While a Bitcoin invoice's payment is on its way: how often to ask, and
+// While a SHA256 invoice's payment is on its way: how often to ask, and
 // for how long before saying so and leaving it to the transactions list.
 const BITCOIN_POLL_MS = 4000;
 const BITCOIN_POLL_LIMIT_MS = 10 * 60 * 1000;
@@ -1131,14 +1131,14 @@ export default {
         fetchedInvoice: "", //the BOLT 12 invoice fetched for an offer, so a retry pays the same one
         fetchedAmount: null, //that invoice's amount, in sats
         decodeSeq: 0, //so a slow decode of an earlier paste cannot overwrite a later one
-        bitcoin: null, //a Bitcoin invoice as the node decoded it, with what paying it costs
+        bitcoin: null, //a SHA256 invoice as the node decoded it, with what paying it costs
         bitcoinAttempt: null, //{request, maxIncomingSat, requestId} of the payment being made
         bitcoinNotice: "", //why the last attempt did not pay
         priceChanged: false, //the service's price moved; the new one is shown
         waitingLong: false, //asked for a while with no answer yet
       },
       bitcoinPaid: {
-        //a Bitcoin invoice just paid
+        //a SHA256 invoice just paid
         bitcoinAmountSat: null,
         description: "",
         amountSat: null,
@@ -1600,7 +1600,7 @@ export default {
       }
 
       // An invoice from a node without the BLAKE2b chain's rules is a
-      // Bitcoin invoice: shown as one, and paid through the service.
+      // SHA256 invoice: shown as one, and paid through the service.
       if (looksLikeBitcoinInvoice(fetchedInvoice)) {
         return this.showBitcoinInvoice(fetchedInvoice);
       }
@@ -1636,9 +1636,9 @@ export default {
       this.send.bitcoinNotice = "";
       this.send.priceChanged = false;
     },
-    //ask the node what paying a Bitcoin invoice costs through the service,
+    //ask the node what paying a SHA256 invoice costs through the service,
     //or why it can't be paid now; `fallback` is the invoice as LND decoded
-    //it, shown as before if the node says it is not a Bitcoin invoice
+    //it, shown as before if the node says it is not a SHA256 invoice
     async showBitcoinInvoice(fallback) {
       const seq = ++this.send.decodeSeq;
       const request = this.send.paymentRequest;
@@ -1654,7 +1654,7 @@ export default {
       } catch (error) {
         failure = getErrorMessage(
           error,
-          "Could not read this Bitcoin invoice. Please try again."
+          "Could not read this SHA256 invoice. Please try again."
         );
       }
       if (seq !== this.send.decodeSeq || request !== this.send.paymentRequest) {
@@ -1696,7 +1696,7 @@ export default {
       this.loading = true;
       this.send.isSending = true;
       this.send.progress =
-        "The service is paying the Bitcoin invoice. This can take a minute.";
+        "The service is paying the SHA256 invoice. This can take a minute.";
 
       const outcome = await this.postBitcoinPay(false);
 
@@ -1739,7 +1739,7 @@ export default {
           code: data.code || "",
           message: getErrorMessage(
             error,
-            "The Bitcoin invoice was not paid. Please try again."
+            "The SHA256 invoice was not paid. Please try again."
           ),
         };
       }
@@ -1800,7 +1800,7 @@ export default {
       this.bitcoinPollToken = (this.bitcoinPollToken || 0) + 1;
       window.clearTimeout(this.bitcoinPollTimer);
     },
-    //the service or the premium changed in the settings: a Bitcoin invoice
+    //the service or the premium changed in the settings: a SHA256 invoice
     //on the send screen is looked at again
     onBitcoinInvoicesChanged() {
       if (
@@ -1958,7 +1958,7 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-// A Bitcoin invoice's details can be longer than the card: they scroll.
+// A SHA256 invoice's details can be longer than the card: they scroll.
 .bitcoin-invoice-details {
   max-height: 14rem;
   overflow-y: auto;

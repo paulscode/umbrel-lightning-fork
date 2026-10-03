@@ -1,4 +1,4 @@
-// The calls to a service that pays Bitcoin invoices for this node: what it
+// The calls to a service that pays SHA256 invoices for this node: what it
 // would charge now (info), a request to pay one invoice (quote), and how an
 // earlier request is going (swap).
 //
@@ -25,11 +25,11 @@ const MAX_RESPONSE_BYTES = 1024 * 1024;
 // What each of the service's refusal codes means to the person paying, and
 // the status the API answers with.
 const REFUSALS = {
-  disabled: [400, "The service is not paying Bitcoin invoices at the moment."],
+  disabled: [400, "The service is not paying SHA256 invoices at the moment."],
   unavailable: [503, "The service is not available right now. Try again later."],
   invalid_request: [400, "The service could not read this request."],
   invalid_invoice: [400, "The service could not read this invoice."],
-  no_direction: [400, "The service does not pay Bitcoin invoices."],
+  no_direction: [400, "The service does not pay SHA256 invoices."],
   no_amount: [400, "This invoice does not say how much to pay, so it can't be paid from here."],
   too_small: [400, "This amount is less than the service pays."],
   too_large: [400, "This amount is more than the service pays at once."],

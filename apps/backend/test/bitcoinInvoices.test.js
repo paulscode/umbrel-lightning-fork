@@ -460,7 +460,7 @@ test("decode: no service, no amount, a closed service, the market rate down or e
     assert.equal(t.kind, "bitcoin-invoice");
     assert.equal(t.estimate, null);
     assert.equal(t.payable, false);
-    assert.match(t.message, /Paying Bitcoin invoices/);
+    assert.match(t.message, /Paying SHA256 invoices/);
     const zero = await none.mobile.decode(bitcoinInvoice(none.ledger, { amountMsat: 0 }).request, CAPABLE);
     assert.equal(zero.amountSat, null);
     assert.match(zero.message, /does not say how much/);
@@ -811,7 +811,7 @@ test("what is not a payable Bitcoin invoice is refused before the service is ask
     const old = bitcoinInvoice(w.ledger, { expiry: 30 });
     await assert.rejects(() => w.mobile.payBitcoinInvoice({ request: old.request, maxIncomingSat: 100000 }), /expired/);
     await assert.rejects(() => w.mobile.payBitcoinInvoice({ request: old.request }), /most you agree to pay/);
-    await assert.rejects(() => w.mobile.payBitcoinInvoice({ request: "hello", maxIncomingSat: 5 }), /not a Bitcoin invoice/);
+    await assert.rejects(() => w.mobile.payBitcoinInvoice({ request: "hello", maxIncomingSat: 5 }), /not a SHA256 invoice/);
     assert.equal(w.service.calls.quote, 0);
   } finally {
     await w.close();
@@ -819,7 +819,7 @@ test("what is not a payable Bitcoin invoice is refused before the service is ask
   const none = await world({ configure: false });
   try {
     const x = bitcoinInvoice(none.ledger);
-    await assert.rejects(() => none.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: 100000 }), (e) => e.refusal === "no_service" && /Paying Bitcoin invoices/.test(e.message));
+    await assert.rejects(() => none.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: 100000 }), (e) => e.refusal === "no_service" && /Paying SHA256 invoices/.test(e.message));
   } finally {
     await none.close();
   }
@@ -832,4 +832,18 @@ test("an onion service is reached through Umbrel's Tor proxy, or the onion-only 
   assert.equal(torProxy({ ONION_PROXY_IP: "10.0.3.1", ONION_PROXY_PORT: "9050" }), "socks5h://10.0.3.1:9050");
   // Umbrel's wins where both are set.
   assert.equal(torProxy({ TOR_PROXY_IP: "a", TOR_PROXY_PORT: "1", ONION_PROXY_IP: "b", ONION_PROXY_PORT: "2" }), "socks5h://a:1");
+});
+
+test("what users read names the other chain by its proof of work, never as Bitcoin", () => {
+  // Which chain "Bitcoin" means depends on who reads it, so the sentences
+  // this feature shows say SHA256.
+  const sources = ["../logic/bitcoinInvoices.js", "../logic/bitcoinBridge.js"].map((f) =>
+    require("fs").readFileSync(require("path").join(__dirname, f), "utf8")
+  );
+  for (const src of sources) {
+    const strings = src.match(/"[^"\n]*"|`[^`\n]*`/g) || [];
+    for (const s of strings) {
+      assert.doesNotMatch(s, /Bitcoin invoice|on Bitcoin\b|Bitcoin's Lightning/, s);
+    }
+  }
 });

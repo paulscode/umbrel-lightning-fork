@@ -131,7 +131,7 @@ function setsBlake2b(features) {
 }
 
 // The same, for an invoice that must be for this chain (a request from the
-// service that pays Bitcoin invoices): unknown counts as not set.
+// service that pays SHA256 invoices): unknown counts as not set.
 function surelySetsBlake2b(features) {
   if (!features || typeof features !== "object") {
     return false;
@@ -140,7 +140,7 @@ function surelySetsBlake2b(features) {
   return bits.includes(512) || bits.includes(513);
 }
 
-// The capability a client declares to be shown Bitcoin invoices as such
+// The capability a client declares to be shown SHA256 invoices as such
 // (kind "bitcoin-invoice") rather than refused: a client that does not
 // know the kind would take one for an ordinary invoice.
 const BITCOIN_INVOICE_CAPABILITY = "bitcoin-invoice";
@@ -276,7 +276,7 @@ function createMobile({
   bitcoinInvoices,
   network = () => process.env.LND_NETWORK || "mainnet",
   now = () => Math.floor(Date.now() / 1000),
-  // How long a payment of a Bitcoin invoice is waited for before the answer
+  // How long a payment of a SHA256 invoice is waited for before the answer
   // is "on its way": the service holds the payment until it has paid.
   payWaitMs = 90 * 1000,
 } = {}) {
@@ -465,7 +465,7 @@ function createMobile({
     };
   }
 
-  // A Bitcoin invoice, for a client that can pay one through the service
+  // A SHA256 invoice, for a client that can pay one through the service
   // the user configured: what it costs, or why it can't be paid now.
   async function bitcoinInvoiceTarget(request, res) {
     const created = num(res.timestamp);
@@ -611,7 +611,7 @@ function createMobile({
       }
       lightning = null;
     }
-    // A Bitcoin invoice's address is a Bitcoin address: coins of this chain
+    // A SHA256 invoice's address is a Bitcoin address: coins of this chain
     // sent there would not reach the recipient as they expect. No fallback.
     if (lightning && lightning.kind === "bitcoin-invoice") {
       return lightning;
@@ -957,13 +957,13 @@ function createMobile({
     return { state: status === "FAILED" ? "failed" : "in_flight" };
   }
 
-  // Paying Bitcoin invoices through the service (logic/bitcoinInvoices.js).
+  // Paying SHA256 invoices through the service (logic/bitcoinInvoices.js).
   //
-  // The service's request carries the Bitcoin invoice's payment hash, and
+  // The service's request carries the SHA256 invoice's payment hash, and
   // the node pays any one hash at most once (a hash in flight or paid is
   // refused), so however often this is asked, at most one payment can go
   // through. What is kept here is about not starting what need not be:
-  // one attempt at a time per Bitcoin invoice (`hashLocks`, `inFlight`),
+  // one attempt at a time per SHA256 invoice (`hashLocks`, `inFlight`),
   // and an attempt on disk, written before its payment starts, that a later
   // call resumes rather than asking the service again.
   const hashLocks = new Map();
@@ -986,10 +986,10 @@ function createMobile({
   }
 
   // The answer while a payment is still held by the service, which keeps it
-  // until it has paid the Bitcoin invoice. Asking again finds out more.
+  // until it has paid the SHA256 invoice. Asking again finds out more.
   function onItsWay() {
     const waiting = new ValidationError(
-      "Your payment is on its way and the Bitcoin invoice is being paid. Check your activity in a little while.",
+      "Your payment is on its way and the SHA256 invoice is being paid. Check your activity in a little while.",
       504
     );
     waiting.uncertain = true;
@@ -999,17 +999,17 @@ function createMobile({
 
   function friendlyBitcoinPayError(error) {
     if (/incorrect payment details|incorrect_payment_details/i.test(detailOf(error))) {
-      return "The service could not pay the Bitcoin invoice, and your payment came back. Nothing was paid.";
+      return "The service could not pay the SHA256 invoice, and your payment came back. Nothing was paid.";
     }
     return friendlyPayError(error);
   }
 
-  // A Bitcoin invoice as this node reads it, for paying. Only one that is
+  // A SHA256 invoice as this node reads it, for paying. Only one that is
   // not for this chain and names an amount.
   async function readBitcoinInvoice(request) {
     const text = String(request || "").trim().replace(/^lightning:/i, "").replace(/\s+/g, "").toLowerCase();
     if (!text.startsWith("ln") || text.length > MAX_INPUT) {
-      throw bad("This is not a Bitcoin invoice.");
+      throw bad("This is not a SHA256 invoice.");
     }
     let res;
     try {
@@ -1072,7 +1072,7 @@ function createMobile({
     };
   }
 
-  // Pays a Bitcoin invoice through the service, at no more than
+  // Pays a SHA256 invoice through the service, at no more than
   // `maxIncomingSat` (the ceiling the user was shown with the estimate).
   // `recheck`/`resume` as for payLightning: the caller asks again about a
   // payment it started before.
@@ -1370,7 +1370,7 @@ function createMobile({
     };
   }
 
-  // The Bitcoin invoice a payment paid through the service, by the
+  // The SHA256 invoice a payment paid through the service, by the
   // attempts on record: {amountSat, description}, or null.
   function bitcoinInvoiceOf(p) {
     let record = null;
@@ -1409,7 +1409,7 @@ function createMobile({
     const txs = value(0, []);
     const payments = value(1, { payments: [] });
     const invoices = value(2, { invoices: [] });
-    // Descriptions, a few at a time. A payment that paid a Bitcoin invoice
+    // Descriptions, a few at a time. A payment that paid a SHA256 invoice
     // is described by that invoice, not by the service's request.
     const paymentList = (payments && payments.payments) || [];
     const linked = new Map();
