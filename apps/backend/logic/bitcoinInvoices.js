@@ -344,7 +344,7 @@ function createBitcoinInvoices({
         source: ref.source,
       };
       if (!withinLimit && !message) {
-        message = rateRefusal(ref, effective).message;
+        message = rateRefusal(ref, effective, true).message;
       }
     } catch (error) {
       if (!(error instanceof ValidationError)) {
@@ -360,11 +360,14 @@ function createBitcoinInvoices({
     return out;
   }
 
-  function rateRefusal(ref, effective) {
+  // `beforePaying`: said while the user is still looking at the price, when
+  // nothing has been attempted, rather than after a payment was stopped.
+  function rateRefusal(ref, effective, beforePaying = false) {
     const over = ref.rate / effective - 1;
+    const outcome = beforePaying ? "so it can't be paid from here" : "so nothing was paid";
     return refuse(
       "rate",
-      `The service's price is ${percent(over)} above the market rate, more than the ${percent(premium() + ref.volatility)} allowed, so nothing was paid. You can change what is allowed in the dashboard's settings, under Paying Bitcoin invoices.`
+      `The service's price is ${percent(over)} above the market rate, more than the ${percent(premium() + ref.volatility)} allowed, ${outcome}. You can change what is allowed in the dashboard's settings, under Paying Bitcoin invoices.`
     );
   }
 

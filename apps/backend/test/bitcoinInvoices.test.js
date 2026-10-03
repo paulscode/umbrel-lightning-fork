@@ -492,6 +492,9 @@ test("decode: no service, no amount, a closed service, the market rate down or e
     const t = await dear.mobile.decode(bitcoinInvoice(dear.ledger).request, CAPABLE);
     assert.equal(t.reference.withinLimit, false);
     assert.match(t.message, /above the market rate/);
+    // Nothing has been attempted yet, so it must not say a payment was stopped.
+    assert.match(t.message, /can't be paid from here/);
+    assert.doesNotMatch(t.message, /nothing was paid/);
   } finally {
     await dear.close();
   }
@@ -590,7 +593,7 @@ test("a price too far from the market rate is not paid, whatever the user agreed
   const w = await world({ behave: { rate: 0.004 } });
   try {
     const x = bitcoinInvoice(w.ledger);
-    await assert.rejects(() => w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: 10_000_000 }), (e) => e.refusal === "rate" && /above the market rate/.test(e.message));
+    await assert.rejects(() => w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: 10_000_000 }), (e) => e.refusal === "rate" && /above the market rate/.test(e.message) && /nothing was paid/.test(e.message));
     assert.equal(w.lnd.sends.length, 0);
   } finally {
     await w.close();
