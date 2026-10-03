@@ -163,3 +163,11 @@ This app is built upon the work done by [Casa](https://github.com/casa) on its o
 Phones pair with the dashboard from its menu (**Mobile app**) and use the
 companion app for Android to see balances, send and receive. The API it
 uses is described in [docs/mobile-api.md](docs/mobile-api.md).
+
+The dashboard can also pay Bitcoin invoices (from nodes on the SHA256
+chain) through a service someone else runs, set up under **Paying Bitcoin
+invoices** in its settings from the code the service's operator gives out.
+The service is paid with an invoice that carries the Bitcoin invoice's own
+payment hash, so it can only collect by paying it, and every invoice it
+sends is checked against the Bitcoin invoice and the market rate before
+anything is paid. See [docs/mobile-api.md](docs/mobile-api.md#paying-bitcoin-invoices).
