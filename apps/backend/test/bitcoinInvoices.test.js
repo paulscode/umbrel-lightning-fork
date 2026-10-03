@@ -395,6 +395,11 @@ test("a service that does not answer is unreachable, and its error bodies are re
   await assert.rejects(() => createBridgeClient().info(gone), (e) => e.refusal === "unreachable" && e.statusCode === 503);
   assert.equal(refusalFromBody(409, JSON.stringify({ message: "in_progress: busy" })).refusal, "in_progress");
   assert.equal(refusalFromBody(429, JSON.stringify({ message: "limit: too many" })).statusCode, 429);
+  // Every code the payer API defines is known by name, so none falls back to
+  // the generic refusal.
+  for (const code of ["disabled", "unavailable", "invalid_request", "invalid_invoice", "no_direction", "no_amount", "too_small", "too_large", "expires_soon", "route_budget", "self_payment", "no_liquidity", "price_unavailable", "chain_unmeasured", "in_progress", "already_paid", "needs_operator", "limit", "not_found", "internal"]) {
+    assert.equal(refusalFromBody(400, JSON.stringify({ message: `${code}: x` })).refusal, code, code);
+  }
   assert.equal(refusalFromBody(400, JSON.stringify({ message: "something_new: what" })).refusal, "refused");
   assert.equal(refusalFromBody(500, "<html>").refusal, "internal");
   // The service's sentence is not passed on; ours is.

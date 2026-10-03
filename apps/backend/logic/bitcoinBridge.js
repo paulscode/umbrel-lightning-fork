@@ -41,6 +41,7 @@ const REFUSALS = {
   chain_unmeasured: [400, "The service is starting up. Try again in a few minutes."],
   in_progress: [409, "This invoice is already being paid. Check your activity before trying again."],
   already_paid: [409, "This invoice has already been paid."],
+  needs_operator: [409, "The service's last attempt at this invoice needs its operator to look at it. Ask them before trying again."],
   limit: [429, "Too many of your payments are waiting at the service. Try again in a minute."],
   not_found: [404, "The service has no record of this payment."],
   internal: [503, "The service ran into a problem. Try again later."],
