@@ -79,3 +79,15 @@ test("the rate is cached; with Neoxa down there is none, and that is an error", 
   const garbage = ref.createReferenceRate({ fetchJson: async () => ({ success: true, ticker: {} }), log: () => {} });
   await assert.rejects(() => garbage.get(), /not available/);
 });
+
+test("one trade far from the book does not move the rate", () => {
+  const book = (lastPrice, bestBid, bestAsk) => ({ success: true, pair: "BTCB2_BTC", ticker: { lastPrice, bestBid, bestAsk } });
+  // A trade 30% under a book of 0.00488..0.0049: the bid is the rate.
+  assert.equal(ref.tickerRate(book(0.0034, 0.00488, 0.0049)), 0.00488);
+  assert.equal(ref.tickerRate(book(0.009, 0.00488, 0.0049)), 0.0049);
+  // Inside the book, the trade itself.
+  assert.equal(ref.tickerRate(book(0.00489, 0.00488, 0.0049)), 0.00489);
+  // No usable book: the last trade.
+  assert.equal(ref.tickerRate(book(0.0048, 0, 0)), 0.0048);
+  assert.equal(ref.tickerRate(book(0.0048, 0.005, 0.004)), 0.0048);
+});

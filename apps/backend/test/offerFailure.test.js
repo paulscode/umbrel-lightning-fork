@@ -39,3 +39,25 @@ test("a node that is not answering keeps a 503, and other errors pass through", 
   const plain = new Error("something else");
   assert.equal(offerFailure(plain), plain);
 });
+
+test("a payment cut off partway is uncertain, never a failure to try again", () => {
+  const { offerPayFailure } = require("../utils/offerFailure.js");
+  const quiet = () => {};
+  for (const [code, details] of [
+    [14, "Connection dropped"],
+    [4, "Deadline Exceeded"],
+    [1, "Cancelled"],
+    [6, "a payment for this invoice is in flight; track payment hash ab"],
+  ]) {
+    const err = offerPayFailure(new LndError("Unable to pay the offer", { code, details }), quiet);
+    assert.equal(err.statusCode, 504, details);
+    assert.equal(err.uncertain, true, details);
+  }
+  // Definite: nothing was sent.
+  const refused = offerPayFailure(new LndError("x", { code: 14, details: "connect failed: ECONNREFUSED" }), quiet);
+  assert.equal(refused.statusCode, 503);
+  const unreachable = offerPayFailure(new LndError("x", { code: 14, details: "destination is unreachable" }), quiet);
+  assert.equal(unreachable.statusCode, 400);
+  const noRoute = offerPayFailure(new LndError("x", { code: 10, details: "payment failed: unable to find a path to destination" }), quiet);
+  assert.equal(noRoute.statusCode, 400);
+});

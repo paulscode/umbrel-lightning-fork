@@ -167,10 +167,10 @@
           <template v-else>
             <div class="d-flex justify-content-between small py-1">
               <span class="text-muted"
-                >Last trade{{
+                >{{
                   status.reference.source
-                    ? ` on ${status.reference.source}`
-                    : ""
+                    ? `On ${status.reference.source}`
+                    : "Now"
                 }}</span
               >
               <span class="text-right ml-3">{{

@@ -286,20 +286,21 @@
               <div>
                 <small class="d-block text-muted mb-1">Paying</small>
                 <h4 class="d-block mb-0">
-                  At most {{ send.bitcoin.estimate.maxIncomingSat | localize }} sats
+                  At most {{ bitcoinMostSat | localize }} sats
                 </h4>
                 <small class="d-block text-muted">
                   Expected {{ send.bitcoin.estimate.incomingSat | localize }} sats
+                  plus routing
                 </small>
               </div>
               <small class="d-block text-muted text-right ml-2"
-                >~ {{ send.bitcoin.estimate.maxIncomingSat | satsToFiat }}</small
+                >~ {{ bitcoinMostSat | satsToFiat }}</small
               >
             </div>
             <small v-if="send.bitcoin.estimate" class="d-block text-muted mb-2">
               Includes the service's fee of
               {{ send.bitcoin.estimate.feeSat | localize }} sats
-              ({{ percent(send.bitcoin.estimate.spread) }}), plus up to
+              ({{ percent(send.bitcoin.estimate.spread) }}) and up to
               {{ send.bitcoin.estimate.routingFeeLimitSat | localize }} sats
               in routing fees.
             </small>
@@ -1188,6 +1189,12 @@ export default {
     }),
     isLightningPage() {
       return this.$router.currentRoute.path === "/lightning";
+    },
+    // The most a SHA256 invoice can cost here: the service's ceiling and
+    // the routing to it.
+    bitcoinMostSat() {
+      const est = this.send.bitcoin && this.send.bitcoin.estimate;
+      return est ? est.maxIncomingSat + est.routingFeeLimitSat : 0;
     },
   },
   methods: {

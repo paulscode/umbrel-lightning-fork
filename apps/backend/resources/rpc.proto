@@ -2504,7 +2504,7 @@ message PayReq {
     map<uint32, Feature> features = 13;
 
     /// The amount in millisatoshis, which num_satoshis rounds down.
-    int64 num_msat = 14 [json_name = "num_msat"];
+    int64 num_msat = 12 [json_name = "num_msat"];
 }
 
 message FeeReportRequest {}

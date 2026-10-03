@@ -165,9 +165,9 @@ companion app for Android to see balances, send and receive. The API it
 uses is described in [docs/mobile-api.md](docs/mobile-api.md).
 
 The dashboard can also pay SHA256 invoices (from nodes on the SHA256
-chain) through a service someone else runs, set up under **Paying Bitcoin
+chain) through a service someone else runs, set up under **Paying SHA256
 invoices** in its settings from the code the service's operator gives out.
 The service is paid with an invoice that carries the SHA256 invoice's own
 payment hash, so it can only collect by paying it, and every invoice it
 sends is checked against the SHA256 invoice and the market rate before
-anything is paid. See [docs/mobile-api.md](docs/mobile-api.md#paying-bitcoin-invoices).
+anything is paid. See [docs/mobile-api.md](docs/mobile-api.md#paying-sha256-invoices).

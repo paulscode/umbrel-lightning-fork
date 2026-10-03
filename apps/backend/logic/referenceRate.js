@@ -1,7 +1,8 @@
 // The market's rate between BTCB2 and bitcoin, against which a service's
 // price for paying a Bitcoin invoice is checked before anything is paid.
 //
-// The rate is Neoxa's last BTCB2_BTC trade, in bitcoin per BTCB2. A price is
+// The rate is Neoxa's BTCB2_BTC market (see tickerRate), in BTC (SHA256) per
+// BTCB2. A price is
 // accepted when it is no worse for the payer than that rate by more than the
 // premium the user allows, widened by how far the market itself moved in the
 // last hour: a service that set its rate at the top of a swing must not be
@@ -30,8 +31,12 @@ function positive(value) {
   return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : null;
 }
 
-// The last trade's rate, or null for anything but a well-formed answer for
-// this pair.
+// The market's rate, or null for anything but a well-formed answer for this
+// pair: the middle one of the last trade, the best bid and the best ask. On a
+// market this thin one trade, made by anyone and at any price the book
+// allows, would otherwise be the rate a service's price is judged by; while
+// orders stand on both sides it moves nothing. Without a usable book, the
+// last trade alone.
 function tickerRate(data) {
   if (!data || typeof data !== "object" || data.success !== true || !data.ticker || typeof data.ticker !== "object") {
     return null;
@@ -39,7 +44,13 @@ function tickerRate(data) {
   if (data.pair !== undefined && data.pair !== PAIR) {
     return null;
   }
-  return positive(data.ticker.lastPrice);
+  const last = positive(data.ticker.lastPrice);
+  const bid = positive(data.ticker.bestBid);
+  const ask = positive(data.ticker.bestAsk);
+  if (!last || !bid || !ask || bid > ask) {
+    return last;
+  }
+  return [last, bid, ask].sort((a, b) => a - b)[1];
 }
 
 // The range the market traded in over the last hour, as a fraction of the

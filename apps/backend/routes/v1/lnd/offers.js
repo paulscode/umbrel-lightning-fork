@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 
 const offersLogic = require("logic/offers.js");
+const { offerPayFailure } = require("utils/offerFailure.js");
 const safeHandler = require("utils/safeHandler");
 const ValidationError = require("models/errors.js").ValidationError;
 
@@ -171,16 +172,20 @@ router.post(
     } catch (error) {
       return next(error);
     }
-    res.json(
-      await offersLogic.pay({
+    let paid;
+    try {
+      paid = await offersLogic.pay({
         offer: offer ? offer.trim() : "",
         invoice: invoice ? invoice.trim() : "",
         amountSat: Number(amountSat || 0),
         quantity: Number(quantity || 0),
         payerNote: typeof payerNote === "string" ? payerNote : "",
         timeoutSeconds: Number(timeoutSeconds || 0),
-      })
-    );
+      });
+    } catch (error) {
+      throw offerPayFailure(error);
+    }
+    res.json(paid);
   })
 );
 

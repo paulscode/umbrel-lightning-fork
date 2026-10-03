@@ -200,11 +200,12 @@ only if, decoded by the node:
 2. it is payable to the node key in the service's code;
 3. it is an invoice of this chain (`option_blake2b`);
 4. it asks no more than `maxIncomingSat`;
-5. its price, bitcoin out per BTCB2 in, is no worse than the market rate
-   by more than the premium the user allows (5% unless changed, 0.5%–25%)
-   plus the market's own range over the last hour (at most 10%); the rate
-   is Neoxa's last BTCB2_BTC trade, fetched over Tor when the node has a
-   Tor proxy, and **without it nothing is paid**;
+5. its price, BTC (SHA256) out per BTCB2 in, is no worse than the market
+   rate by more than the premium the user allows (5% unless changed,
+   0.5%–25%) plus the market's own range over the last hour (at most 10%);
+   the rate is Neoxa's BTCB2_BTC market (the middle of its last trade, best
+   bid and best ask), fetched over Tor when the node has a Tor proxy, and
+   **without it nothing is paid**;
 6. it has at least 20 seconds left.
 
 Success is `{status: "succeeded", paymentHash, preimage, amountSat, feeSat,

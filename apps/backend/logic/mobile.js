@@ -472,7 +472,8 @@ function createMobile({
     const expiresAt = created + (num(res.expiry) || DEFAULT_INVOICE_EXPIRY);
     const amountMsat = msatOf(res);
     const expired = expiresAt <= now();
-    const described = await bitcoinInvoices().describe({ amountMsat, expired });
+    const paymentHash = String(res.paymentHash || "").toLowerCase();
+    const described = await bitcoinInvoices().describe({ amountMsat, expired, paymentHash });
     return {
       kind: "bitcoin-invoice",
       request,
@@ -994,6 +995,8 @@ function createMobile({
     );
     waiting.uncertain = true;
     waiting.recheck = true;
+    // Told apart from an uncertain answer: this one is known to be under way.
+    waiting.refusal = "on_its_way";
     return waiting;
   }
 
@@ -1166,6 +1169,15 @@ function createMobile({
         throw stillUncertain();
       }
     }
+    // Asking again finds out what became of a payment; it never starts
+    // another. One that came back is answered as such, and a new attempt
+    // is the user's to make.
+    if (again && last && service.lastAttempt(hash).state === "failed") {
+      throw refuse(
+        "returned",
+        "The service could not pay the SHA256 invoice, and your payment came back. Nothing was paid; you can try again."
+      );
+    }
     if (x.expiresAt <= now()) {
       throw bad("This request has expired.");
     }
@@ -1256,7 +1268,14 @@ function createMobile({
             amountSat: num(res.valueSat) || amountSat,
             feeSat: num(res.feeSat),
           };
-          service.updateAttempt(hash, { state: "succeeded", outcome: result });
+          // Paid whatever happens to the record: a disk that will not
+          // take it must not turn the payment into an error. A repeat
+          // finds it in the node's own payments.
+          try {
+            service.updateAttempt(hash, { state: "succeeded", outcome: result });
+          } catch (error) {
+            console.warn(`[bitcoin invoices] paid ${hash}, but could not record it: ${error.message}`);
+          }
           return result;
         },
         (error) => {

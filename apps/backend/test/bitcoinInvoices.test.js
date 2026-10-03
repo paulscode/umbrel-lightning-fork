@@ -629,7 +629,7 @@ test("a payment the service holds is 'on its way'; asking again neither asks the
     const x = bitcoinInvoice(w.ledger);
     const est = await estimateOf(w, x.request);
     const args = { request: x.request, maxIncomingSat: est.maxIncomingSat };
-    await assert.rejects(() => w.mobile.payBitcoinInvoice(args), (e) => e.statusCode === 504 && e.uncertain && e.recheck && /on its way/.test(e.message));
+    await assert.rejects(() => w.mobile.payBitcoinInvoice(args), (e) => e.statusCode === 504 && e.uncertain && e.recheck && e.refusal === "on_its_way" && /on its way/.test(e.message));
     await assert.rejects(() => w.mobile.payBitcoinInvoice({ ...args, resume: true }), (e) => e.statusCode === 504 && e.uncertain);
     // A new request (another device, a new id) is no different.
     await assert.rejects(() => w.mobile.payBitcoinInvoice(args), (e) => e.statusCode === 504 && e.uncertain);
@@ -685,6 +685,40 @@ test("a payment that came back may be tried again: a new quote once the service 
     assert.equal(w.service.calls.quote, 2, "the service was asked again");
     assert.equal(w.lnd.sends.length, 2);
     assert.notEqual(w.lnd.sends[0].pr, w.lnd.sends[1].pr);
+  } finally {
+    await w.close();
+  }
+});
+
+test("asking again about a payment that came back says so, and starts no new one", async () => {
+  const w = await world({ pay: async (pr, d) => failPayment(w.ledger, d) });
+  try {
+    const x = bitcoinInvoice(w.ledger);
+    const est = await estimateOf(w, x.request);
+    const args = { request: x.request, maxIncomingSat: est.maxIncomingSat };
+    await assert.rejects(() => w.mobile.payBitcoinInvoice(args), (e) => e.refusal === "returned");
+    for (const again of [{ resume: true }, { recheck: true }]) {
+      await assert.rejects(() => w.mobile.payBitcoinInvoice({ ...args, ...again }), (e) => e.refusal === "returned" && !e.uncertain && /came back/.test(e.message));
+    }
+    assert.equal(w.service.calls.quote, 1, "the service was not asked for a new price");
+    assert.equal(w.lnd.sends.length, 1, "nothing more was paid");
+  } finally {
+    await w.close();
+  }
+});
+
+test("after a price rise, the estimate is the price still standing, and paying it works", async () => {
+  const w = await world();
+  try {
+    const x = bitcoinInvoice(w.ledger);
+    const first = await estimateOf(w, x.request);
+    w.service.behave.amountFactor = 1.01;
+    await assert.rejects(() => w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: first.maxIncomingSat }), (e) => e.refusal === "price_changed");
+    const again = await estimateOf(w, x.request);
+    assert.ok(again.maxIncomingSat > first.maxIncomingSat, "the new estimate covers the standing price");
+    const res = await w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: again.maxIncomingSat });
+    assert.equal(res.status, "succeeded");
+    assert.equal(w.service.calls.quote, 1, "the standing price was the one paid");
   } finally {
     await w.close();
   }

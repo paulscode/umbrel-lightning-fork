@@ -151,7 +151,9 @@ async function pay({ offer, invoice, amountSat, quantity, payerNote, timeoutSeco
       timeoutSeconds,
     });
   } catch (error) {
-    throw offerFailure(error);
+    // Raw: whether a cut-off payment went through is for the caller to
+    // say (logic/mobile.js and the web route each do), never "failed".
+    throw error;
   }
   return {
     bolt12: res.bolt12,

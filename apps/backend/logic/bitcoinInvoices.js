@@ -130,6 +130,19 @@ function estimateFor(outMsat, { rate, spread }) {
   };
 }
 
+// The same, for a price the service has already named.
+function estimateFromIncoming(outMsat, incomingMsat, { rate }) {
+  const incomingSat = sat(incomingMsat);
+  const atRateSat = outMsat / rate / 1000;
+  return {
+    incomingMsat,
+    incomingSat,
+    feeSat: Math.max(0, Math.ceil(incomingSat - atRateSat - 1e-9)),
+    maxIncomingSat: Math.ceil(incomingSat * (1 + PRICE_TOLERANCE)),
+    routingFeeLimitSat: routingFeeLimit(incomingSat),
+  };
+}
+
 function routingFeeLimit(amountSat) {
   return Math.max(ROUTING_FEE_FLOOR_SAT, Math.ceil(amountSat * ROUTING_FEE_FRACTION));
 }
@@ -288,7 +301,13 @@ function createBitcoinInvoices({
   // What paying a SHA256 invoice of `amountMsat` would cost, for the
   // payment screen: {estimate, reference, referenceError, message}, where
   // `message` says why it can't be paid now, if it can't.
-  async function describe({ amountMsat, expired }) {
+  //
+  // While the service's last price for this invoice (`paymentHash`) is
+  // still standing, a new attempt is offered that price again rather than a
+  // new one, so the estimate starts from it when it is the higher: else a
+  // price that rose would be refused, re-estimated from the advertised rate
+  // and refused again until it expired.
+  async function describe({ amountMsat, expired, paymentHash }) {
     if (!amountMsat) {
       return { estimate: null, message: NO_AMOUNT };
     }
@@ -308,7 +327,11 @@ function createBitcoinInvoices({
     if (!d) {
       return { estimate: null, message: REFUSALS.no_direction[1] };
     }
-    const est = estimateFor(amountMsat, d);
+    let est = estimateFor(amountMsat, d);
+    const standing = standingQuoteMsat(paymentHash);
+    if (standing > est.incomingMsat) {
+      est = estimateFromIncoming(amountMsat, standing, d);
+    }
     const estimate = {
       incomingSat: est.incomingSat,
       feeSat: est.feeSat,
@@ -512,6 +535,19 @@ function createBitcoinInvoices({
   // (the node's payment came back) or "succeeded".
   function record(paymentHash) {
     return loadRecords()[paymentHash] || null;
+  }
+
+  // What the service last asked for this invoice, in msat, while that
+  // price may still be offered again; 0 when there is none.
+  function standingQuoteMsat(paymentHash) {
+    const last = paymentHash ? lastAttempt(paymentHash) : null;
+    if (!last || !last.holdInvoice || last.invalid || last.state === "succeeded") {
+      return 0;
+    }
+    if (!(last.expiresAt - now() >= MIN_HOLD_SECONDS)) {
+      return 0;
+    }
+    return Number(last.quotedIncomingMsat) || 0;
   }
 
   function lastAttempt(paymentHash) {

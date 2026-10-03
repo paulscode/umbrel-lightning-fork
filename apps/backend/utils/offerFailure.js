@@ -22,4 +22,31 @@ function offerFailure(error, log = console.warn) {
   return new ValidationError(friendlyPayError(error), 400);
 }
 
-module.exports = { offerFailure };
+// The same for paying, where a call cut off partway (cancelled, a deadline,
+// the connection dropped, a payment still in flight) leaves it unknown
+// whether the payment went through. That must not read as a failure, which
+// invites paying again.
+const UNCERTAIN_GRPC_CODES = [1, 4, 14];
+function offerPayFailure(error, log = console.warn) {
+  if (!(error instanceof LndError)) {
+    return error;
+  }
+  const code = error.error && error.error.code;
+  const detail = String((error.error && error.error.details) || "");
+  const notReached = /failed to connect|connect failed|ECONNREFUSED|no connection established|name resolution/i.test(detail);
+  const cutOff =
+    (UNCERTAIN_GRPC_CODES.includes(code) && !notReached && !/destination is unreachable|names no way to reach/i.test(detail)) ||
+    /in flight|in transition|no final payment status|stream removed|connection (reset|closed)|socket hang up|ECONNRESET|deadline/i.test(detail);
+  if (cutOff) {
+    log(`[offers] payment outcome unknown: ${error.message}: ${detail}`);
+    const unknown = new ValidationError(
+      "Your node did not say whether this payment went through. Check your transactions before trying again.",
+      504
+    );
+    unknown.uncertain = true;
+    return unknown;
+  }
+  return offerFailure(error, log);
+}
+
+module.exports = { offerFailure, offerPayFailure };
