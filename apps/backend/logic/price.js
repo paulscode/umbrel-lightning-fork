@@ -205,6 +205,7 @@ function createPriceLogic({ fetchJson = defaultFetchJson, now = monotonicNow, lo
 module.exports = {
   ...createPriceLogic(),
   createPriceLogic,
+  defaultFetchJson,
   validPrice,
   btcb2Price,
   getRate,
