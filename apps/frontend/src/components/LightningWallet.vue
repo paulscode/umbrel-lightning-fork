@@ -276,8 +276,77 @@
             :disabled="send.isSending"
           ></b-input>
 
+          <!-- An invoice from Bitcoin's Lightning network, paid through a service -->
+          <div
+            v-if="send.kind === 'bitcoin-invoice' && send.bitcoin"
+            class="bitcoin-invoice-details"
+          >
+            <span class="bitcoin-chip mb-2">Bitcoin invoice</span>
+            <div v-if="send.bitcoin.estimate" class="d-flex justify-content-between align-items-center mb-1">
+              <div>
+                <small class="d-block text-muted mb-1">Paying</small>
+                <h4 class="d-block mb-0">
+                  At most {{ send.bitcoin.estimate.maxIncomingSat | localize }} sats
+                </h4>
+                <small class="d-block text-muted">
+                  Expected {{ send.bitcoin.estimate.incomingSat | localize }} sats
+                </small>
+              </div>
+              <small class="d-block text-muted text-right ml-2"
+                >~ {{ send.bitcoin.estimate.maxIncomingSat | satsToFiat }}</small
+              >
+            </div>
+            <small v-if="send.bitcoin.estimate" class="d-block text-muted mb-2">
+              Includes the service's fee of
+              {{ send.bitcoin.estimate.feeSat | localize }} sats
+              ({{ percent(send.bitcoin.estimate.spread) }}), plus up to
+              {{ send.bitcoin.estimate.routingFeeLimitSat | localize }} sats
+              in routing fees.
+            </small>
+
+            <div class="small">
+              <div class="d-flex justify-content-between py-1">
+                <span class="text-muted">Bitcoin invoice for</span>
+                <span class="text-right ml-3">{{
+                  send.bitcoin.amountSat ? `${Number(send.bitcoin.amountSat).toLocaleString()} sats` : "No amount"
+                }}</span>
+              </div>
+              <div v-if="send.bitcoin.estimate" class="d-flex justify-content-between py-1">
+                <span class="text-muted">Rate</span>
+                <span class="text-right ml-3">{{ rateText(send.bitcoin.estimate.rate) }}</span>
+              </div>
+              <div v-if="send.bitcoin.reference" class="d-flex justify-content-between py-1">
+                <span class="text-muted">Market</span>
+                <span class="text-right ml-3">{{ marketComparison(send.bitcoin.reference) }}</span>
+              </div>
+              <div v-if="send.bitcoin.description" class="d-flex justify-content-between py-1">
+                <span class="text-muted">For</span>
+                <span class="text-right ml-3 text-break">{{ send.bitcoin.description }}</span>
+              </div>
+              <div v-if="send.bitcoin.estimate" class="d-flex justify-content-between py-1">
+                <span class="text-muted">Paid through</span>
+                <span class="text-right ml-3 text-break">{{ send.bitcoin.estimate.serviceLabel || "Your service" }}</span>
+              </div>
+            </div>
+
+            <small v-if="send.bitcoin.message" class="d-block text-warning mt-2">
+              {{ send.bitcoin.message }}
+            </small>
+            <b-button
+              v-if="!send.bitcoin.estimate && send.bitcoin.amountSat && !send.bitcoin.expired"
+              variant="outline-primary"
+              size="sm"
+              class="mt-2"
+              v-b-modal.bitcoin-invoices-modal
+              >Settings for paying Bitcoin invoices</b-button
+            >
+            <small v-if="send.bitcoinNotice" class="d-block text-warning mt-2">
+              {{ send.bitcoinNotice }}
+            </small>
+          </div>
+
           <!-- An offer that lets the payer choose the amount -->
-          <div v-if="send.isValidInvoice && send.kind === 'offer' && send.anyAmount">
+          <div v-else-if="send.isValidInvoice && send.kind === 'offer' && send.anyAmount">
             <label class="sr-onlsy" for="input-offer-amount">Amount</label>
             <div class="mb-3">
               <b-input-group class="neu-input-group">
@@ -387,6 +456,102 @@
               <b>{{ send.description }}</b>
             </span>
           </p>
+        </div>
+
+        <!-- SCREEN/MODE: A Bitcoin invoice's payment on its way -->
+        <div
+          class="px-3 px-lg-4 mode-sent wallet-mode"
+          v-else-if="mode === 'bitcoin-waiting'"
+          key="mode-bitcoin-waiting"
+        >
+          <div class="pb-3">
+            <a
+              href="#"
+              class="card-link text-muted"
+              v-on:click.stop.prevent="reset"
+            >
+              <svg
+                width="7"
+                height="13"
+                viewBox="0 0 7 13"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M6.74372 11.4153C7.08543 11.7779 7.08543 12.3659 6.74372 12.7285C6.40201 13.0911 5.84799 13.0911 5.50628 12.7285L0.256283 7.15709C-0.0749738 6.80555 -0.0865638 6.23951 0.229991 5.87303L5.04249 0.301606C5.36903 -0.0764332 5.92253 -0.101971 6.27876 0.244565C6.63499 0.591101 6.65905 1.17848 6.33251 1.55652L2.08612 6.47256L6.74372 11.4153Z"
+                  fill="#C3C6D1"
+                />
+              </svg>
+              Back
+            </a>
+          </div>
+          <span class="bitcoin-chip mb-3">Bitcoin invoice</span>
+          <h4 class="mb-3" :class="{ blink: !send.waitingLong }">On its way</h4>
+          <p v-if="!send.waitingLong" class="text-muted mb-2">
+            The service is paying the Bitcoin invoice. Your payment completes
+            only once it has, which can take a minute or two.
+          </p>
+          <p v-else class="text-muted mb-2">
+            This is taking longer than usual. The payment may still complete;
+            it will show in your transactions when it does, and it will not
+            be paid twice.
+          </p>
+          <small v-if="!send.waitingLong" class="d-block text-muted">
+            You can leave this screen; the payment carries on.
+          </small>
+          <b-button
+            v-else
+            variant="outline-primary"
+            size="sm"
+            @click="startBitcoinPolling"
+            >Check again</b-button
+          >
+        </div>
+
+        <!-- SCREEN/MODE: A Bitcoin invoice paid -->
+        <div
+          class="px-3 px-lg-4 mode-sent wallet-mode"
+          v-else-if="mode === 'bitcoin-sent'"
+          key="mode-bitcoin-sent"
+        >
+          <div class="pb-3">
+            <a
+              href="#"
+              class="card-link text-muted"
+              v-on:click.stop.prevent="reset"
+            >
+              <svg
+                width="7"
+                height="13"
+                viewBox="0 0 7 13"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M6.74372 11.4153C7.08543 11.7779 7.08543 12.3659 6.74372 12.7285C6.40201 13.0911 5.84799 13.0911 5.50628 12.7285L0.256283 7.15709C-0.0749738 6.80555 -0.0865638 6.23951 0.229991 5.87303L5.04249 0.301606C5.36903 -0.0764332 5.92253 -0.101971 6.27876 0.244565C6.63499 0.591101 6.65905 1.17848 6.33251 1.55652L2.08612 6.47256L6.74372 11.4153Z"
+                  fill="#C3C6D1"
+                />
+              </svg>
+              Back
+            </a>
+          </div>
+          <circular-checkmark class="mb-3" success></circular-checkmark>
+          <p class="text-center mb-2">
+            Paid a Bitcoin invoice of
+            <b>{{ bitcoinPaid.bitcoinAmountSat | localize }} sats</b>
+            <span v-if="bitcoinPaid.description">
+              for
+              <b>{{ bitcoinPaid.description }}</b>
+            </span>
+          </p>
+          <small class="d-block text-center text-muted mb-3">
+            It cost {{ bitcoinPaid.amountSat | localize }} BTCB2 sats, plus
+            {{ bitcoinPaid.feeSat | localize }} in routing fees.
+          </small>
+          <input-copy size="sm" :value="bitcoinPaid.preimage"></input-copy>
+          <small class="text-center text-muted d-block mt-2"
+            >Proof of payment (preimage)</small
+          >
         </div>
 
         <!-- SCREEN/MODE: Create Invoice (Receive) -->
@@ -873,7 +1038,7 @@
             fill="#FFFFFF"
           />
         </svg>
-        {{ send.isSending ? "Sending..." : send.fetchedInvoice ? "Retry Payment" : send.kind === "offer" ? "Pay Offer" : "Send" }}
+        {{ send.isSending ? "Sending..." : send.fetchedInvoice ? "Retry Payment" : send.kind === "offer" ? "Pay Offer" : send.priceChanged ? "Send at the new price" : "Send" }}
       </b-button>
 
       <!-- Button: Create Invoice (receive mode) -->
@@ -915,6 +1080,14 @@ import { mapState } from "vuex";
 import { satsToBtc, btcToSats } from "@/helpers/units.js";
 import API from "@/helpers/api";
 import getErrorMessage from "@/helpers/error-message";
+import {
+  bitcoinInvoicesUrl,
+  percent,
+  rateText,
+  marketComparison,
+  newRequestId,
+  looksLikeBitcoinInvoice,
+} from "@/helpers/bitcoin-invoices";
 
 import CountUp from "@/components/Utility/CountUp";
 import CardWidget from "@/components/CardWidget";
@@ -922,6 +1095,11 @@ import InputCopy from "@/components/Utility/InputCopy";
 import QrCode from "@/components/Utility/QrCode.vue";
 import CircularCheckmark from "@/components/Utility/CircularCheckmark.vue";
 import SatsBtcSwitch from "@/components/Utility/SatsBtcSwitch";
+
+// While a Bitcoin invoice's payment is on its way: how often to ask, and
+// for how long before saying so and leaving it to the transactions list.
+const BITCOIN_POLL_MS = 4000;
+const BITCOIN_POLL_LIMIT_MS = 10 * 60 * 1000;
 
 export default {
   data() {
@@ -954,6 +1132,19 @@ export default {
         fetchedInvoice: "", //the BOLT 12 invoice fetched for an offer, so a retry pays the same one
         fetchedAmount: null, //that invoice's amount, in sats
         decodeSeq: 0, //so a slow decode of an earlier paste cannot overwrite a later one
+        bitcoin: null, //a Bitcoin invoice as the node decoded it, with what paying it costs
+        bitcoinAttempt: null, //{request, maxIncomingSat, requestId} of the payment being made
+        bitcoinNotice: "", //why the last attempt did not pay
+        priceChanged: false, //the service's price moved; the new one is shown
+        waitingLong: false, //asked for a while with no answer yet
+      },
+      bitcoinPaid: {
+        //a Bitcoin invoice just paid
+        bitcoinAmountSat: null,
+        description: "",
+        amountSat: null,
+        feeSat: null,
+        preimage: "",
       },
       offer: {
         //a reusable offer just created from the receive screen
@@ -1049,7 +1240,20 @@ export default {
         paymentPreImage: "",
         fetchedInvoice: "",
         fetchedAmount: null,
-        decodeSeq: 0,
+        decodeSeq: this.send.decodeSeq + 1,
+        bitcoin: null,
+        bitcoinAttempt: null,
+        bitcoinNotice: "",
+        priceChanged: false,
+        waitingLong: false,
+      };
+      this.stopBitcoinPolling();
+      this.bitcoinPaid = {
+        bitcoinAmountSat: null,
+        description: "",
+        amountSat: null,
+        feeSat: null,
+        preimage: "",
       };
       this.offer = { bolt12: "", qr: "1", existed: false };
       this.paymentInfo = {
@@ -1069,6 +1273,10 @@ export default {
     async sendSats() {
       //broadcast tx
       if (!this.send.isValidInvoice) return; //check if the invoice user pasted is valid
+
+      if (this.send.kind === "bitcoin-invoice") {
+        return this.payBitcoinInvoice();
+      }
 
       if (this.send.kind !== "bolt11") {
         return this.payOffer();
@@ -1359,6 +1567,7 @@ export default {
         this.send.fetchedInvoice = "";
         this.send.fetchedAmount = null;
         this.send.description = "";
+        this.clearBitcoinInvoice();
         this.error = "";
         return;
       }
@@ -1371,6 +1580,7 @@ export default {
       this.send.fetchedInvoice = "";
       this.send.fetchedAmount = null;
       this.send.description = "";
+      this.clearBitcoinInvoice();
       this.error = "";
       this.loading = true;
 
@@ -1390,6 +1600,16 @@ export default {
         return;
       }
 
+      // An invoice from a node without the BLAKE2b chain's rules is a
+      // Bitcoin invoice: shown as one, and paid through the service.
+      if (looksLikeBitcoinInvoice(fetchedInvoice)) {
+        return this.showBitcoinInvoice(fetchedInvoice);
+      }
+
+      this.useLightningInvoice(fetchedInvoice);
+    },
+    //show an ordinary invoice of this chain, as decoded by the node
+    useLightningInvoice(fetchedInvoice) {
       //check if invoice is expired
       const now = Math.floor(new Date().getTime());
       const invoiceExpiresOn =
@@ -1407,6 +1627,193 @@ export default {
       }
 
       this.loading = false;
+    },
+    percent,
+    rateText,
+    marketComparison,
+    clearBitcoinInvoice() {
+      this.send.bitcoin = null;
+      this.send.bitcoinAttempt = null;
+      this.send.bitcoinNotice = "";
+      this.send.priceChanged = false;
+    },
+    //ask the node what paying a Bitcoin invoice costs through the service,
+    //or why it can't be paid now; `fallback` is the invoice as LND decoded
+    //it, shown as before if the node says it is not a Bitcoin invoice
+    async showBitcoinInvoice(fallback) {
+      const seq = ++this.send.decodeSeq;
+      const request = this.send.paymentRequest;
+      this.loading = true;
+      let decoded = null;
+      let failure = "";
+      try {
+        decoded = (
+          await API.post(bitcoinInvoicesUrl("/decode"), {
+            input: request.trim(),
+          })
+        ).data;
+      } catch (error) {
+        failure = getErrorMessage(
+          error,
+          "Could not read this Bitcoin invoice. Please try again."
+        );
+      }
+      if (seq !== this.send.decodeSeq || request !== this.send.paymentRequest) {
+        return false; // a later paste is being decoded
+      }
+      this.loading = false;
+      if (decoded && decoded.kind !== "bitcoin-invoice" && fallback) {
+        this.send.kind = "bolt11";
+        this.useLightningInvoice(fallback);
+        return false;
+      }
+      if (!decoded || decoded.kind !== "bitcoin-invoice") {
+        this.send.isValidInvoice = false;
+        this.error = failure || "Invalid invoice";
+        return false;
+      }
+      this.send.kind = "bitcoin-invoice";
+      this.send.bitcoin = decoded;
+      this.send.amount = decoded.amountSat;
+      this.send.description = decoded.description || "";
+      this.send.isValidInvoice = Boolean(decoded.payable && decoded.estimate);
+      this.error = "";
+      return true;
+    },
+    async payBitcoinInvoice() {
+      const b = this.send.bitcoin;
+      if (!b || !b.payable || !b.estimate) return;
+
+      // One id per attempt: asking again after a lost answer finds this
+      // payment instead of starting another.
+      this.send.bitcoinAttempt = {
+        request: b.request,
+        maxIncomingSat: b.estimate.maxIncomingSat,
+        requestId: newRequestId(),
+      };
+      this.send.bitcoinNotice = "";
+      this.send.priceChanged = false;
+      this.error = "";
+      this.loading = true;
+      this.send.isSending = true;
+      this.send.progress =
+        "The service is paying the Bitcoin invoice. This can take a minute.";
+
+      const outcome = await this.postBitcoinPay(false);
+
+      this.loading = false;
+      this.send.isSending = false;
+      this.send.progress = "";
+      await this.handleBitcoinOutcome(outcome);
+    },
+    //one request to pay (or, with `resume`, to find) the current attempt:
+    //{paid}, {uncertain} when the payment may be on its way, or {code, message}
+    async postBitcoinPay(resume) {
+      const attempt = this.send.bitcoinAttempt;
+      const body = {
+        request: attempt.request,
+        maxIncomingSat: attempt.maxIncomingSat,
+        requestId: attempt.requestId,
+      };
+      if (resume) {
+        body.resume = true;
+      }
+      try {
+        const res = await API.post(bitcoinInvoicesUrl("/pay"), body);
+        return { paid: res.data };
+      } catch (error) {
+        const response = error.response;
+        const data =
+          response && response.data && typeof response.data === "object"
+            ? response.data
+            : {};
+        // No answer, the node's "on its way", or a proxy that gave up
+        // waiting: the payment may be going ahead.
+        if (
+          !response ||
+          response.status === 504 ||
+          (response.status === 502 && !data.error)
+        ) {
+          return { uncertain: true };
+        }
+        return {
+          code: data.code || "",
+          message: getErrorMessage(
+            error,
+            "The Bitcoin invoice was not paid. Please try again."
+          ),
+        };
+      }
+    },
+    async handleBitcoinOutcome(outcome) {
+      if (outcome.paid) {
+        const paid = outcome.paid;
+        const invoice = paid.bitcoinInvoice || {};
+        this.stopBitcoinPolling();
+        this.bitcoinPaid = {
+          bitcoinAmountSat: invoice.amountSat,
+          description: invoice.description || "",
+          amountSat: paid.amountSat,
+          feeSat: paid.feeSat,
+          preimage: paid.preimage,
+        };
+        this.mode = "bitcoin-sent";
+        this.$store.dispatch("lightning/getTransactions");
+        this.$store.dispatch("lightning/getChannels");
+        return;
+      }
+      if (outcome.uncertain) {
+        this.mode = "bitcoin-waiting";
+        this.startBitcoinPolling();
+        return;
+      }
+      this.stopBitcoinPolling();
+      this.mode = "send";
+      if (outcome.code === "price_changed") {
+        // Show the new price and let the user agree to it.
+        const shown = await this.showBitcoinInvoice();
+        this.send.priceChanged = shown && this.send.isValidInvoice;
+      }
+      this.send.bitcoinNotice = outcome.message;
+    },
+    startBitcoinPolling() {
+      this.stopBitcoinPolling();
+      const token = this.bitcoinPollToken;
+      const since = Date.now();
+      this.send.waitingLong = false;
+      const tick = async () => {
+        if (token !== this.bitcoinPollToken) return;
+        if (Date.now() - since > BITCOIN_POLL_LIMIT_MS) {
+          this.send.waitingLong = true;
+          return;
+        }
+        const outcome = await this.postBitcoinPay(true);
+        if (token !== this.bitcoinPollToken) return;
+        if (outcome.uncertain) {
+          this.bitcoinPollTimer = window.setTimeout(tick, BITCOIN_POLL_MS);
+          return;
+        }
+        this.handleBitcoinOutcome(outcome);
+      };
+      this.bitcoinPollTimer = window.setTimeout(tick, BITCOIN_POLL_MS);
+    },
+    stopBitcoinPolling() {
+      this.bitcoinPollToken = (this.bitcoinPollToken || 0) + 1;
+      window.clearTimeout(this.bitcoinPollTimer);
+    },
+    //the service or the premium changed in the settings: a Bitcoin invoice
+    //on the send screen is looked at again
+    onBitcoinInvoicesChanged() {
+      if (
+        this.mode === "send" &&
+        this.send.kind === "bitcoin-invoice" &&
+        !this.send.isSending &&
+        this.send.paymentRequest
+      ) {
+        this.send.bitcoinNotice = "";
+        this.send.priceChanged = false;
+        this.showBitcoinInvoice();
+      }
     },
     showTransactionInfo(tx) {
       if (!tx || tx.type === "loading") return; //eg. when tx is loading
@@ -1519,6 +1926,7 @@ export default {
   },
   async created() {
     window.moment = moment;
+    this.$root.$on("bitcoin-invoices-changed", this.onBitcoinInvoicesChanged);
     await this.$store.dispatch("lightning/getStatus");
   },
   mounted() {
@@ -1535,6 +1943,8 @@ export default {
   beforeDestroy() {
     window.clearInterval(this.QRAnimation);
     window.clearInterval(this.receive.invoiceStatusPoller);
+    this.stopBitcoinPolling();
+    this.$root.$off("bitcoin-invoices-changed", this.onBitcoinInvoicesChanged);
   },
   components: {
     CardWidget,
@@ -1548,6 +1958,29 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+// A Bitcoin invoice's details can be longer than the card: they scroll.
+.bitcoin-invoice-details {
+  max-height: 14rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.bitcoin-chip {
+  display: inline-block;
+  padding: 0.1rem 0.55rem;
+  border-radius: 1rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #f7c48a;
+  background: rgba(247, 147, 26, 0.16);
+  border: 1px solid rgba(247, 147, 26, 0.4);
+}
+body:not(.theme-dark) .bitcoin-chip {
+  color: #a35a00;
+  background: rgba(247, 147, 26, 0.12);
+}
+
 .transaction-description {
   flex: 1;
   min-width: 0;
