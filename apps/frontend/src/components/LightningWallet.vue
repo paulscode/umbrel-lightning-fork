@@ -629,10 +629,40 @@
             >
           </div>
 
-          <label class="sr-onlsy" for="input-description">
-            Description
-            <small class="text-muted">{{ receive.kind === 'offer' ? '' : '(optional)' }}</small>
-          </label>
+          <div class="d-flex justify-content-between align-items-baseline">
+            <label class="sr-onlsy" for="input-description">
+              Description
+              <small class="text-muted">{{ receive.kind === 'offer' ? '' : '(optional)' }}</small>
+            </label>
+            <!-- The offer's explanation, on request: the card has no room
+                 for it below the form. Click, not hover, so it works on a
+                 phone too; it closes on a click anywhere else. -->
+            <button
+              v-if="receive.kind === 'offer'"
+              id="offer-help"
+              type="button"
+              class="btn btn-link btn-sm p-0 text-muted offer-help"
+            >
+              How offers work
+              <b-icon icon="info-circle" class="ml-1"></b-icon>
+            </button>
+            <b-popover
+              v-if="receive.kind === 'offer'"
+              target="offer-help"
+              triggers="click blur"
+              placement="top"
+              title="Reusable offers"
+            >
+              <p class="mb-2">
+                Anyone holding the offer can pay it, as often as they like.
+              </p>
+              <p class="mb-0">
+                For a mining pool's payouts, use the description the pool asks
+                for and leave the amount empty, so the pool can pay whatever
+                you have earned.
+              </p>
+            </b-popover>
+          </div>
           <b-input
             id="input-description"
             class="mb-2 neu-input"
@@ -641,12 +671,7 @@
             :placeholder="receive.kind === 'offer' ? 'e.g. OCEAN Payouts for bc1q…' : ''"
             :disabled="receive.isGeneratingInvoice"
           ></b-input>
-          <small v-if="receive.kind === 'offer'" class="d-block text-muted mb-4">
-            Anyone holding an offer can pay it as often as they like. For a
-            pool payout, use the description the pool asks for and leave the
-            amount empty.
-          </small>
-          <div v-else class="mb-2"></div>
+          <div class="mb-2"></div>
         </div>
 
         <!-- SCREEN/MODE: Show a created offer -->
@@ -683,8 +708,10 @@
             >
             <span v-else>
               {{ offer.existed ? "Your existing offer for" : "Offer for" }}
-              <b>{{ receive.description }}</b>
-              <br />
+              <!-- One line, so the QR code and the offer fit the card. -->
+              <b class="d-block text-truncate" :title="receive.description">{{
+                receive.description
+              }}</b>
               <small>
                 <span v-if="receive.amount">
                   {{ receive.amount | unit | localize }}
@@ -692,6 +719,25 @@
                 </span>
                 <span v-else>any amount</span>
                 · reusable
+                <button
+                  id="offer-share-help"
+                  type="button"
+                  class="btn btn-link p-0 text-muted align-baseline offer-help"
+                  aria-label="How to share this offer"
+                >
+                  <b-icon icon="info-circle"></b-icon>
+                </button>
+                <b-popover
+                  target="offer-share-help"
+                  triggers="click blur"
+                  placement="bottom"
+                  title="Sharing an offer"
+                >
+                  <p class="mb-0">
+                    Share it as many times as you like. To be paid by a mining
+                    pool, give it to the pool as your Lightning payout address.
+                  </p>
+                </b-popover>
               </small>
             </span>
           </p>
@@ -708,10 +754,6 @@
                 :value="offer.bolt12"
                 class="mb-2"
               ></input-copy>
-              <small class="text-center d-block text-muted">
-                Reusable: share it as many times as you like. To be paid by a
-                pool, give it the pool as your Lightning payout address.
-              </small>
             </div>
           </transition>
         </div>
