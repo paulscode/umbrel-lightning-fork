@@ -128,6 +128,14 @@
             >
           </div>
         </div>
+        <div v-if="away" class="mt-3">
+          <small class="d-block">
+            <span class="font-weight-bold">Away from home: </span>
+            <span v-if="away.onion" class="text-success">ready</span>
+            <span v-else class="text-warning">not set up</span>
+          </small>
+          <small class="text-muted d-block">{{ awayHint }}</small>
+        </div>
         <div class="d-flex justify-content-between align-items-center mt-3">
           <small class="text-muted"
             >Get the app:
@@ -159,6 +167,8 @@ export default {
   data() {
     return {
       devices: [],
+      // {onion}: whether the node has an address for phones away from home.
+      away: null,
       loading: false,
       error: "",
       notice: "",
@@ -209,8 +219,19 @@ export default {
     },
     noOnionHint() {
       return this.$store.state.system.platform === "startos"
-        ? "This dashboard has no onion address, so the phone can reach your node only on your local network. To use the app anywhere, add an onion address to the dashboard's interface in StartOS, then pair again."
+        ? "This dashboard has no onion address, so the phone can reach your node only on your local network. To use the app anywhere, give the Dashboard interface an onion address with SSL off (Lightning Fork's task in StartOS does this); a phone paired now picks it up the next time it opens at home."
         : "Your node has no onion address for the app yet, so the phone can reach it only on your local network. Tor publishes one shortly after Lightning Fork is installed; a phone paired now picks it up the next time it opens at home, or cancel and pair again in a minute.";
+    },
+    awayHint() {
+      if (!this.away) {
+        return "";
+      }
+      if (this.away.onion) {
+        return "Away from your local network, the app reaches your node through its own built-in Tor. Phones paired before this was set up pick it up the next time they open at home.";
+      }
+      return this.$store.state.system.platform === "startos"
+        ? "The app reaches your node only on your local network until the Dashboard has an onion address. In StartOS, run the task on Lightning Fork's page that adds one (it opens Tor with the Dashboard selected and SSL off), or add a Tor address to Lightning Fork's Dashboard interface yourself, with SSL off. Phones already paired pick it up the next time they open at home."
+        : "The app reaches your node only on your local network until Tor publishes the app's onion address, which it does within a few minutes of installing or updating Lightning Fork. If this still says not set up after that, restart Lightning Fork from the Umbrel home screen.";
     }
   },
   methods: {
@@ -244,6 +265,7 @@ export default {
       this.loading = false;
       if (res && Array.isArray(res.devices)) {
         this.devices = res.devices;
+        this.away = res.away || null;
         return res.devices;
       }
       this.error = "Unable to load the paired phones.";

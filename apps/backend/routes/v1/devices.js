@@ -12,10 +12,12 @@ const router = express.Router();
 
 const ID = /^[0-9a-f]{12}$/;
 
+// `away`: whether a phone can reach the node away from home, which takes an
+// onion address; the Mobile app screen keeps it in view with the steps.
 router.get(
   "/",
   safeHandler(async (req, res) => {
-    res.json({ devices: await devices.list() });
+    res.json({ devices: await devices.list(), away: { onion: Boolean(access.endpoints(req).onionUrl) } });
   })
 );
 
