@@ -43,6 +43,7 @@ const widgets = require("routes/v1/lnd/widgets.js");
 const external = require("routes/v1/external.js");
 const ping = require("routes/ping.js");
 const devicesRoutes = require("routes/v1/devices.js");
+const bitcoinInvoicesRoutes = require("routes/v1/bitcoin-invoices.js");
 const mobileApi = require("routes/api/v1/mobile.js");
 const app = express();
 
@@ -104,6 +105,7 @@ app.use("/v1/system", system);
 app.use("/v1/external", external);
 app.use("/v1/channel-backup", channelBackupRoutes);
 app.use("/v1/devices", devicesRoutes);
+app.use("/v1/bitcoin-invoices", bitcoinInvoicesRoutes);
 app.use("/ping", ping);
 
 // Umbrel only. StartOS owns lnd.conf and restarts LND itself, and has no
