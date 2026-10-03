@@ -210,7 +210,7 @@ only if, decoded by the node:
 Success is `{status: "succeeded", paymentHash, preimage, amountSat, feeSat,
 bitcoinInvoice: {amountSat, description, paymentHash}}`: `amountSat` and
 `feeSat` are what it cost in BTCB2 (the service's invoice and routing),
-`bitcoinInvoice.amountSat` what was paid in Bitcoin, `preimage` the proof.
+`bitcoinInvoice.amountSat` what was paid on the SHA256 chain, `preimage` the proof.
 
 The service holds the payment until it has paid, which can take a while.
 After 90 seconds the answer is 504, `uncertain`, "on its way"; the payment
