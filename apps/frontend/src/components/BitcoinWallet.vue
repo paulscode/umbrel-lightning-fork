@@ -229,7 +229,7 @@
         >
           <div class="px-3 px-lg-4">
             <!-- Back Button -->
-            <div class="pb-3">
+            <div class="pb-2">
               <a
                 href="#"
                 class="card-link text-muted"
@@ -293,7 +293,7 @@
             >
             <b-input
               id="input-withdrawal-address"
-              class="mb-2 neu-input"
+              class="mb-1 neu-input"
               type="text"
               size="lg"
               min="1"
@@ -301,7 +301,7 @@
               @input="fetchWithdrawalFees"
             ></b-input>
           </div>
-          <div class="px-3 px-lg-4 mt-1" v-show="!error">
+          <div class="px-3 px-lg-4" v-show="!error">
             <fee-selector
               :fee="this.fees"
               :mempool-fees="mempoolFees"
@@ -319,7 +319,7 @@
         >
           <div class="px-3 px-lg-4">
             <!-- Back Button -->
-            <div class="pt-2 pb-3">
+            <div class="pb-2">
               <a
                 href="#"
                 class="card-link text-muted"
@@ -417,7 +417,7 @@
         >
           <div class="px-3 px-lg-4">
             <!-- Back Button -->
-            <div class="pt-2 pb-3">
+            <div class="pb-2">
               <a
                 href="#"
                 class="card-link text-muted"
@@ -439,7 +439,7 @@
               </a>
             </div>
             <!-- Big green checkmark -->
-            <circular-checkmark class="mb-4" success></circular-checkmark>
+            <circular-checkmark class="mb-3 mt-2" :size="100" success></circular-checkmark>
 
             <!-- Invoice amount + description -->
             <div class="text-center mb-2">
@@ -465,7 +465,7 @@
         >
           <div class="px-3 px-lg-4">
             <!-- Back Button -->
-            <div class="pt-2 pb-3">
+            <div class="pb-2">
               <a
                 href="#"
                 class="card-link text-muted"
@@ -486,7 +486,7 @@
                 Back
               </a>
             </div>
-            <p class="text-center text-muted mb-3">
+            <p class="text-center text-muted mb-2">
               <span>
                 Send
                 <b>only Bitcoin</b> to this address
@@ -497,7 +497,7 @@
             <qr-code
               class="mb-3 mx-auto"
               :value="depositAddress"
-              :size="190"
+              :size="170"
               showLogo
             ></qr-code>
 
@@ -505,7 +505,7 @@
             <input-copy
               size="sm"
               :value="depositAddress"
-              class="mb-4 mt-1"
+              class="mb-0"
             ></input-copy>
           </div>
         </div>

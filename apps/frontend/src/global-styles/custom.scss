@@ -387,6 +387,25 @@ svg.icon-clock {
 //wallet
 .wallet-content {
   height: 22rem;
+  // Content taller than the card scrolls here, rather than painting over
+  // what follows it (the error box and the buttons). Each screen is meant to
+  // fit; this is for what nobody planned, such as a very long description.
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+
+  // A screen's trailing margin is space below its last line, inside a box
+  // that scrolls: it would make a scrollbar appear for nothing.
+  .wallet-mode:not(.mode-transactions) {
+    padding-bottom: 0 !important;
+
+    > :last-child,
+    > :last-child > :last-child,
+    > :last-child > :last-child > :last-child {
+      margin-bottom: 0 !important;
+      padding-bottom: 0 !important;
+    }
+  }
 }
 .wallet-buttons {
   height: 3.5rem;

@@ -1,6 +1,10 @@
 <template>
   <transition name="checkmark-animation" appear>
-    <div class="checkmark" :class="danger ? `checkmark-danger` : ''">
+    <div
+      class="checkmark"
+      :class="danger ? `checkmark-danger` : ''"
+      :style="{ width: `${size}px`, height: `${size}px` }"
+    >
       <svg
         width="54"
         height="43"
@@ -43,6 +47,11 @@ export default {
     danger: {
       type: Boolean,
       default: false
+    },
+    // Smaller where the result shares the card with its details.
+    size: {
+      type: Number,
+      default: 150
     }
   },
   data() {

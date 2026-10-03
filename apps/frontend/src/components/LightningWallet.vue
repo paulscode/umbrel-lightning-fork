@@ -241,7 +241,7 @@
           key="mode-send"
         >
           <!-- Back Button -->
-          <div class="pb-3">
+          <div class="pb-2">
             <a
               href="#"
               class="card-link text-muted"
@@ -266,7 +266,7 @@
           <label class="sr-onlsy" for="input-sats">Paste Invoice or Offer</label>
           <b-input
             id="input-sats"
-            class="mb-4 neu-input"
+            class="mb-3 neu-input"
             type="text"
             size="lg"
             min="1"
@@ -281,10 +281,12 @@
             v-if="send.kind === 'bitcoin-invoice' && send.bitcoin"
             class="bitcoin-invoice-details"
           >
-            <span class="bitcoin-chip mb-2">SHA256 invoice</span>
+            <span v-if="!send.bitcoin.estimate" class="bitcoin-chip mb-2">SHA256 invoice</span>
             <div v-if="send.bitcoin.estimate" class="d-flex justify-content-between align-items-center mb-1">
               <div>
-                <small class="d-block text-muted mb-1">Paying</small>
+                <small class="d-block text-muted mb-1"
+                  >Paying <span class="bitcoin-chip ml-1">SHA256 invoice</span></small
+                >
                 <h4 class="d-block mb-0">
                   At most {{ bitcoinMostSat | localize }} sats
                 </h4>
@@ -297,20 +299,33 @@
                 >~ {{ bitcoinMostSat | satsToFiat }}</small
               >
             </div>
-            <small v-if="send.bitcoin.estimate" class="d-block text-muted mb-2">
-              Includes the service's fee of
-              {{ send.bitcoin.estimate.feeSat | localize }} sats
-              ({{ percent(send.bitcoin.estimate.spread) }}) and up to
-              {{ send.bitcoin.estimate.routingFeeLimitSat | localize }} sats
-              in routing fees.
-            </small>
 
-            <div class="small">
+            <a
+              href="#"
+              class="small d-inline-block mb-1"
+              @click.prevent="send.bitcoinDetails = !send.bitcoinDetails"
+              >{{ send.bitcoinDetails ? "Hide details" : "Details" }}</a
+            >
+            <div v-show="send.bitcoinDetails" class="small">
               <div class="d-flex justify-content-between py-1">
                 <span class="text-muted">SHA256 invoice for</span>
                 <span class="text-right ml-3">{{
                   send.bitcoin.amountSat ? `${Number(send.bitcoin.amountSat).toLocaleString()} sats` : "No amount"
                 }}</span>
+              </div>
+              <div v-if="send.bitcoin.estimate" class="d-flex justify-content-between py-1">
+                <span class="text-muted">Service fee, included</span>
+                <span class="text-right ml-3"
+                  >{{ send.bitcoin.estimate.feeSat | localize }} sats ({{
+                    percent(send.bitcoin.estimate.spread)
+                  }})</span
+                >
+              </div>
+              <div v-if="send.bitcoin.estimate" class="d-flex justify-content-between py-1">
+                <span class="text-muted">Routing, included</span>
+                <span class="text-right ml-3"
+                  >up to {{ send.bitcoin.estimate.routingFeeLimitSat | localize }} sats</span
+                >
               </div>
               <div v-if="send.bitcoin.estimate" class="d-flex justify-content-between py-1">
                 <span class="text-muted">Rate</span>
@@ -322,7 +337,9 @@
               </div>
               <div v-if="send.bitcoin.description" class="d-flex justify-content-between py-1">
                 <span class="text-muted">For</span>
-                <span class="text-right ml-3 text-break">{{ send.bitcoin.description }}</span>
+                <span class="text-right ml-3"
+                  ><clamped-text :text="send.bitcoin.description" :lines="2"></clamped-text
+                ></span>
               </div>
               <div v-if="send.bitcoin.estimate" class="d-flex justify-content-between py-1">
                 <span class="text-muted">Paid through</span>
@@ -349,6 +366,19 @@
           <!-- An offer that lets the payer choose the amount -->
           <div v-else-if="send.isValidInvoice && send.kind === 'offer' && send.anyAmount">
             <label class="sr-onlsy" for="input-offer-amount">Amount</label>
+            <span class="kind-chip offer-chip ml-1">Reusable offer</span>
+                <button
+                  id="offer-any-help"
+                  type="button"
+                  class="btn btn-link p-0 ml-1 text-muted offer-help align-baseline"
+                  aria-label="What paying an offer does"
+                >
+                  <b-icon icon="info-circle"></b-icon>
+                </button>
+                <b-popover target="offer-any-help" triggers="click blur" placement="bottom">
+                  Your node asks the recipient for an invoice, then pays it.
+                  The offer stays valid, so it can be paid again.
+                </b-popover>
             <div class="mb-3">
               <b-input-group class="neu-input-group">
                 <b-input
@@ -374,20 +404,31 @@
               >
             </div>
             <div v-if="send.description" class="mb-2">
-              <small class="d-block text-muted mb-1">Offer</small>
-              <span>{{ send.description }}</span>
+              <small class="d-block text-muted mb-1">For</small>
+              <clamped-text :text="send.description" :lines="1"></clamped-text>
             </div>
-            <small class="d-block text-muted mb-2">
-              This is a reusable offer: your node asks the recipient for an
-              invoice and pays it.
-            </small>
           </div>
 
           <!-- Invoice amount + description -->
           <div v-else-if="send.isValidInvoice && send.amount">
             <div class="d-flex justify-content-between mb-3 align-items-center">
               <div>
-                <small class="d-block text-muted mb-1">Paying</small>
+                <small class="d-block text-muted mb-1"
+                  >Paying<template v-if="send.kind === 'offer'">
+                <span class="kind-chip offer-chip ml-1">Reusable offer</span>
+                <button
+                  id="offer-pay-help"
+                  type="button"
+                  class="btn btn-link p-0 ml-1 text-muted offer-help align-baseline"
+                  aria-label="What paying an offer does"
+                >
+                  <b-icon icon="info-circle"></b-icon>
+                </button>
+                <b-popover target="offer-pay-help" triggers="click blur" placement="bottom">
+                  Your node asks the recipient for an invoice, then pays it.
+                  The offer stays valid, so it can be paid again.
+                </b-popover></template></small
+                >
                 <h4 class="d-block mb-0">
                   {{ send.amount | unit | localize }}
                 </h4>
@@ -402,16 +443,10 @@
 
             <div v-if="send.description">
               <small class="d-block text-muted mb-1">For</small>
-              <span>{{ send.description }}</span>
+              <clamped-text :text="send.description" :lines="2"></clamped-text>
             </div>
-            <small v-if="send.kind === 'offer'" class="d-block text-muted mt-2">
-              This is a reusable offer: your node asks the recipient for an
-              invoice and pays it.
-            </small>
           </div>
-          <small v-if="send.isSending && send.kind !== 'bolt11'" class="d-block text-muted">
-            {{ send.progress }}
-          </small>
+
         </div>
 
         <!-- SCREEN/MODE: Successfully paid invoice -->
@@ -421,7 +456,7 @@
           key="mode-sent"
         >
           <!-- Back Button -->
-          <div class="pb-3">
+          <div class="pb-2">
             <a
               href="#"
               class="card-link text-muted"
@@ -444,19 +479,21 @@
           </div>
 
           <!-- Big green checkmark -->
-          <circular-checkmark class="mb-4 mt-4" success></circular-checkmark>
+          <circular-checkmark class="mb-3 mt-2" :size="100" success></circular-checkmark>
 
           <!-- Invoice amount + description -->
-          <p class="text-center mb-4 pb-1">
+          <div class="text-center mb-4 pb-1">
             Paid
             <b>{{ send.amount | unit | localize }}</b>
             <!-- display "Sat" for a value of 1, otherwise display "Sats" -->
             {{ unit | formatUnit(send.amount) }}
-            <span v-if="send.description">
-              for
-              <b>{{ send.description }}</b>
-            </span>
-          </p>
+            <clamped-text
+              v-if="send.description"
+              class="text-muted small mt-1"
+              :text="send.description"
+              :lines="2"
+            ></clamped-text>
+          </div>
         </div>
 
         <!-- SCREEN/MODE: A SHA256 invoice's payment on its way -->
@@ -465,7 +502,7 @@
           v-else-if="mode === 'bitcoin-waiting'"
           key="mode-bitcoin-waiting"
         >
-          <div class="pb-3">
+          <div class="pb-2">
             <a
               href="#"
               class="card-link text-muted"
@@ -515,7 +552,7 @@
           v-else-if="mode === 'bitcoin-sent'"
           key="mode-bitcoin-sent"
         >
-          <div class="pb-3">
+          <div class="pb-2">
             <a
               href="#"
               class="card-link text-muted"
@@ -536,18 +573,20 @@
               Back
             </a>
           </div>
-          <circular-checkmark class="mb-3" success></circular-checkmark>
-          <p class="text-center mb-2">
+          <circular-checkmark class="mb-2" :size="72" success></circular-checkmark>
+          <div class="text-center mb-2">
             Paid a SHA256 invoice of
             <b>{{ bitcoinPaid.bitcoinAmountSat | localize }} sats</b>
-            <span v-if="bitcoinPaid.description">
-              for
-              <b>{{ bitcoinPaid.description }}</b>
-            </span>
-          </p>
-          <small class="d-block text-center text-muted mb-3">
-            It cost {{ bitcoinPaid.amountSat | localize }} BTCB2 sats, plus
-            {{ bitcoinPaid.feeSat | localize }} in routing fees.
+            <clamped-text
+              v-if="bitcoinPaid.description"
+              class="text-muted small mt-1"
+              :text="bitcoinPaid.description"
+              :lines="1"
+            ></clamped-text>
+          </div>
+          <small class="d-block text-center text-muted mb-2">
+            Cost here: {{ bitcoinPaid.amountSat | localize }} sats +
+            {{ bitcoinPaid.feeSat | localize }} sats routing
           </small>
           <input-copy size="sm" :value="bitcoinPaid.preimage"></input-copy>
           <small class="text-center text-muted d-block mt-2"
@@ -562,7 +601,7 @@
           key="mode-receive"
         >
           <!-- Back Button -->
-          <div class="pb-3">
+          <div class="pb-2">
             <a
               href="#"
               class="card-link text-muted"
@@ -681,10 +720,10 @@
           key="mode-offer"
         >
           <!-- Back Button -->
-          <div class="pb-3">
+          <div class="pb-2 d-flex justify-content-between align-items-baseline">
             <a
               href="#"
-              class="card-link text-muted"
+              class="card-link text-muted text-nowrap flex-shrink-0"
               v-on:click.stop.prevent="reset"
             >
               <svg
@@ -701,50 +740,50 @@
               </svg>
               Back
             </a>
+            <small v-if="!receive.isGeneratingInvoice" class="text-muted text-truncate ml-3" style="min-width: 0"
+              >Offer ·
+              <span v-if="receive.amount"
+                >{{ receive.amount | unit | localize }}
+                {{ unit | formatUnit(receive.amount) }}</span
+              ><span v-else>any amount</span> · reusable
+              <button
+                id="offer-share-help"
+                type="button"
+                class="btn btn-link p-0 text-muted align-baseline offer-help"
+                aria-label="How to share this offer"
+              >
+                <b-icon icon="info-circle"></b-icon>
+              </button>
+              <b-popover
+                target="offer-share-help"
+                triggers="click blur"
+                placement="bottom"
+                title="Sharing an offer"
+              >
+                <p class="mb-0">
+                  Share it as many times as you like. To be paid by a mining
+                  pool, give it to the pool as your Lightning payout address.
+                </p>
+              </b-popover></small
+            >
           </div>
           <p class="text-center text-muted mb-2">
             <span class="blink" v-if="receive.isGeneratingInvoice"
               >Creating Offer</span
             >
-            <span v-else>
-              {{ offer.existed ? "Your existing offer for" : "Offer for" }}
-              <!-- One line, so the QR code and the offer fit the card. -->
-              <b class="d-block text-truncate" :title="receive.description">{{
-                receive.description
-              }}</b>
-              <small>
-                <span v-if="receive.amount">
-                  {{ receive.amount | unit | localize }}
-                  {{ unit | formatUnit(receive.amount) }}
-                </span>
-                <span v-else>any amount</span>
-                · reusable
-                <button
-                  id="offer-share-help"
-                  type="button"
-                  class="btn btn-link p-0 text-muted align-baseline offer-help"
-                  aria-label="How to share this offer"
-                >
-                  <b-icon icon="info-circle"></b-icon>
-                </button>
-                <b-popover
-                  target="offer-share-help"
-                  triggers="click blur"
-                  placement="bottom"
-                  title="Sharing an offer"
-                >
-                  <p class="mb-0">
-                    Share it as many times as you like. To be paid by a mining
-                    pool, give it to the pool as your Lightning payout address.
-                  </p>
-                </b-popover>
-              </small>
-            </span>
+            <!-- One line, so the QR code and the offer fit the card. -->
+            <b
+              v-else
+              class="d-block text-truncate"
+              :title="receive.description"
+              >{{ receive.description }}</b
+            >
           </p>
           <qr-code
             class="mb-3 mx-auto"
             :showLogo="!receive.isGeneratingInvoice"
             :value="offer.qr"
+            :size="184"
             level="L"
           ></qr-code>
           <transition name="slide-up" appear>
@@ -765,10 +804,10 @@
           key="mode-invoice"
         >
           <!-- Back Button -->
-          <div class="pb-3">
+          <div class="pb-2 d-flex justify-content-between align-items-baseline">
             <a
               href="#"
-              class="card-link text-muted"
+              class="card-link text-muted text-nowrap flex-shrink-0"
               v-on:click.stop.prevent="reset"
             >
               <svg
@@ -785,26 +824,26 @@
               </svg>
               Back
             </a>
+            <small v-if="!receive.isGeneratingInvoice" class="text-muted text-truncate ml-3" style="min-width: 0"
+              ><b
+                >{{ receive.amount | unit | localize }}
+                {{ unit | formatUnit(receive.amount) }}</b
+              >
+              · expires {{ getTimeFromNow(receive.expiresOn) }}</small
+            >
           </div>
 
           <p class="text-center text-muted mb-2">
-            <!-- If still generating invoice, show blinking loading text -->
             <span class="blink" v-if="receive.isGeneratingInvoice"
               >Generating Invoice</span
             >
-
-            <!-- Invoice amount + description -->
-            <span v-else>
-              Invoice of
-              <!-- {{ receive.amount | unit | localize}} -->
-              <b>
-                {{ receive.amount | unit | localize }}
-                <!-- display "Sat" for a value of 1, otherwise display "Sats" -->
-                {{ unit | formatUnit(receive.amount) }}
-              </b>
-              {{ receive.description ? "for" : null }}
-              <b>{{ receive.description }}</b>
-            </span>
+            <!-- One line, so the QR code and the invoice fit the card. -->
+            <b
+              v-else-if="receive.description"
+              class="d-block text-truncate"
+              :title="receive.description"
+              >{{ receive.description }}</b
+            >
           </p>
 
           <!-- QR Code -->
@@ -812,6 +851,7 @@
             class="mb-3 mx-auto"
             :showLogo="!receive.isGeneratingInvoice"
             :value="receive.invoiceQR"
+            :size="184"
           ></qr-code>
 
           <!-- Copy Invoice Input Field -->
@@ -820,12 +860,7 @@
               <input-copy
                 size="sm"
                 :value="receive.invoiceQR"
-                class="mb-2"
               ></input-copy>
-              <small class="text-center d-block text-muted">
-                This invoice will expire
-                {{ getTimeFromNow(receive.expiresOn) }}
-              </small>
             </div>
           </transition>
         </div>
@@ -837,7 +872,7 @@
           key="mode-received"
         >
           <!-- Back Button -->
-          <div class="pb-3">
+          <div class="pb-2">
             <a
               href="#"
               class="card-link text-muted"
@@ -860,23 +895,24 @@
           </div>
 
           <!-- Big green checkmark -->
-          <circular-checkmark class="mb-4 mt-4" success></circular-checkmark>
+          <circular-checkmark class="mb-3 mt-2" :size="100" success></circular-checkmark>
 
           <!-- Invoice amount + description -->
-          <p class="text-center mb-4 pb-1">
+          <div class="text-center mb-4 pb-1">
             Received
             <b
               >{{ receive.amount | unit | localize }} {{ unit | formatUnit(receive.amount) }}</b
             >
-            <span v-if="receive.description">
-              for
-              <b>{{ receive.description }}</b>
-            </span>
-            <br />
-            <small class="text-muted">{{
+            <clamped-text
+              v-if="receive.description"
+              class="text-muted small mt-1"
+              :text="receive.description"
+              :lines="2"
+            ></clamped-text>
+            <small class="text-muted d-block mt-1">{{
               getReadableTime(receive.timestamp)
             }}</small>
-          </p>
+          </div>
         </div>
 
         <!-- SCREEN/MODE: payment info -->
@@ -886,7 +922,7 @@
           key="payment-success"
         >
           <!-- Back Button -->
-          <div class="pb-3">
+          <div class="pb-2">
             <a
               href="#"
               class="card-link text-muted"
@@ -908,20 +944,22 @@
             </a>
           </div>
 
-          <circular-checkmark class="mb-4" success></circular-checkmark>
+          <circular-checkmark class="mb-3" :size="88" success></circular-checkmark>
 
           <!-- Payment amount + description -->
-          <p class="text-center mb-2">
+          <div class="text-center mb-2">
             Paid
             <b>
               {{ paymentInfo.amount | unit | localize }}
               {{ unit | formatUnit(paymentInfo.amount) }}
             </b>
-            <span v-if="paymentInfo.description">
-              for
-              <b>{{ paymentInfo.description }}</b>
-            </span>
-          </p>
+            <clamped-text
+              v-if="paymentInfo.description"
+              class="text-muted small mt-1"
+              :text="paymentInfo.description"
+              :lines="1"
+            ></clamped-text>
+          </div>
           <div class="pt-2 mb-3">
             <div class="d-flex justify-content-between">
               <small class="text-muted">{{
@@ -932,7 +970,7 @@
                 {{ paymentInfo.fee | unit | localize }} {{ unit | formatUnit }}
               </small>
             </div>
-            <div class="pt-3 d-block pb-2">
+            <div class="pt-2 d-block">
               <input-copy
                 size="sm"
                 :value="paymentInfo.paymentPreImage"
@@ -951,7 +989,7 @@
           key="mode-invoice-info"
         >
           <!-- Back Button -->
-          <div class="pb-3">
+          <div class="pb-2">
             <a
               href="#"
               class="card-link text-muted"
@@ -973,7 +1011,7 @@
             </a>
           </div>
           <!-- Big red checkmark -->
-          <circular-checkmark class="mb-4 mt-4" danger></circular-checkmark>
+          <circular-checkmark class="mb-3 mt-2" :size="100" danger></circular-checkmark>
 
           <!-- Invoice amount + description -->
           <p class="text-center mb-4 pb-1">
@@ -1079,7 +1117,7 @@
             fill="#FFFFFF"
           />
         </svg>
-        {{ send.isSending ? "Sending..." : send.fetchedInvoice ? "Retry Payment" : send.kind === "offer" ? "Pay Offer" : send.priceChanged ? "Send at the new price" : "Send" }}
+        {{ send.isSending ? send.progress || "Sending..." : send.fetchedInvoice ? "Retry Payment" : send.kind === "offer" ? "Pay Offer" : send.priceChanged ? "Send at the new price" : "Send" }}
       </b-button>
 
       <!-- Button: Create Invoice (receive mode) -->
@@ -1132,6 +1170,7 @@ import {
 
 import CountUp from "@/components/Utility/CountUp";
 import WalletError from "@/components/Utility/WalletError.vue";
+import ClampedText from "@/components/Utility/ClampedText.vue";
 import CardWidget from "@/components/CardWidget";
 import InputCopy from "@/components/Utility/InputCopy";
 import QrCode from "@/components/Utility/QrCode.vue";
@@ -1177,6 +1216,7 @@ export default {
         bitcoin: null, //a SHA256 invoice as the node decoded it, with what paying it costs
         bitcoinAttempt: null, //{request, maxIncomingSat, requestId} of the payment being made
         bitcoinNotice: "", //why the last attempt did not pay
+        bitcoinDetails: false, //the SHA256 invoice's details shown
         priceChanged: false, //the service's price moved; the new one is shown
         waitingLong: false, //asked for a while with no answer yet
       },
@@ -1292,6 +1332,7 @@ export default {
         bitcoin: null,
         bitcoinAttempt: null,
         bitcoinNotice: "",
+        bitcoinDetails: false,
         priceChanged: false,
         waitingLong: false,
       };
@@ -1381,7 +1422,7 @@ export default {
         // one, which could pay twice if the first attempt settles late.
         let invoice = this.send.fetchedInvoice;
         if (isOffer && !invoice) {
-          this.send.progress = "Asking the recipient for an invoice…";
+          this.send.progress = "Getting an invoice…";
           const fetched = await API.post(
             `${process.env.VUE_APP_API_BASE_URL}/v1/lnd/offers/fetchInvoice`,
             {
@@ -2002,18 +2043,15 @@ export default {
     InputCopy,
     CircularCheckmark,
     SatsBtcSwitch,
+    ClampedText,
   },
 };
 </script>
 
 <style lang="scss" scoped>
-// A SHA256 invoice's details can be longer than the card: they scroll.
-.bitcoin-invoice-details {
-  max-height: 14rem;
-  overflow-y: auto;
-  overflow-x: hidden;
-}
-
+// What was pasted, when it is not an ordinary invoice: a small label above
+// its details, with the explanation a click away.
+.kind-chip,
 .bitcoin-chip {
   display: inline-block;
   padding: 0.1rem 0.55rem;
@@ -2024,6 +2062,15 @@ export default {
   color: #f7c48a;
   background: rgba(247, 147, 26, 0.16);
   border: 1px solid rgba(247, 147, 26, 0.4);
+}
+.offer-chip {
+  color: #9fc0ff;
+  background: rgba(80, 140, 255, 0.14);
+  border-color: rgba(80, 140, 255, 0.4);
+}
+body:not(.theme-dark) .offer-chip {
+  color: #2f5fc4;
+  background: rgba(80, 140, 255, 0.1);
 }
 body:not(.theme-dark) .bitcoin-chip {
   color: #a35a00;
