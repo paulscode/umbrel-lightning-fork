@@ -15,15 +15,14 @@ const lndService = require("services/lnd.js");
 const peersLogic = require("logic/peers.js");
 const offersLogic = require("logic/offers.js");
 const priceLogic = require("logic/price.js");
-const { ValidationError, LndError } = require("models/errors.js");
+const { ValidationError } = require("models/errors.js");
 const { createDeviceAuth, createFailureLimiter } = require("middlewares/deviceAuth.js");
+const { createJsonErrorHandler } = require("middlewares/jsonErrors.js");
 const { createIdempotency } = require("utils/idempotency.js");
 const { createSendJournal } = require("utils/sendJournal.js");
 const x509 = require("utils/x509.js");
-const logger = require("utils/logger.js");
 
 const API_VERSION = 1;
-const WALLET_LOCKED = "wallet locked, unlock it to enable full RPC access";
 
 const router = express.Router();
 const deviceAuth = createDeviceAuth({ devices: () => devices });
@@ -42,6 +41,15 @@ const body = (req) => req.body || {};
 
 // A JSON true, and nothing else: "false" in a form body is not true.
 const yes = (value) => value === true;
+
+// What the client says it can show beyond the kinds every client knows, in
+// the X-LF-Capabilities header: a comma-separated list.
+function capabilitiesOf(req) {
+  return String(req.get("X-LF-Capabilities") || "")
+    .split(",")
+    .map((c) => c.trim().toLowerCase())
+    .filter(Boolean);
+}
 
 // Runs a money-moving call once per request id. The id is bound to the call
 // and its parameters, so a reused id cannot answer for a different payment.
@@ -144,7 +152,7 @@ router.post(
 
 router.get("/wallet", handle(() => mobile.wallet()));
 router.get("/fees", handle(() => mobile.fees()));
-router.post("/decode", handle((req) => mobile.decode(body(req).input)));
+router.post("/decode", handle((req) => mobile.decode(body(req).input, { capabilities: capabilitiesOf(req) })));
 
 router.post(
   "/onchain/estimate",
@@ -170,6 +178,18 @@ router.post(
     idempotent(req, ({ recheck }) => {
       const { request, amountSat, payerNote, resume } = body(req);
       return mobile.payLightning({ request, amountSat, payerNote, recheck, resume: yes(resume), journal: journalFor(req) });
+    })
+  )
+);
+
+// A Bitcoin invoice, paid through the service set up in the dashboard, for
+// no more than `maxIncomingSat` (the ceiling /decode's estimate showed).
+router.post(
+  "/pay/bitcoin-invoice",
+  handle((req) =>
+    idempotent(req, ({ recheck }) => {
+      const { request, maxIncomingSat, resume } = body(req);
+      return mobile.payBitcoinInvoice({ request, maxIncomingSat, recheck, resume: yes(resume) });
     })
   )
 );
@@ -311,37 +331,6 @@ router.use((req, res) => {
   res.status(404).json({ error: "No such call" });
 });
 
-// eslint-disable-next-line no-unused-vars
-router.use((error, req, res, next) => {
-  let status = error.statusCode || 500;
-  let message = error.message || "Something went wrong";
-  const detail = error.error && error.error.details;
-  if (error instanceof LndError) {
-    if (detail === WALLET_LOCKED) {
-      status = 503;
-      message = "The node's wallet is locked.";
-    } else if (
-      (error.error && (error.error.code === 14 || error.error.code === 4)) ||
-      /failed to connect|ECONNREFUSED|waiting to start|in the process of starting/i.test(String(detail || ""))
-    ) {
-      status = 503;
-      message = "The node is not answering. It may be starting up.";
-    } else {
-      // LND refused: the request, not the server, is at fault.
-      status = error.statusCode || 400;
-      if (detail) {
-        message = `${message}: ${detail}`;
-      }
-    }
-  }
-  if (error.type === "entity.parse.failed") {
-    status = 400;
-    message = "The request is not valid JSON";
-  }
-  if (status >= 500) {
-    logger.error(message, `mobile ${req.method} ${req.path}`, error.stack);
-  }
-  res.status(status).json(error.uncertain ? { error: message, uncertain: true } : { error: message });
-});
+router.use(createJsonErrorHandler("mobile"));
 
 module.exports = router;

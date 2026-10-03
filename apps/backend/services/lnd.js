@@ -589,10 +589,11 @@ function defaultRoutingFeeLimit(amount) {
   return Math.floor((amount * DEFAULT_ROUTING_FEE_PERCENT) / 100);
 }
 
-function sendPayment(paymentRequest, amt, paymentAmount) {
+// `feeLimitSat`, when given, replaces the default routing fee limit.
+function sendPayment(paymentRequest, amt, paymentAmount, feeLimitSat) {
   const rpcPayload = {
     payment_request: paymentRequest,
-    fee_limit_sat: defaultRoutingFeeLimit(paymentAmount),
+    fee_limit_sat: feeLimitSat || defaultRoutingFeeLimit(paymentAmount),
     no_inflight_updates: true,
   };
 
