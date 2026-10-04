@@ -8,8 +8,10 @@ const path = require("node:path");
 const { createBridgeSwitch, sha256ConfWriter } = require("../logic/bridgeSwitch.js");
 const { createSha256Nodes, parseNodes } = require("../logic/sha256Nodes.js");
 
-const ACT = { height: 961640, hash: "0000000000000050c1e5f69672f459293be14f46e5a494e7a8c8541396f18eeb" };
-const SHA = "00000000000000000001aaaa" + "0".repeat(40);
+const { ACTIVATION } = require("../logic/mempool.js");
+
+const ACT = ACTIVATION.mainnet;
+const SHA = ACT.sha256Hash;
 const COMPANION = "paulscode-knots-sha256|10.21.21.64:19332|umbrel|Sha_pw-B=";
 const KNOTS = "bitcoin-knots|10.21.21.7:9332|umbrel|Kn0ts_pw-A=";
 
@@ -35,10 +37,13 @@ function harness({ platform = "umbrel", nodes = fakeNodes(COMPANION, { "10.21.21
   // Lightning Fork applies what was written at each restart, unless told.
   state.applied = !!(state.settings.bridge && state.settings.bridge.enabled);
   state.confs = [];
+  state.conf = null;
   const sw = createBridgeSwitch({
     platform,
     sha256Nodes: nodes,
-    writeSha256Conf: async (text) => { state.confs.push(text); },
+    writeSha256Conf: async (text) => { state.confs.push(text); state.conf = text; },
+    readSha256Conf: async () => state.conf,
+    removeSha256Conf: async () => { state.conf = null; state.removed = (state.removed || 0) + 1; },
     readSettings: async () => state.settings,
     writeLndConfig: async (lnd, bridge) => {
       state.writes.push({ lnd, bridge });
@@ -175,7 +180,7 @@ test("changing the node of a running bridge does not restart Lightning Fork", as
   assert.deepEqual(await sw.set(true, "bitcoin-knots"), { on: true, restarting: false, node: "bitcoin-knots" });
   assert.equal(state.stops, 0);
   assert.equal(state.settings.bridge.sha256Node, "bitcoin-knots");
-  assert.match(state.confs[0], /10\.21\.21\.7:9332/);
+  assert.match(state.conf, /10\.21\.21\.7:9332/);
 });
 
 test("why nothing can be used is said, with what to do", async () => {
@@ -197,4 +202,61 @@ test("the SHA256 node's config is written whole, private, and replaced cleanly",
   assert.equal(fs.statSync(file).mode & 0o777, 0o600);
   assert.deepEqual(fs.readdirSync(dir), ["bridge-sha256.conf"]);
   await assert.rejects(sha256ConfWriter("", 1000)("x"), /no place/);
+});
+
+test("while on, the node in use is kept current, and stopped when it leaves the SHA256 chain", async () => {
+  const byHost = { "10.21.21.7": { hash: SHA } };
+  const nodes = fakeNodes(KNOTS, byHost);
+  const { sw, state } = harness({ nodes, settings: { lnd: LND, bridge: { enabled: true, sha256Node: "bitcoin-knots" } } });
+
+  // Restored elsewhere: no config file. Written again.
+  assert.equal(await sw.reconcile(), "");
+  assert.match(state.conf, /10\.21\.21\.7:9332/);
+  const writes = state.confs.length;
+  assert.equal(await sw.reconcile(), "");
+  assert.equal(state.confs.length, writes, "unchanged is left alone");
+
+  // Bitcoin Knots switched to a BLAKE2b version in its own settings.
+  byHost["10.21.21.7"].hash = ACT.hash;
+  await nodes.survey({ fresh: true });
+  const problem = await sw.reconcile();
+  assert.match(problem, /stopped rather than follow it/);
+  assert.equal(state.conf, null, "the SHA256 node no longer reads it");
+  assert.match((await sw.info()).problem, /Bitcoin Knots is on the BLAKE2b chain now/);
+
+  // Not answering: said, nothing changed.
+  byHost["10.21.21.7"].hash = SHA;
+  await nodes.survey({ fresh: true });
+  await sw.reconcile();
+  delete byHost["10.21.21.7"];
+  await nodes.survey({ fresh: true });
+  const before = state.conf;
+  assert.match(await sw.reconcile(), /not answering/);
+  assert.equal(state.conf, before);
+});
+
+test("nothing is reconciled while the bridge is off", async () => {
+  const { sw, state } = harness({ settings: { lnd: LND, bridge: { enabled: false, sha256Node: "paulscode-knots-sha256" } } });
+  assert.equal(await sw.reconcile(), "");
+  assert.equal(state.confs.length, 0);
+});
+
+test("the node is not changed under unfinished payments", async () => {
+  const byHost = { "10.21.21.64": { hash: SHA }, "10.21.21.7": { hash: SHA } };
+  const { sw, state } = harness({
+    nodes: fakeNodes(`${COMPANION};${KNOTS}`, byHost),
+    settings: { lnd: LND, bridge: { enabled: true, sha256Node: "paulscode-knots-sha256" } },
+    unfinished: async () => 1,
+  });
+  await assert.rejects(sw.set(true, "bitcoin-knots"), /Change its node once none/);
+  assert.equal(state.confs.length, 0);
+});
+
+test("two writes at once both land, the last one standing", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sha256-conf-"));
+  const file = path.join(dir, "bridge-sha256.conf");
+  const write = sha256ConfWriter(file, 1000);
+  await Promise.all([write("a\n"), write("b\n")]);
+  assert.ok(["a\n", "b\n"].includes(fs.readFileSync(file, "utf8")));
+  assert.deepEqual(fs.readdirSync(dir), ["bridge-sha256.conf"]);
 });

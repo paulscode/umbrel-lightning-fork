@@ -41,6 +41,8 @@ function createBridgeSwitch({
   readSettings,           // settings.json: {lnd, bridge}
   writeLndConfig,         // (lnd, bridge) -> writes umbrel-lnd.conf and settings.json
   writeSha256Conf = async () => {}, // the SHA256 node's config file
+  readSha256Conf = async () => null,
+  removeSha256Conf = async () => {},
   defaultLnd,
   stopDaemon,
   unfinished = async () => null,   // payments not finished, or null if unknown
@@ -58,12 +60,49 @@ function createBridgeSwitch({
     return sha256Nodes ? sha256Nodes.survey({ fresh }) : [];
   }
 
+  // Keep the SHA256 node reading what was chosen, as it is now. A node whose
+  // credentials changed (reinstalled, or restored elsewhere) is written
+  // again. One that has left the SHA256 chain (Bitcoin Knots switched to a
+  // BLAKE2b version in its own settings, say) is not read at all: its config
+  // is removed, which stops the SHA256 node, rather than let it follow the
+  // wrong chain with live channels. Returns what is wrong, or "".
+  async function reconcile(list = null) {
+    if (!umbrel || !sha256Nodes) {
+      return "";
+    }
+    const bridge = await bridgeSettings();
+    if (bridge.enabled !== true || !bridge.sha256Node) {
+      return "";
+    }
+    const seen = (list || (await survey())).find((n) => n.id === bridge.sha256Node);
+    const node = sha256Nodes.byId(bridge.sha256Node);
+    if (!seen || !node) {
+      return `The node the bridge's node reads (${bridge.sha256Node}) is no longer installed. Choose another below, or reinstall it.`;
+    }
+    if (seen.state === "sha256") {
+      const want = confFor(node);
+      if ((await readSha256Conf()) !== want) {
+        await writeSha256Conf(want);
+      }
+      return "";
+    }
+    if (["blake2b", "other-chain", "other-network", "lightning-fork"].includes(seen.state)) {
+      if ((await readSha256Conf()) !== null) {
+        await removeSha256Conf();
+      }
+      return `${seen.name} is ${seen.detail} now, so the bridge's node has been stopped rather than follow it. Choose a node on the SHA256 chain below, or put ${seen.name} back on it.`;
+    }
+    // Behind or not answering: nothing to change, only to say.
+    return `${seen.name}: ${seen.detail}.`;
+  }
+
   async function info() {
     if (!umbrel) {
       return null;
     }
     const bridge = await bridgeSettings();
     const list = await survey();
+    const problem = await reconcile(list).catch((error) => `Could not check the bridge's node: ${error.message}`);
     const chosen = sha256Nodes ? sha256Nodes.pick(list, bridge.sha256Node) : null;
     return {
       on: bridge.enabled === true,
@@ -71,6 +110,7 @@ function createBridgeSwitch({
       // The node in use while on; the one that would be used otherwise.
       chosen: chosen ? chosen.id : null,
       inUse: bridge.enabled === true ? bridge.sha256Node || null : null,
+      problem,
       available: !!chosen,
       unavailable: chosen ? "" : unavailableSentence(list),
       backend: chosen ? chosen.name : "",
@@ -104,13 +144,19 @@ function createBridgeSwitch({
       throw new ValidationError("Name the node by its id.", 400);
     }
 
+    const settingsNow = (await readSettings()) || {};
+    const current = settingsNow.bridge || {};
+    const changingNode = enabled && current.enabled === true && !!nodeId && nodeId !== current.sha256Node;
+
     // Its journal finishes each payment only while the bridge runs: cut
     // off after paying the SHA256 invoice and before claiming the payer's
     // payment, it would cost the operator what the bridge already paid.
-    if (!enabled) {
+    // Moving it to another node restarts the SHA256 node, which lnd
+    // survives, but is held to the same rule.
+    if (!enabled || changingNode) {
       const open = await unfinished();
       if (open > 0) {
-        throw new ValidationError(`${open} ${open === 1 ? "payment" : "payments"} through the bridge ${open === 1 ? "is" : "are"} not finished. Turn the bridge off once none is in progress or needs you.`, 409);
+        throw new ValidationError(`${open} ${open === 1 ? "payment" : "payments"} through the bridge ${open === 1 ? "is" : "are"} not finished. ${enabled ? "Change its node" : "Turn the bridge off"} once none is in progress or needs you.`, 409);
       }
     }
 
@@ -159,7 +205,7 @@ function createBridgeSwitch({
     return { on: enabled, restarting: true, node: next.sha256Node || null };
   }
 
-  return { info, set };
+  return { info, set, reconcile };
 }
 
 // The SHA256 node's config file, written whole and readable only by the
@@ -171,13 +217,26 @@ function sha256ConfWriter(file, uid) {
     if (!file) {
       throw new Error("this app has no place for it");
     }
-    const tmp = path.join(path.dirname(file), `.${path.basename(file)}.tmp`);
-    await fs.promises.rm(tmp, { force: true });
+    const tmp = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`);
     await fs.promises.writeFile(tmp, text, { mode: 0o600, flag: "wx" });
     if (process.getuid && process.getuid() === 0 && Number.isInteger(uid)) {
       await fs.promises.chown(tmp, uid, uid);
     }
     await fs.promises.rename(tmp, file);
+  };
+}
+
+function sha256ConfReader(file) {
+  const fs = require("fs");
+  return async () => {
+    try {
+      return await fs.promises.readFile(file, "utf8");
+    } catch (error) {
+      if (error.code === "ENOENT") {
+        return null;
+      }
+      throw error;
+    }
   };
 }
 
@@ -200,6 +259,8 @@ function instance() {
       : {},
     writeLndConfig: configLogic.writeLndConfig,
     writeSha256Conf: sha256ConfWriter(process.env.BRIDGE_SHA256_CONF, Number(process.env.BRIDGE_SHA256_CONF_UID || 1000)),
+    readSha256Conf: process.env.BRIDGE_SHA256_CONF ? sha256ConfReader(process.env.BRIDGE_SHA256_CONF) : async () => null,
+    removeSha256Conf: async () => require("fs").promises.rm(process.env.BRIDGE_SHA256_CONF, { force: true }),
     defaultLnd: require("../utils/defaultConfig.js"),
     stopDaemon: lightning.stopDaemon,
     unfinished: () => require("./bridgeOperator.js").instance().unfinished(),
@@ -214,4 +275,4 @@ function instance() {
   return singleton;
 }
 
-module.exports = { createBridgeSwitch, instance, unavailableSentence, sha256ConfWriter };
+module.exports = { createBridgeSwitch, instance, unavailableSentence, sha256ConfWriter, sha256ConfReader };

@@ -86,6 +86,16 @@ router.get("/sha256/channel-backup", async (req, res, next) => {
 router.post("/participants", handle((req) => logic().issueCode(body(req).label)));
 router.delete("/participants/:rootKeyId", handle((req) => logic().revokeCode(req.params.rootKeyId)));
 
+// While the bridge is on, its SHA256 node is kept reading what was chosen,
+// whether or not this page is open: soon after start (a restore, a
+// reinstalled node), then every few minutes (Bitcoin Knots switched chain).
+// Nothing happens on a node that does not bridge, or on StartOS.
+if (process.env.BRIDGE_SHA256_NODES) {
+  const keep = () => bridgeSwitch.instance().reconcile().catch(() => {});
+  setTimeout(keep, 30 * 1000).unref();
+  setInterval(keep, 5 * 60 * 1000).unref();
+}
+
 router.use(createJsonErrorHandler("bridge"));
 
 module.exports = router;

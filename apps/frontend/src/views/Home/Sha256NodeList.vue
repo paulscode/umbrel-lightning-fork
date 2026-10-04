@@ -25,7 +25,7 @@
         </div>
         <!-- What is wrong, where the state alone does not say -->
         <small
-          v-if="['behind', 'unreachable', 'other-network'].includes(n.state)"
+          v-if="['behind', 'unreachable', 'other-network', 'other-chain'].includes(n.state)"
           class="d-block text-muted"
           >{{ n.detail }}</small
         >

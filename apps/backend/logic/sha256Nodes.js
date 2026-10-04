@@ -32,6 +32,8 @@ function parseNodes(text) {
     .split(";")
     .map((entry) => entry.split("|"))
     .filter((p) => p.length === 4 && p.every(Boolean))
+    // As exports.sh checks too: they go into an lnd config file.
+    .filter((p) => /^[A-Za-z0-9._-]+$/.test(p[0]) && /^[A-Za-z0-9_=-]+$/.test(p[2]) && /^[A-Za-z0-9_=-]+$/.test(p[3]))
     .map(([id, address, user, pass]) => {
       const m = address.match(/^([0-9A-Za-z.-]+):(\d{1,5})$/);
       return m ? { id, name: NAMES[id] || id, host: m[1], port: Number(m[2]), user, pass } : null;
@@ -89,6 +91,7 @@ function jsonRpc(node, method, params = []) {
 //   lightning-fork  is the node Lightning Fork reads (so BLAKE2b, or wrong)
 //   behind          has not reached the first BLAKE2b block, so cannot tell
 //   other-network   is not on mainnet
+//   other-chain     follows a third chain (neither block at that height)
 //   unreachable     did not answer, or refused
 async function probe(node, { rpc = jsonRpc, activation = ACTIVATION.mainnet, lfHost = "" } = {}) {
   const out = { id: node.id, name: node.name, state: "unreachable", detail: "", height: null };
@@ -121,7 +124,11 @@ async function probe(node, { rpc = jsonRpc, activation = ACTIVATION.mainnet, lfH
   if (hash === activation.hash) {
     return { ...out, state: "blake2b", detail: "on the BLAKE2b chain" };
   }
-  return { ...out, state: "sha256", detail: "on the SHA256 chain" };
+  // Positively the SHA256 chain, not merely not the BLAKE2b one.
+  if (!activation.sha256Hash || hash === activation.sha256Hash) {
+    return { ...out, state: "sha256", detail: "on the SHA256 chain" };
+  }
+  return { ...out, state: "other-chain", detail: "on neither chain: its block at the first BLAKE2b height is neither chain's (a Bitcoin Knots 29.4, perhaps)" };
 }
 
 // The lnd config lines for the bridge's SHA256 node to read `node`.
@@ -139,6 +146,7 @@ function confFor(node) {
 
 function createSha256Nodes({ nodes = [], rpc = jsonRpc, lfHost = "", activation = ACTIVATION.mainnet, now = () => Date.now() } = {}) {
   let cached = null;
+  let pending = null;
 
   // Every candidate and what it is. Asked again after a minute, or at once
   // when `fresh`.
@@ -146,9 +154,16 @@ function createSha256Nodes({ nodes = [], rpc = jsonRpc, lfHost = "", activation 
     if (!fresh && cached && now() - cached.at < SURVEY_CACHE_MS) {
       return cached.list;
     }
-    const list = await Promise.all(nodes.map((n) => probe(n, { rpc, activation, lfHost })));
-    cached = { at: now(), list };
-    return list;
+    // Callers at the same moment share one round of questions.
+    if (!pending) {
+      pending = Promise.all(nodes.map((n) => probe(n, { rpc, activation, lfHost })))
+        .then((list) => {
+          cached = { at: now(), list };
+          return list;
+        })
+        .finally(() => { pending = null; });
+    }
+    return pending;
   }
 
   // The node to use: the one chosen before while it is still on the SHA256

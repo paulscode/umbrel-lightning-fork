@@ -133,6 +133,14 @@
           </small>
         </div>
 
+        <!-- The node the bridge's node reads, when something is wrong with it -->
+        <b-alert
+          :show="Boolean(overview.toggle && overview.toggle.problem)"
+          variant="danger"
+          class="small"
+          >{{ overview.toggle && overview.toggle.problem }}</b-alert
+        >
+
         <!-- Swaps that need the operator -->
         <div v-if="overview.needsOperator.length" class="mb-3">
           <b-alert show variant="danger" class="small mb-0">
@@ -839,9 +847,14 @@ export default {
       this.unavailableToggle = null;
       this.loadError = "";
       this.overview = overview;
-      // The node choice starts at the one in use, or the one suggested.
-      if (overview.toggle && !this.changingNode && !this.confirmSwitch) {
-        this.chosenNode = overview.toggle.inUse || overview.toggle.chosen;
+      // The node choice starts at the one in use, or the one suggested, and
+      // then stays the operator's: refreshing does not undo a pick unless
+      // that node can no longer be used.
+      if (overview.toggle) {
+        const usable = overview.toggle.nodes.filter(n => n.state === "sha256").map(n => n.id);
+        if (!this.chosenNode || !usable.includes(this.chosenNode)) {
+          this.chosenNode = overview.toggle.inUse || overview.toggle.chosen;
+        }
       }
     },
     scrollTo(ref) {

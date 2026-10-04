@@ -4,8 +4,11 @@ const http = require("node:http");
 
 const { parseNodes, probe, confFor, createSha256Nodes, jsonRpc } = require("../logic/sha256Nodes.js");
 
-const ACT = { height: 961640, hash: "0000000000000050c1e5f69672f459293be14f46e5a494e7a8c8541396f18eeb" };
-const SHA = "00000000000000000001aaaa" + "0".repeat(40);
+const { ACTIVATION } = require("../logic/mempool.js");
+
+const ACT = ACTIVATION.mainnet;
+const SHA = ACT.sha256Hash;
+const THIRD = "00000000000000000001bbbb" + "0".repeat(40);
 
 // A fake RPC: what each host says.
 function chains(byHost) {
@@ -31,7 +34,7 @@ const SHA256C = "paulscode-knots-sha256|10.21.21.64:19332|umbrel|Sha_pw-B=";
 const B2B_COMPANION_IP = "10.21.21.62";
 
 test("the list from exports.sh is read, and anything malformed dropped", () => {
-  const nodes = parseNodes(`${KNOTS};${SHA256C};bad;x|y|z|w;a|host:99999999|u|p`);
+  const nodes = parseNodes(`${KNOTS};${SHA256C};bad;x|y|z|w;a|host:99999999|u|p;b|10.0.0.1:1|u|p\nrpcbind=0.0.0.0`);
   assert.deepEqual(nodes.map((n) => [n.id, n.name, n.host, n.port]), [
     ["bitcoin-knots", "Bitcoin Knots", "10.21.21.7", 9332],
     ["paulscode-knots-sha256", "Knots (SHA256) Companion", "10.21.21.64", 19332],
@@ -46,6 +49,10 @@ test("each node is told by its block at the activation height", async () => {
   const host = knots.host;
   assert.equal((await at({ [host]: { hash: SHA } })).state, "sha256");
   assert.equal((await at({ [host]: { hash: ACT.hash } })).state, "blake2b");
+  // Not the BLAKE2b chain is not therefore the SHA256 chain.
+  const third = await at({ [host]: { hash: THIRD } });
+  assert.equal(third.state, "other-chain");
+  assert.match(third.detail, /neither chain/);
   const behind = await at({ [host]: { blocks: 900000 } });
   assert.equal(behind.state, "behind");
   assert.match(behind.detail, /900,000/);
@@ -133,4 +140,15 @@ test("the RPC client speaks bitcoind's JSON-RPC with basic auth", async (t) => {
   assert.equal(seen.body.method, "getblockhash");
   assert.deepEqual(seen.body.params, [961640]);
   await assert.rejects(jsonRpc({ ...node, pass: "wrong" }, "getblockchaininfo"), /refused the RPC credentials/);
+});
+
+test("callers at the same moment share one round of questions", async () => {
+  let asked = 0;
+  const s = createSha256Nodes({
+    nodes: parseNodes(SHA256C),
+    rpc: async (node, method) => { asked++; await new Promise((r) => setTimeout(r, 5)); return method === "getblockchaininfo" ? { chain: "main", blocks: 970000 } : SHA; },
+    activation: ACT,
+  });
+  await Promise.all([s.survey({ fresh: true }), s.survey({ fresh: true }), s.survey({ fresh: true })]);
+  assert.equal(asked, 2, "one getblockchaininfo and one getblockhash");
 });

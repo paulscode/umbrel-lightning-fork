@@ -138,6 +138,7 @@ export const SHA256_NODE_STATES = {
   },
   behind: { text: "Still syncing", variant: "warning" },
   "other-network": { text: "Not on mainnet", variant: "muted" },
+  "other-chain": { text: "On neither chain", variant: "warning" },
   unreachable: { text: "Not answering", variant: "warning" }
 };
 

@@ -253,7 +253,7 @@ test("the selected app's name is given without asking any app", async () => {
 });
 
 test("the SHA256 chain's links go to an app on that chain, else mempool.space", async () => {
-  const hashes = { "10.0.3.7": BITCOIN, "10.0.3.9": BLAKE2B };
+  const hashes = { "10.0.3.7": ACTIVATION.mainnet.sha256Hash, "10.0.3.9": BLAKE2B };
   const make = (apps) => createMempool({
     apps: () => apps,
     fallbackExplorer: () => ({ port: "", hiddenService: "" }),
@@ -273,4 +273,7 @@ test("the SHA256 chain's links go to an app on that chain, else mempool.space", 
   assert.equal(pub.url, "https://mempool.space");
   // No apps at all.
   assert.equal((await make([]).sha256Explorer()).name, "mempool.space");
+  // An app on a third chain is no explorer for the SHA256 one.
+  hashes["10.0.3.7"] = BITCOIN;
+  assert.equal((await make(APPS).sha256Explorer()).public, true);
 });

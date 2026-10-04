@@ -30,6 +30,11 @@ const ACTIVATION = {
   mainnet: {
     height: 961640,
     hash: "0000000000000050c1e5f69672f459293be14f46e5a494e7a8c8541396f18eeb",
+    // The SHA256 chain's block at that height (mempool.space and
+    // blockstream.info agree, and its header hashes to it). Something that
+    // is not the BLAKE2b chain is not therefore the SHA256 chain: a node on
+    // a third (a BIP 110 Knots 29.4 follows neither) has neither block.
+    sha256Hash: "00000000000000000001d82da6ecccf08e07afa383f9212b0e1b95cc72430c00",
   },
 };
 // A verdict stands for a while; an app that did not answer is asked again
@@ -115,6 +120,8 @@ function createMempool({
   const findApp = id => known().find(app => app.id === id) || null;
   const cache = new Map();
   const chains = new Map();
+  // The apps seen to have the SHA256 chain's block, not just another.
+  const onSha256 = new Set();
 
   // "blake2b", "other", "unknown" (it did not answer, or not with a block
   // hash) or "unchecked" (a network without a fixed activation block).
@@ -148,6 +155,11 @@ function createMempool({
       const hash = (await fetchText(
         app.api.replace(/\/+$/, "") + `/api/block-height/${activation.height}`
       )).trim().toLowerCase();
+      if (activation.sha256Hash && hash === activation.sha256Hash) {
+        onSha256.add(app.id);
+      } else {
+        onSha256.delete(app.id);
+      }
       if (hash === activation.hash) {
         chain = "blake2b";
       } else if (/^[0-9a-f]{64}$/.test(hash)) {
@@ -237,7 +249,7 @@ function createMempool({
   // will not use for this chain; else the public mempool.space.
   async function sha256Explorer() {
     for (const app of known()) {
-      if ((await chainOf(app)) === "other") {
+      if ((await chainOf(app)) === "other" && onSha256.has(app.id)) {
         return {
           app: app.id,
           name: app.name,
