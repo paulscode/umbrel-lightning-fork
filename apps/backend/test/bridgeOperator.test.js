@@ -349,6 +349,10 @@ test("lndRest pins the node's certificate and sends the macaroon", async (t) => 
         res.write(JSON.stringify({ result: { close_pending: { txid: Buffer.from("ab".repeat(32), "hex").toString("base64") } } }) + "\n");
         return;
       }
+      if (req.url === "/v1/stream-refused") {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({ error: { code: 2, message: "cannot coop close channel with active htlcs" } }));
+      }
       if (req.url === "/v1/stream-error") {
         res.writeHead(200, { "Content-Type": "application/json" });
         return res.end(JSON.stringify({ error: { code: 2, message: "cannot coop close channel with active htlcs" } }) + "\n");
@@ -394,6 +398,8 @@ test("lndRest pins the node's certificate and sends the macaroon", async (t) => 
   const update = await call("DELETE", `/v1/channels/${"cd".repeat(32)}/0`, undefined, { firstMessage: true });
   assert.ok(update.close_pending);
   await assert.rejects(call("POST", "/v1/stream-error", {}, { firstMessage: true }), /active htlcs/);
+  await assert.rejects(call("DELETE", "/v1/stream-refused", undefined, { firstMessage: true }),
+    (e) => /active htlcs/.test(e.message) && e.grpcCode === 2 && e.status === 500);
 });
 
 const CP = `${"ab".repeat(32)}:1`;
@@ -693,4 +699,13 @@ test("a bridge that is off and still finishing counts what it finishes", async (
   assert.equal(await op.unfinished(), 2);
   const off = createBridgeOperator({ lightningFork: fakeNode({ "GET /v2/bridge/status": { enabled: false, refusals: ["the bridge is not enabled on this node"] } }) });
   assert.equal(await off.unfinished(), 0);
+});
+
+test("unfinished is Lightning Fork's own count when it gives one, never a lost swap", async () => {
+  const lostOnly = lndStatus({ unfinished: 0, swaps_in_flight: 0, needs_operator: ["ab lost: paid out, and the payment coming in could not be claimed"] });
+  assert.equal(await createBridgeOperator({ lightningFork: fakeNode({ "GET /v2/bridge/status": lostOnly }) }).unfinished(), 0);
+  const notUp = lndStatus({ unfinished: 2, swaps_in_flight: 0 });
+  assert.equal(await createBridgeOperator({ lightningFork: fakeNode({ "GET /v2/bridge/status": notUp }) }).unfinished(), 2);
+  const older = lndStatus({ swaps_in_flight: 1, needs_operator: ["x"] });
+  assert.equal(await createBridgeOperator({ lightningFork: fakeNode({ "GET /v2/bridge/status": older }) }).unfinished(), 2, "an older Lightning Fork: as before");
 });

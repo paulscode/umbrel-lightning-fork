@@ -112,3 +112,11 @@ test("a hand-written line with spaces around = is still the switch's once used",
   await config.writeLndConfig(DEFAULT_CONFIG, { enabled: false });
   assert.doesNotMatch(conf(), /bridgerpc/);
 });
+
+test("once the switch is used, the directions are its own, not lnd.conf's", async () => {
+  reset(["bridgerpc.toblake2b=true", "bridgerpc.tosha256=false", "bridgerpc.spread=0.02"].join("\n"));
+  await config.writeLndConfig(DEFAULT_CONFIG, { enabled: true });
+  assert.doesNotMatch(conf(), /toblake2b/);
+  assert.match(conf(), /^bridgerpc\.tosha256=true$/m);
+  assert.match(conf(), /^bridgerpc\.spread=0\.02$/m, "tuning stays lnd.conf's");
+});

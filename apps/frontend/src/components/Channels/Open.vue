@@ -211,6 +211,14 @@ export default {
         return;
       }
 
+      // No estimate and no custom rate: lnd would pick a rate nobody saw.
+      if (!(parseInt(this.selectedFee.satPerByte, 10) > 0)) {
+        this.isOpening = false;
+        this.error =
+          "The node has no fee estimate right now. Set a custom fee rate to open the channel.";
+        return;
+      }
+
       this.error = "";
 
       // When every coin goes into the channel, the amount is what is left

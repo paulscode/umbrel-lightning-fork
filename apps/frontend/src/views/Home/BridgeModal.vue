@@ -48,7 +48,7 @@
       <template v-if="overview && overview.enabled === false">
         <b-alert show variant="warning" v-if="overview.draining" class="small">
           The bridge is off and finishing
-          {{ overview.swapsInFlight === 1 ? "a payment" : `${overview.swapsInFlight || "the"} payments` }}
+          {{ drainingCount === 1 ? "a payment" : `${drainingCount || "the"} payments` }}
           already under way; it takes no new ones, and stops once they are
           done.
         </b-alert>
@@ -426,8 +426,9 @@
 
         <div v-if="panel === 'channels'" class="neu-card p-3 mb-3" ref="panel">
           <div class="font-weight-bold mb-2">The bridge node's channels</div>
-          <div v-if="chans.loading" class="text-muted small">Asking the node…</div>
-          <small v-else-if="!chans.list.length" class="d-block text-muted">No channels yet.</small>
+          <small v-if="chans.listError" class="d-block text-warning mb-1">{{ chans.listError }}</small>
+          <div v-if="chans.loading && !chans.list.length" class="text-muted small">Asking the node…</div>
+          <small v-else-if="!chans.list.length && !chans.listError" class="d-block text-muted">No channels yet.</small>
           <div v-for="c in chans.list" :key="c.channelPoint" class="channel-row py-2">
             <div class="kv">
               <span :title="c.remotePubkey">{{ shortKey(c.remotePubkey) }}</span>
@@ -766,6 +767,7 @@ const REFRESH_MS = 15 * 1000;
 const emptyChans = () => ({
   loading: false,
   list: [],
+  listError: "",
   closing: "",
   force: false,
   fee: "",
@@ -828,6 +830,12 @@ export default {
     };
   },
   computed: {
+    drainingCount() {
+      const o = this.overview || {};
+      return o.unfinished !== null && o.unfinished !== undefined
+        ? o.unfinished
+        : o.swapsInFlight;
+    },
     backupText() {
       return this.overview
         ? sha256BackupText(this.overview.sha256Backup, this.overview.now)
@@ -1098,11 +1106,13 @@ export default {
       this.chans.loading = true;
       // API.get answers nothing, rather than an error, when it fails.
       const res = await API.get(bridgeUrl("/sha256/channels"));
+      // Nothing also when the same request is still on its way: the list
+      // shown stays, with a word, and the panel stays open.
       if (res && Array.isArray(res.channels)) {
         this.chans.list = res.channels;
+        this.chans.listError = "";
       } else {
-        this.panel = "";
-        this.error = "Could not list the bridge node's channels. Please try again.";
+        this.chans.listError = "Could not list the bridge node's channels just now.";
       }
       this.chans.loading = false;
     },

@@ -135,9 +135,12 @@ function lndRest({ base, certFile, macaroonFile, readFile = fs.promises.readFile
           if (ok) {
             return resolve(data);
           }
-          const e = new Error((data && (data.message || data.error)) || `HTTP ${res.statusCode}`);
+          // A stream that fails before its first message answers
+          // {"error": {code, message}}; anything else {code, message}.
+          const body = data && data.error && typeof data.error === "object" ? data.error : data;
+          const e = new Error((body && (body.message || (typeof body.error === "string" && body.error))) || `HTTP ${res.statusCode}`);
           e.status = res.statusCode;
-          e.grpcCode = data && data.code;
+          e.grpcCode = body && body.code;
           return reject(e);
         });
       });
@@ -177,6 +180,9 @@ function normaliseStatus(s) {
     directions: s.directions || [],
     refusals: s.refusals || [],
     swapsInFlight: int(s.swaps_in_flight),
+    // The journal's count of swaps not yet final, in every state; null from
+    // a Lightning Fork too old to say it.
+    unfinished: s.unfinished === undefined || s.unfinished === null ? null : int(s.unfinished),
     rate: int(s.rate),
     rateSetAt: int(s.rate_set_at),
     rateExpiresAt: int(s.rate_expires_at),
@@ -184,6 +190,11 @@ function normaliseStatus(s) {
     // Off with swaps still being finished (Lightning Fork's drain): it
     // quotes nothing, finishes them, and stops.
     draining: !s.enabled && (s.refusals || []).some((r) => /^finishing the swaps/.test(r)),
+    // Off with swaps unfinished and no SHA256 node to finish them through.
+    stuck: s.enabled ? 0 : (s.refusals || []).reduce((n, r) => {
+      const m = /^(\d+) swap\(s\) are unfinished/.exec(r);
+      return m ? Number(m[1]) : n;
+    }, 0),
     sha256Node: node && {
       mode: node.mode || "external",
       state: node.state || "",
@@ -470,12 +481,19 @@ function createBridgeOperator({
     return !s.enabled && !!(await idleNode());
   }
 
-  // Payments the bridge has not finished: in flight, or stopped for the
-  // operator; while on, or off and still finishing them. Null when
-  // Lightning Fork cannot be asked.
+  // Payments the bridge has not finished: in flight, waiting, or stopped
+  // for the operator; whether it is on, off and finishing them, or not up.
+  // A lost one is final and does not count. Null when Lightning Fork
+  // cannot be asked.
   async function unfinished() {
     try {
       const s = await status();
+      if (s.unfinished !== null) {
+        return s.unfinished;
+      }
+      if (s.stuck) {
+        return s.stuck;
+      }
       return s.enabled || s.draining ? s.swapsInFlight + s.needsOperator.length : 0;
     } catch (_) {
       return null;
@@ -690,7 +708,11 @@ function createBridgeOperator({
     try {
       const update = await sha256Node("DELETE", `/v1/channels/${m[1]}/${m[2]}${query.toString() ? `?${query}` : ""}`, undefined, { firstMessage: true });
       const pendingTxid = update.close_pending && update.close_pending.txid;
-      return { txid: pendingTxid ? Buffer.from(pendingTxid, "base64").reverse().toString("hex") : "" };
+      // Asked for, without a closing transaction yet to show: said as
+      // under way.
+      return pendingTxid
+        ? { txid: Buffer.from(pendingTxid, "base64").reverse().toString("hex") }
+        : { txid: "", slow: true };
     } catch (error) {
       if (/did not answer in time/.test(error.message)) {
         return { txid: "", slow: true };

@@ -22,6 +22,7 @@ const lnd = {
 stub("services/lnd.js", {
   generateAddress: async () => { lnd.addresses++; return { address: "bcrt1qestimate" }; },
   estimateFee: (address, amt, conf) => lnd.estimate(address, amt, conf),
+  getWalletBalance: async () => ({ confirmedBalance: String(lnd.balance || 0) }),
 });
 let mempool = async () => ({ result: { mempoolminfee: 0.00001 } });
 stub("logic/bitcoind.js", { getMempoolInfo: () => mempool() });
@@ -90,4 +91,29 @@ test("estimates reuse one address rather than making one a keystroke", async () 
   await lightning.estimateChannelOpenFee(100002, 0, false);
   assert.equal(lnd.addresses - before, 0);
   assert.ok(lnd.addresses <= 1);
+});
+
+test("sending everything under the node's floor is raised to it, the extra fee out of the amount", async () => {
+  const before = lnd.estimate;
+  lnd.balance = 100000;
+  lnd.estimate = async (address, amt) => {
+    if (amt + 154 > lnd.balance) {
+      throw { error: { details: "insufficient funds available to construct transaction" } };
+    }
+    return { feeSat: "154", feerateSatPerByte: "1", satPerVbyte: "1" };
+  };
+  try {
+    mempool = async () => ({ result: { mempoolminfee: 0.00001 } });
+    const at = await lightning.estimateFee("bcrt1qx", 0, 6, true);
+    assert.equal(at.sweepAmount, 100000 - 154);
+    mempool = async () => ({ result: { mempoolminfee: 0.0000101 } }); // 1.01 sat/vB
+    const raised = await lightning.estimateFee("bcrt1qx", 0, 6, true);
+    assert.equal(raised.code, undefined, "raised, not refused");
+    assert.equal(raised.feerateSatPerByte, "2");
+    assert.equal(raised.feeSat, "308");
+    assert.equal(raised.sweepAmount, 100000 - 308);
+  } finally {
+    lnd.estimate = before;
+    mempool = async () => ({ result: { mempoolminfee: 0.00001 } });
+  }
 });

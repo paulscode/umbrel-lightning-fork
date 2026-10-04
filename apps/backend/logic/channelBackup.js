@@ -40,7 +40,7 @@ const backupPath = () => constants.CHANNEL_BACKUP_FILE || path.join(lndDir(), "d
 // The bridge's SHA256 node, which this app runs beside LND (sha256-lnd), and
 // the second agent that copies its channel.backup to the same targets.
 const sha256Dir = () => process.env.SHA256_LND_DIR || path.join(lndDir(), "sha256-node");
-const sha256BackupPath = () => path.join(sha256Dir(), "data/chain/bitcoin/mainnet/channel.backup");
+const sha256BackupPath = () => path.join(sha256Dir(), "data/chain/bitcoin", process.env.LND_NETWORK || "mainnet", "channel.backup");
 const sha256StatePath = () => path.join(lndDir(), ".channel-backup-sha256-state.json");
 
 // ---------- the configuration file

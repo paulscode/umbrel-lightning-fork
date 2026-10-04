@@ -68,13 +68,13 @@ const deriveConfigFile = async (configObject, bridge = {}) => {
     const userLndConfFile = await diskService.readUtf8File(constants.LND_CONF_FILEPATH);
     userLndConfig = lndConfig.parse(userLndConfFile);
   }
-  // Once the switch has been used, whether the bridge is on and which node
-  // it pays through are the switch's. Until then lnd.conf's own bridgerpc
+  // Once the switch has been used, whether the bridge is on, its directions
+  // and which node it pays through are the switch's. Until then lnd.conf's own bridgerpc
   // lines stand: that is how a bridge through an operator's own LND is set up
   // here. Tuning (spread, limits) stays lnd.conf's either way.
   if (typeof bridge.enabled === 'boolean') {
     for (const key of Object.keys(userLndConfig)) {
-      if (key === 'bridgerpc.enabled' || key.startsWith('bridgerpc.sha256.')) {
+      if (key === 'bridgerpc.enabled' || key === 'bridgerpc.tosha256' || key === 'bridgerpc.toblake2b' || key.startsWith('bridgerpc.sha256.')) {
         delete userLndConfig[key];
       }
     }

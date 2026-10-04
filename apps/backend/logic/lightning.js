@@ -230,20 +230,17 @@ async function estimateFeeSweep(
 
     // Return after we have completed our search.
     if (l === amtToEstimate) {
-      successfulEstimate.sweepAmount = amtToEstimate;
-
-      const estimatedFeeSatPerKiloByte =
-        successfulEstimate.feerateSatPerByte * 1000;
-
-      if (
-        mempoolMinFee !== null &&
-        estimatedFeeSatPerKiloByte <
-        convert(mempoolMinFee, "btc", "sat", "Number")
-      ) {
+      // Under the node's floor the rate is raised to it, as for any
+      // other send; sending everything, the extra fee comes out of the
+      // amount.
+      const raised = raiseToFloor(successfulEstimate, mempoolMinFee);
+      const extra = Number(raised.feeSat) - Number(successfulEstimate.feeSat);
+      raised.sweepAmount = amtToEstimate - (extra > 0 ? extra : 0);
+      if (raised.sweepAmount <= 0) {
         throw new NodeError("FEE_RATE_TOO_LOW");
       }
 
-      return successfulEstimate;
+      return raised;
     }
 
     return await estimateFeeSweep(

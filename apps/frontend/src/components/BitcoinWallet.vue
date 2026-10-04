@@ -570,7 +570,11 @@
         @click="changeMode('review-withdraw')"
         v-else-if="mode === 'withdraw'"
         :disabled="
-          !!error || !withdraw.amount || !withdraw.address || withdraw.isTyping
+          !!error ||
+            !withdraw.amount ||
+            !withdraw.address ||
+            withdraw.isTyping ||
+            !(Number(withdraw.selectedFee.satPerByte) > 0)
         "
         >Review Withdrawal</b-button
       >
