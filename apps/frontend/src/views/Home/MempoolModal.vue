@@ -13,16 +13,27 @@
     <div class="px-2 px-sm-3 pb-2">
       <p class="text-muted">
         Fee rates for sending and for opening channels, and the links behind
-        transactions, come from the Mempool app you choose. The rates are the
-        ones its own page shows: Low, Medium and High priority. The app has to
-        follow this node's chain.
+        transactions, come from the Mempool you choose. The rates are the ones
+        its own page shows: Low, Medium and High priority. It has to follow
+        this node's chain.
       </p>
       <b-form-radio-group v-model="choice" stacked class="mb-3" :disabled="saving">
-        <b-form-radio value="" class="mb-2">
+        <!-- No app of your own: the public explorer most people watch, or
+             the node alone. Off mainnet only the node, as before. -->
+        <b-form-radio v-if="publicSource" value="" class="mb-2">
+          <span class="font-bold">{{ publicSource.name }}</span>
+          <small class="d-block text-muted">
+            No app of your own. The rates {{ publicSource.name }}, the public
+            explorer for this chain, shows; your node's own estimate whenever it
+            does not answer. Asking it tells it your node's address, as visiting
+            it would. Transactions link there, after asking.
+          </small>
+        </b-form-radio>
+        <b-form-radio :value="publicSource ? 'node' : ''" class="mb-2">
           <span class="font-bold">Your node's own estimate</span>
           <small class="d-block text-muted">
-            No app. Transactions link to mempool.guide, a public explorer for
-            this chain, after asking.
+            No app, and no public site asked for rates. Transactions link to
+            mempool.guide, a public explorer for this chain, after asking.
           </small>
         </b-form-radio>
         <b-form-radio
@@ -35,9 +46,9 @@
           <span class="font-bold">{{ app.name }}</span>
           <small class="d-block text-muted">{{ describe(app) }}</small>
           <small v-if="app.chain === 'other'" class="d-block text-danger">
-            Follows the other chain: its node has not upgraded to BLAKE2b, so
-            its fee rates and transactions are Bitcoin's. Point it at a BLAKE2b
-            node to use it here.
+            Follows the other chain: its node is on the SHA256 chain, so its
+            fee rates and transactions are that chain's. Point it at a node on
+            the BLAKE2b chain to use it here.
           </small>
           <small v-else-if="app.chain === 'unknown'" class="d-block text-warning">
             Did not say which chain it follows. It can still be chosen, but
@@ -96,6 +107,7 @@ export default {
       apps: state => state.system.mempool.apps,
       known: state => state.system.mempool.known,
       mempoolFees: state => state.bitcoin.mempoolFees,
+      publicSource: state => state.system.mempool.publicSource,
       isStartOS: state => state.system.platform === "startos"
     })
   },
@@ -131,15 +143,16 @@ export default {
       // Read the rates once now: a wrong address shows here rather than
       // at the moment of sending, and an open form drops the old app's.
       await this.$store.dispatch("bitcoin/getMempoolFees");
-      if (this.choice) {
+      const nodeOnly = this.choice === "node" || (!this.choice && !this.publicSource);
+      if (!nodeOnly) {
         const result = this.mempoolFees;
         if (result && result.fees) {
           const f = result.fees;
           this.checked = `${result.name} answers. Right now: low ${f.hourFee}, medium ${f.halfHourFee}, high ${f.fastestFee} sat/vB.`;
         } else {
           this.error =
-            (result && result.error) ||
-            "Saved, but the app did not answer. Fees fall back to your node's estimate until it does.";
+            (result && result.error && `${result.error} Fees come from your node's estimate until it answers.`) ||
+            "Saved, but it did not answer. Fees fall back to your node's estimate until it does.";
         }
       } else {
         this.checked = "Saved. Fees come from your node's estimate.";

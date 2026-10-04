@@ -41,7 +41,7 @@ const state = () => ({
   explorerName: "",
   // The Mempool app chosen for fee rates and transaction links, and the
   // apps the wrapper can reach.
-  mempool: { selected: "", apps: [], known: false },
+  mempool: { selected: "", apps: [], known: false, publicSource: null },
 });
 
 // Functions to update the state directly
@@ -97,8 +97,8 @@ const mutations = {
   setExplorerName(state, name) {
     state.explorerName = name;
   },
-  setMempool(state, { selected, apps }) {
-    state.mempool = { selected, apps, known: true };
+  setMempool(state, { selected, apps, publicSource }) {
+    state.mempool = { selected, apps, known: true, publicSource: publicSource || null };
   }
 };
 

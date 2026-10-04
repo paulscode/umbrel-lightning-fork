@@ -371,6 +371,9 @@ function createMobile({
       if (res && res.fees) {
         source = { kind: "mempool", name: res.name || "Mempool" };
         rates = { low: res.fees.hourFee, medium: res.fees.halfHourFee, high: res.fees.fastestFee };
+      } else if (res && res.error) {
+        // The public source not answering is said, not thrown.
+        warning = `${res.error.replace(/\.$/, "")}; using the node's estimate.`;
       }
     } catch (error) {
       warning = `${error.message || "The Mempool app did not answer"}; using the node's estimate.`;
