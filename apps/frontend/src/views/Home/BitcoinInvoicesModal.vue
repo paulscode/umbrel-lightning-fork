@@ -36,6 +36,22 @@
       </div>
 
       <template v-else-if="settings">
+        <!-- This node runs a bridge: its SHA256 node pays, before any service -->
+        <div v-if="status && status.ownBridge" class="neu-card p-3 mb-4">
+          <div class="font-weight-bold mb-1">Paid from your bridge</div>
+          <small class="d-block text-muted">
+            This node runs a bridge, so SHA256 invoices are paid from its
+            SHA256 node, with no fee and nothing spent from this wallet.
+            <template v-if="status.ownBridge.ready"
+              >It can send
+              {{ Number(status.ownBridge.availableSat).toLocaleString() }} sats
+              (SHA256) now.</template
+            >
+            <template v-else>It pays once it is running and synced.</template>
+            A service added below is used only for an invoice your bridge
+            can't pay.
+          </small>
+        </div>
         <!-- No service yet: add one from its code -->
         <div v-if="!settings.service" class="mb-4">
           <label class="font-weight-bold mb-1" for="bitcoin-invoices-code">

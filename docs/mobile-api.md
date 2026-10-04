@@ -171,6 +171,12 @@ the SHA256 invoice: it can only collect by paying, and the preimage the
 node gets back is the proof. The node pays nothing the service sends
 without checking it first (below).
 
+**A node that runs its own bridge** pays SHA256 invoices from the bridge's
+SHA256 node instead, whenever that node can: no swap, no fee, nothing spent
+of this chain. A service, if one is set up, is used only for an invoice the
+bridge's node cannot pay (not ready, or not enough in its channels). See
+[From the node's own bridge](#from-the-nodes-own-bridge).
+
 `/decode`, with the capability, answers
 
 ```json
@@ -267,6 +273,7 @@ after any of them except `on_its_way` (paying, held by the service) and
 | `code` | Status | |
 |---|---|---|
 | `no_service` | 400 | no service is set up |
+| `own_bridge_not_ready`, `own_bridge_no_liquidity` | 400 | the node's own bridge cannot pay this invoice, and no service is set up |
 | `no_amount` | 400 | the SHA256 invoice names no amount |
 | `not_bitcoin_invoice` | 400 | the invoice is this chain's; pay it with `/lightning/pay` |
 | `on_its_way` | 504 | paid to the service and held until it has paid the SHA256 invoice; ask again with `resume`. `details.maxHoldHours` |
@@ -295,6 +302,38 @@ In `/activity`, a payment that paid a SHA256 invoice keeps `kind:
 `description`, and `preimage` once paid. The web's
 `/v1/lnd/lightning/payments` carries the same `bitcoinInvoice` (without
 `state`) on such payments.
+
+#### From the node's own bridge
+
+The estimate then has `source: "own_bridge"`, `serviceLabel: "Your
+bridge"`, and `incomingSat`, `feeSat`, `maxIncomingSat` and
+`routingFeeLimitSat` all 0 (nothing of this chain is spent), beside:
+
+- `sha256AmountSat`: what the bridge's SHA256 node pays;
+- `sha256RoutingFeeLimitSat`: the most it spends on routing (1%, at least
+  10 sats), in SHA256 sats;
+- `sha256AvailableSat`: what that node can send now.
+
+There is no `reference`: no price is involved. `POST /pay/bitcoin-invoice`
+takes `maxIncomingSat: 0`. Success is as above with `amountSat` and `feeSat`
+0 and `bitcoinInvoice.source: "own_bridge"`, `bitcoinInvoice.sha256FeeSat`.
+While the bridge's node is still paying after 90 seconds the answer is
+`on_its_way`; asking again follows that node's payment for the hash and never
+starts another. A payment that failed is `not_paid`, and may be tried again.
+
+When the node runs a bridge whose SHA256 node cannot pay, and no service is
+set up, `/decode` gives no estimate and `messageCode`
+`own_bridge_not_ready` or `own_bridge_no_liquidity` (the same codes as
+refusals from `/pay/bitcoin-invoice`).
+
+These payments are the SHA256 node's, so the node's own list of payments
+does not show them; `/activity` adds them from the dashboard's record:
+`amountSat` and `feeSat` 0, `bitcoinInvoice.serviceLabel` "Your bridge",
+`bitcoinInvoice.source: "own_bridge"`. The web's payments list shows the
+paid ones.
+
+`GET /api/v1/bitcoin-invoices` adds `ownBridge: {ready, availableSat}` when
+the node runs a bridge, else `null`.
 
 ### Request ids
 

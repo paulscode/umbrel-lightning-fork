@@ -293,7 +293,22 @@
             class="bitcoin-invoice-details"
           >
             <span v-if="!send.bitcoin.estimate" class="bitcoin-chip mb-2">SHA256 invoice</span>
-            <div v-if="send.bitcoin.estimate" class="d-flex justify-content-between align-items-center mb-1">
+            <!-- Paid from this node's own bridge: its SHA256 node pays, and nothing leaves this wallet -->
+            <div v-if="ownBridgePays" class="mb-1">
+              <small class="d-block text-muted mb-1"
+                >Paying <span class="bitcoin-chip ml-1">SHA256 invoice</span></small
+              >
+              <h4 class="d-block mb-0">
+                {{ send.bitcoin.estimate.sha256AmountSat | localize }} sats (SHA256)
+              </h4>
+              <small class="d-block text-muted">
+                From your bridge's SHA256 node, plus up to
+                {{ send.bitcoin.estimate.sha256RoutingFeeLimitSat | localize }} sats
+                (SHA256) of routing. Nothing is spent from this wallet, and there
+                is no fee.
+              </small>
+            </div>
+            <div v-else-if="send.bitcoin.estimate" class="d-flex justify-content-between align-items-center mb-1">
               <div>
                 <small class="d-block text-muted mb-1"
                   >Paying <span class="bitcoin-chip ml-1">SHA256 invoice</span></small
@@ -312,6 +327,7 @@
             </div>
 
             <a
+              v-if="!ownBridgePays"
               href="#"
               class="small d-inline-block mb-1"
               @click.prevent="send.bitcoinDetails = !send.bitcoinDetails"
@@ -1285,6 +1301,11 @@ export default {
     },
     // The most a SHA256 invoice can cost here: the service's ceiling and
     // the routing to it.
+    // A SHA256 invoice this node's own bridge pays from its SHA256 node.
+    ownBridgePays() {
+      const est = this.send.bitcoin && this.send.bitcoin.estimate;
+      return Boolean(est && est.source === "own_bridge");
+    },
     bitcoinMostSat() {
       const est = this.send.bitcoin && this.send.bitcoin.estimate;
       return est ? est.maxIncomingSat + est.routingFeeLimitSat : 0;
@@ -1802,8 +1823,9 @@ export default {
       this.error = "";
       this.loading = true;
       this.send.isSending = true;
-      this.send.progress =
-        "The service is paying the SHA256 invoice. This can take a minute.";
+      this.send.progress = this.ownBridgePays
+        ? "Your bridge's SHA256 node is paying the invoice. This can take a minute."
+        : "The service is paying the SHA256 invoice. This can take a minute.";
 
       const outcome = await this.postBitcoinPay(false);
 

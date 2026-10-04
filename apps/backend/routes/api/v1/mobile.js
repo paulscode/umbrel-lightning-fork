@@ -153,8 +153,9 @@ router.get(
 );
 
 // The service for SHA256 invoices and its terms now, for the app's
-// settings: asks the service (over Tor when its address is an onion), so it
-// can take a while. Set up and changed only in the dashboard.
+// settings, and whether this node pays them from its own bridge: asks the
+// service (over Tor when its address is an onion), so it can take a while.
+// Set up and changed only in the dashboard.
 router.get(
   "/bitcoin-invoices",
   handle(async () => {
@@ -162,12 +163,16 @@ router.get(
     if (!summary) {
       throw new ValidationError("The settings for paying SHA256 invoices can't be read.", 500);
     }
-    if (!summary.configured) {
-      return { ...summary, terms: null };
-    }
     const st = await bitcoinInvoices().status();
+    // This node's own bridge, which pays SHA256 invoices from its SHA256
+    // node when it can, before any service: {ready, availableSat} or null.
+    const ownBridge = st.ownBridge || null;
+    if (!summary.configured) {
+      return { ...summary, terms: null, ownBridge };
+    }
     return {
       ...summary,
+      ownBridge,
       terms: st.terms || null,
       error: st.error || null,
       reference: st.reference

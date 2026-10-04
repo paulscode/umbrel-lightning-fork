@@ -51,6 +51,10 @@ const MINUTES_PER_BLOCK = 10;
 const ENDED_STATES = ["failed", "aborted", "expired"];
 const WAITING_STATES = ["quoted", "offered"];
 
+// Paid from this node's own bridge.
+const OWN_BRIDGE = "own_bridge";
+const OWN_LABEL = "Your bridge";
+
 const NO_SERVICE = "To pay SHA256 invoices, add a service in the dashboard's settings, under Paying SHA256 invoices.";
 const NO_AMOUNT = "This SHA256 invoice does not say how much to pay. Only SHA256 invoices with an amount can be paid from here; ask for one with an amount.";
 const INVALID_HOLD = "The service returned an invalid payment request, so nothing was paid. Do not use this service again until its operator has looked into it.";
@@ -180,6 +184,9 @@ function createBitcoinInvoices({
   write = writeFileJson,
   bridge = createBridgeClient(),
   reference = createReferenceRate(),
+  // This node's own bridge (logic/bridgeOperator.js): {ready, outboundSat}
+  // or null, a payment from its SHA256 node, and what became of one.
+  ownBridge = () => require("./bridgeOperator.js").instance(),
   now = () => Math.floor(Date.now() / 1000),
   clock = Date.now,
   log = console.warn,
@@ -295,13 +302,91 @@ function createBitcoinInvoices({
     return (REFUSALS[d.refusalCode] && REFUSALS[d.refusalCode][1]) || REFUSALS.disabled[1];
   }
 
-  // The service's terms now and the reference rate, for the settings page.
+  // Whether to pay a SHA256 invoice of `amountMsat` from this node's own
+  // bridge: its SHA256 node pays it directly, with no swap and no fee. A
+  // swap through the node's own bridge cannot work (the node would be paying
+  // its own hold invoice), and would charge the operator their own fee.
+  //
+  // {use: true, availableSat, routingFeeLimitSat} when it can pay it now;
+  // {use: false, code, message} when the node runs a bridge that cannot,
+  // and there is no service to pay through instead; null when the node runs
+  // no bridge of its own, or a service is configured to fall back on.
+  async function ownRoute(amountMsat) {
+    let own = null;
+    try {
+      own = await ownBridge().ownPayer();
+    } catch (_) {
+      own = null;
+    }
+    if (!own) {
+      return null;
+    }
+    const amountSat = Math.ceil(amountMsat / 1000);
+    const fees = routingFeeLimit(amountSat);
+    if (own.ready && own.outboundSat >= amountSat + fees) {
+      return { use: true, availableSat: own.outboundSat, routingFeeLimitSat: fees };
+    }
+    if (service()) {
+      return null;
+    }
+    if (!own.ready) {
+      return {
+        use: false,
+        code: "own_bridge_not_ready",
+        message: "Your bridge's SHA256 node is not ready to pay yet. It pays SHA256 invoices once it is running and synced.",
+      };
+    }
+    return {
+      use: false,
+      code: "own_bridge_no_liquidity",
+      message: `Your bridge's SHA256 node can send ${own.outboundSat.toLocaleString("en-US")} sats; this needs ${(amountSat + fees).toLocaleString("en-US")} with routing. Open or refill its channel, or add a service in the dashboard's settings, under Paying SHA256 invoices.`,
+    };
+  }
+
+  // The estimate for paying from the node's own bridge. Nothing of this
+  // chain is spent, so its amounts are 0; what the SHA256 node spends is in
+  // the sha256 fields.
+  function ownEstimate(amountMsat, route) {
+    return {
+      source: OWN_BRIDGE,
+      incomingSat: 0,
+      feeSat: 0,
+      maxIncomingSat: 0,
+      routingFeeLimitSat: 0,
+      sha256AmountSat: Math.ceil(amountMsat / 1000),
+      sha256RoutingFeeLimitSat: route.routingFeeLimitSat,
+      sha256AvailableSat: route.availableSat,
+      rate: 0,
+      spread: 0,
+      serviceLabel: OWN_LABEL,
+      open: true,
+    };
+  }
+
+  // A payment from the node's own bridge's SHA256 node.
+  async function ownPay(request, feeLimitSat) {
+    return ownBridge().sha256Pay(request, feeLimitSat);
+  }
+
+  async function ownPayment(paymentHash) {
+    return ownBridge().sha256Payment(paymentHash);
+  }
+
+  // The service's terms now and the reference rate, for the settings page,
+  // and whether this node pays from its own bridge.
   async function status() {
     const s = service();
-    if (!s) {
-      return { service: null };
+    let own = null;
+    try {
+      own = await ownBridge().ownPayer();
+    } catch (_) {
+      own = null;
     }
-    const out = { service: get().service };
+    const ownBridgeInfo = own ? { ready: own.ready, availableSat: own.outboundSat } : null;
+    if (!s) {
+      return { service: null, ownBridge: ownBridgeInfo };
+    }
+    const out = { service: get().service, ownBridge: ownBridgeInfo };
     try {
       const answer = await info(s);
       out.terms = answer.direction ? termsOf(answer.direction) : null;
@@ -334,6 +419,17 @@ function createBitcoinInvoices({
   async function describe({ amountMsat, expired, paymentHash }) {
     if (!amountMsat) {
       return { estimate: null, message: NO_AMOUNT, messageCode: "no_amount" };
+    }
+    const own = await ownRoute(amountMsat);
+    if (own && own.use) {
+      return {
+        estimate: ownEstimate(amountMsat, own),
+        message: expired ? "This request has expired." : null,
+        messageCode: expired ? "expired" : null,
+      };
+    }
+    if (own) {
+      return { estimate: null, message: own.message, messageCode: own.code };
     }
     const s = service();
     if (!s) {
@@ -611,6 +707,32 @@ function createBitcoinInvoices({
   // The SHA256 invoice a payment of this node paid through the service, by
   // the attempts on record: {amountSat, description, serviceLabel}, or
   // null. Matched by the service's request when the payment names it.
+  // The SHA256 invoices paid from the node's own bridge, for the activity:
+  // they are payments of its SHA256 node, which this node's own list does
+  // not show. Newest first: {paymentHash, amountSat, description, at,
+  // state ("paid", "pending" or "failed"), preimage, sha256FeeSat}.
+  function ownPayments() {
+    const all = loadRecords();
+    const out = [];
+    for (const [paymentHash, r] of Object.entries(all)) {
+      const a = (r.attempts || [])[r.attempts.length - 1];
+      if (!a || a.source !== OWN_BRIDGE) {
+        continue;
+      }
+      const state = a.state === "succeeded" ? "paid" : a.state === "paying" ? "pending" : "failed";
+      out.push({
+        paymentHash,
+        amountSat: Math.ceil(Number(r.amountMsat || 0) / 1000),
+        description: r.description || "",
+        at: a.startedAt || a.at || r.at || 0,
+        state,
+        preimage: (a.outcome && a.outcome.preimage) || "",
+        sha256FeeSat: (a.outcome && a.outcome.sha256FeeSat) || 0,
+      });
+    }
+    return out.sort((x, y) => y.at - x.at);
+  }
+
   function linkOf(paymentHash, paymentRequest) {
     const r = record(paymentHash);
     if (!r) {
@@ -647,7 +769,9 @@ function createBitcoinInvoices({
     r.at = now();
     // The service it went through, by name, for the activity.
     const s = service();
-    if (s && s.label) {
+    if (attempt.source === OWN_BRIDGE) {
+      r.serviceLabel = OWN_LABEL;
+    } else if (s && s.label) {
       r.serviceLabel = s.label;
     }
     r.attempts.push({ at: now(), ...attempt });
@@ -676,12 +800,16 @@ function createBitcoinInvoices({
     setPremium,
     status,
     describe,
+    ownRoute,
+    ownPay,
+    ownPayment,
     quote,
     swapState,
     checkHold,
     referenceRate,
     record,
     linkOf,
+    ownPayments,
     lastAttempt,
     addAttempt,
     updateAttempt,
@@ -699,6 +827,7 @@ function instance() {
 
 module.exports = {
   instance,
+  OWN_BRIDGE,
   createBitcoinInvoices,
   estimateFor,
   routingFeeLimit,

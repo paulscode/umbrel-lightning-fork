@@ -270,7 +270,10 @@ function referenceFeed({ rate = REFERENCE, down = false, candles = [] } = {}) {
 }
 
 // The whole thing, with a service configured unless `configure` is false.
-async function world({ behave = {}, pay, reference = {}, configure = true, payWaitMs = 2000, files = memoryFiles(), ledger = createLedger() } = {}) {
+// No bridge of the node's own, unless a test gives one (ownBridgeFake).
+const NO_OWN_BRIDGE = () => ({ ownPayer: async () => null });
+
+async function world({ behave = {}, pay, reference = {}, configure = true, payWaitMs = 2000, files = memoryFiles(), ledger = createLedger(), ownBridge = NO_OWN_BRIDGE } = {}) {
   let t = NOW;
   ledger.now = () => t;
   const service = await startService(ledger, behave);
@@ -283,6 +286,7 @@ async function world({ behave = {}, pay, reference = {}, configure = true, payWa
       write: files.write,
       bridge: createBridgeClient(),
       reference: referenceFeed(reference),
+      ownBridge,
       now: () => t,
       clock: () => t * 1000,
       log: () => {},
@@ -292,7 +296,7 @@ async function world({ behave = {}, pay, reference = {}, configure = true, payWa
     await invoices.setService(service.code());
   }
   const mobileFor = (bi) =>
-    createMobile({ lnd: () => lnd, bitcoinInvoices: () => bi, now: () => t, payWaitMs, network: () => "mainnet" });
+    createMobile({ lnd: () => lnd, bitcoinInvoices: () => bi, now: () => t, payWaitMs, ownPollMs: 20, network: () => "mainnet" });
   return {
     ledger,
     service,
@@ -1048,4 +1052,193 @@ test("a full record keeps the attempt just made, and any still under way", () =>
   assert.ok(invoices.record("held"), "one still paying is kept");
   assert.equal(Object.keys(saved.payments).length, 2000);
   assert.equal(saved.payments.old1999, undefined, "the oldest paid one went");
+});
+
+// This node's own bridge: its SHA256 node pays from `outboundSat`. `outcome`
+// decides each payment: "succeeded", "failed", "slow" (in flight until
+// `finish` is called) or "refused" (lnd answers with an error).
+function ownBridgeFake(ledger, { ready = true, outboundSat = 1_000_000, outcome = "succeeded" } = {}) {
+  const payments = new Map();
+  const calls = { pay: 0, track: 0 };
+  const fake = {
+    calls,
+    payments,
+    outcome,
+    ownPayer: async () => ({ ready, outboundSat }),
+    sha256Pay: async (request, feeLimitSat) => {
+      calls.pay++;
+      const x = ledger.invoices.get(request);
+      if (fake.outcome === "refused") {
+        const e = new Error("invoice expired");
+        e.grpcCode = 2;
+        throw e;
+      }
+      const p = { status: "IN_FLIGHT", preimage: "", feeSat: 0, valueSat: Number(x.numSatoshis), failureReason: "", feeLimitSat };
+      if (fake.outcome === "succeeded") {
+        Object.assign(p, { status: "SUCCEEDED", preimage: x.preimage, feeSat: 3 });
+      } else if (fake.outcome === "failed") {
+        Object.assign(p, { status: "FAILED", failureReason: "FAILURE_REASON_NO_ROUTE" });
+      }
+      payments.set(x.paymentHash, p);
+      return { ...p };
+    },
+    sha256Payment: async (hash) => {
+      calls.track++;
+      const p = payments.get(hash);
+      return p ? { ...p } : null;
+    },
+    finish: (hash, status = "SUCCEEDED") => {
+      const p = payments.get(hash);
+      const x = [...ledger.invoices.values()].find((i) => i.paymentHash === hash);
+      Object.assign(p, status === "SUCCEEDED" ? { status, preimage: x.preimage, feeSat: 3 } : { status, failureReason: "FAILURE_REASON_TIMEOUT" });
+    },
+  };
+  return fake;
+}
+
+test("own bridge: a node running its own bridge pays from its SHA256 node, with no service and no fee", async () => {
+  const ledger = createLedger();
+  const own = ownBridgeFake(ledger);
+  const w = await world({ configure: false, ledger, ownBridge: () => own });
+  try {
+    const x = bitcoinInvoice(ledger);
+    const d = await w.mobile.decode(x.request, CAPABLE);
+    assert.equal(d.payable, true, d.message);
+    assert.equal(d.estimate.source, "own_bridge");
+    assert.equal(d.estimate.incomingSat, 0);
+    assert.equal(d.estimate.maxIncomingSat, 0);
+    assert.equal(d.estimate.sha256AmountSat, 150);
+    assert.equal(d.estimate.sha256RoutingFeeLimitSat, 10);
+    assert.equal(d.estimate.serviceLabel, "Your bridge");
+
+    const paid = await w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: d.estimate.maxIncomingSat });
+    assert.equal(paid.status, "succeeded");
+    assert.equal(paid.preimage, x.preimage);
+    assert.equal(paid.amountSat, 0, "nothing of this chain spent");
+    assert.equal(paid.bitcoinInvoice.source, "own_bridge");
+    assert.equal(paid.bitcoinInvoice.sha256FeeSat, 3);
+    assert.equal(own.calls.pay, 1);
+    assert.equal(own.payments.get(x.hash).feeLimitSat, 10);
+    assert.equal(w.service.calls.quote, 0, "the service is never asked");
+    assert.equal(w.ledger.payments.size, 0, "this node paid nothing");
+
+    // Asking again answers from the bridge's node; paying again is refused.
+    const again = await w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: 0, recheck: true });
+    assert.equal(again.preimage, x.preimage);
+    await assert.rejects(w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: 0 }), (e) => e.refusal === "already_paid");
+    assert.equal(own.calls.pay, 1);
+
+    // In the activity, though this node's own list has no payment for it.
+    const listed = w.invoices.ownPayments();
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0].state, "paid");
+    assert.equal(listed[0].preimage, x.preimage);
+    w.lnd.getOnChainTransactions = async () => [];
+    w.lnd.listRecentPayments = async () => ({ payments: [] });
+    w.lnd.getInvoices = async () => ({ invoices: [] });
+    const { items } = await w.mobile.activity();
+    const item = items.find((i) => i.reference === x.hash);
+    assert.equal(item.status, "complete");
+    assert.equal(item.amountSat, 0);
+    assert.equal(item.bitcoinInvoice.amountSat, 150);
+    assert.equal(item.bitcoinInvoice.serviceLabel, "Your bridge");
+    assert.equal(item.preimage, x.preimage);
+  } finally {
+    w.close();
+  }
+});
+
+test("own bridge: preferred to a configured service while it can pay; the service when it cannot", async () => {
+  const ledger = createLedger();
+  const own = ownBridgeFake(ledger, { outboundSat: 100 });
+  const w = await world({ ledger, ownBridge: () => own });
+  try {
+    const x = bitcoinInvoice(ledger);
+    // 150 sats and 10 routing against 100: the service.
+    let d = await w.mobile.decode(x.request, CAPABLE);
+    assert.notEqual(d.estimate.source, "own_bridge");
+    assert.ok(d.estimate.incomingSat > 0);
+
+    const own2 = ownBridgeFake(ledger);
+    const w2 = await world({ ledger, ownBridge: () => own2 });
+    try {
+      d = await w2.mobile.decode(x.request, CAPABLE);
+      assert.equal(d.estimate.source, "own_bridge");
+      await w2.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: 0 });
+      assert.equal(w2.service.calls.quote, 0);
+    } finally {
+      w2.close();
+    }
+  } finally {
+    w.close();
+  }
+});
+
+test("own bridge: one that cannot pay, with no service, says why", async () => {
+  const ledger = createLedger();
+  const w = await world({ configure: false, ledger, ownBridge: () => ownBridgeFake(ledger, { outboundSat: 100 }) });
+  const w2 = await world({ configure: false, ledger, ownBridge: () => ownBridgeFake(ledger, { ready: false }) });
+  try {
+    const x = bitcoinInvoice(ledger);
+    let d = await w.mobile.decode(x.request, CAPABLE);
+    assert.equal(d.payable, false);
+    assert.equal(d.messageCode, "own_bridge_no_liquidity");
+    assert.match(d.message, /can send 100 sats; this needs 160/);
+    await assert.rejects(w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: 0 }), (e) => e.refusal === "own_bridge_no_liquidity");
+    d = await w2.mobile.decode(x.request, CAPABLE);
+    assert.equal(d.messageCode, "own_bridge_not_ready");
+  } finally {
+    w.close();
+    w2.close();
+  }
+});
+
+test("own bridge: a slow payment is on its way, and asking again follows it without paying twice", async () => {
+  const ledger = createLedger();
+  const own = ownBridgeFake(ledger, { outcome: "slow" });
+  const w = await world({ configure: false, ledger, ownBridge: () => own, payWaitMs: 100 });
+  try {
+    const x = bitcoinInvoice(ledger);
+    await assert.rejects(w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: 0 }), (e) => e.refusal === "on_its_way" && e.recheck);
+    await assert.rejects(w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: 0, recheck: true }), (e) => e.refusal === "on_its_way");
+    own.finish(x.hash);
+    // After a restart too: the attempt is on disk.
+    const paid = await w.restart().mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: 0, recheck: true });
+    assert.equal(paid.preimage, x.preimage);
+    assert.equal(own.calls.pay, 1);
+  } finally {
+    w.close();
+  }
+});
+
+test("own bridge: a payment that fails, or that the node refuses, paid nothing and may be tried again", async () => {
+  const ledger = createLedger();
+  const own = ownBridgeFake(ledger, { outcome: "failed" });
+  const w = await world({ configure: false, ledger, ownBridge: () => own });
+  try {
+    const x = bitcoinInvoice(ledger);
+    await assert.rejects(w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: 0 }), (e) => e.refusal === "not_paid" && /no route/.test(e.message));
+    await assert.rejects(w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: 0, recheck: true }), (e) => e.refusal === "not_paid");
+    assert.equal(own.calls.pay, 1, "asking again starts nothing");
+
+    own.outcome = "refused";
+    await assert.rejects(w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: 0 }), (e) => e.refusal === "not_paid" && /refused it \(invoice expired\)/.test(e.message));
+
+    own.outcome = "succeeded";
+    const paid = await w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: 0 });
+    assert.equal(paid.preimage, x.preimage);
+    assert.equal(own.calls.pay, 3);
+  } finally {
+    w.close();
+  }
+});
+
+test("own bridge: a payment through a service needs a ceiling", async () => {
+  const w = await world();
+  try {
+    const x = bitcoinInvoice(w.ledger);
+    await assert.rejects(w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: 0 }), /Say the most/);
+  } finally {
+    w.close();
+  }
 });

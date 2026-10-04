@@ -14,6 +14,7 @@ const {
   WAITING_STATES,
   NO_AMOUNT,
   NO_SERVICE,
+  OWN_BRIDGE,
   INVALID_HOLD,
   holdHours,
 } = require("./bitcoinInvoices.js");
@@ -308,6 +309,9 @@ function createMobile({
   // How long a payment of a SHA256 invoice is waited for before the answer
   // is "on its way": the service holds the payment until it has paid.
   payWaitMs = 90 * 1000,
+  // How often a payment from the node's own bridge is looked at while it is
+  // waited for.
+  ownPollMs = 1000,
 } = {}) {
   let ownPubkey = null;
   // Descriptions of paid invoices, by payment hash: a payment does not carry
@@ -1122,13 +1126,14 @@ function createMobile({
     };
   }
 
-  function bitcoinPaid(result, x) {
+  function bitcoinPaid(result, x, extra = {}) {
     return {
       ...result,
       bitcoinInvoice: {
         amountSat: Math.ceil(x.amountMsat / 1000),
         description: x.description || "",
         paymentHash: x.paymentHash,
+        ...extra,
       },
     };
   }
@@ -1145,10 +1150,9 @@ function createMobile({
   // after every check in bitcoinInvoices.checkHold passes.
   async function payBitcoinInvoice({ request, maxIncomingSat, recheck = false, resume = false }) {
     const again = recheck || resume;
-    const max = satAmount(maxIncomingSat);
-    if (!max) {
-      throw bad("Say the most you agree to pay for this invoice.");
-    }
+    // 0 from an estimate to pay from the node's own bridge, which spends
+    // nothing of this chain; a payment through a service needs a ceiling.
+    const max = satAmount(maxIncomingSat, { allowZero: true }) || null;
     let x;
     try {
       x = await readBitcoinInvoice(request);
@@ -1161,7 +1165,179 @@ function createMobile({
     return withHashLock(x.paymentHash, () => payBitcoinLocked(x, max, again));
   }
 
+  // Whether this invoice is paid from the node's own bridge: once an
+  // attempt has gone that way, always; else when the bridge's SHA256 node
+  // can pay it now and no payment through a service is under way. Throws the
+  // reason when the node runs a bridge that cannot pay it and there is no
+  // service to fall back on.
+  async function ownBridgeRoute(x, again) {
+    const service = bitcoinInvoices();
+    const last = service.lastAttempt(x.paymentHash);
+    if (last && last.source === OWN_BRIDGE) {
+      return { resumed: true };
+    }
+    // A service's attempt under way is the service's; asking again about
+    // one that has ended finds out about it, through the service.
+    if (inFlight.has(x.paymentHash) || (last && (["quoted", "paying"].includes(last.state) || again))) {
+      return null;
+    }
+    const route = await service.ownRoute(x.amountMsat);
+    if (route && !route.use) {
+      throw refuse(route.code, route.message);
+    }
+    return route;
+  }
+
+  // The answer while the bridge's SHA256 node is still paying.
+  function ownOnItsWay() {
+    const waiting = new ValidationError(
+      "Your bridge's SHA256 node is paying the invoice. Check your activity in a little while.",
+      504
+    );
+    waiting.uncertain = true;
+    waiting.recheck = true;
+    waiting.refusal = "on_its_way";
+    return waiting;
+  }
+
+  const OWN_FAILURES = {
+    FAILURE_REASON_NO_ROUTE: "it found no route to the recipient",
+    FAILURE_REASON_INSUFFICIENT_BALANCE: "its channels do not hold enough",
+    FAILURE_REASON_TIMEOUT: "it ran out of time trying",
+    FAILURE_REASON_INCORRECT_PAYMENT_DETAILS: "the recipient refused it",
+    FAILURE_REASON_CANCELED: "it was cancelled",
+  };
+
+  function ownNotPaid(reason) {
+    const why = OWN_FAILURES[reason] || "it could not pay it";
+    return refuse("not_paid", `Nothing was paid: your bridge's SHA256 node ${why.replace(/^it /, "")}. You can try again.`);
+  }
+
+  function ownPaid(st, x) {
+    return bitcoinPaid({ status: "succeeded", paymentHash: x.paymentHash, preimage: st.preimage, amountSat: 0, feeSat: 0 }, x, {
+      source: OWN_BRIDGE,
+      sha256FeeSat: st.feeSat,
+    });
+  }
+
+  // Pays a SHA256 invoice from the node's own bridge: its SHA256 node pays
+  // it from its channels. Nothing of this chain moves. The payment hash is
+  // paid at most once by that node (one in flight or paid is refused), and
+  // the attempt is on disk before the payment starts, so asking again
+  // follows that payment rather than starting another.
+  async function payOwnLocked(x, again, route) {
+    const hash = x.paymentHash;
+    const service = bitcoinInvoices();
+    if (inFlight.has(hash)) {
+      throw ownOnItsWay();
+    }
+    let st;
+    try {
+      st = await service.ownPayment(hash);
+    } catch (error) {
+      if (again) {
+        throw stillUncertain();
+      }
+      throw new ValidationError("Your bridge's SHA256 node is not answering. Try again in a minute.", 503);
+    }
+    const last = service.lastAttempt(hash);
+    if (st && st.status === "SUCCEEDED") {
+      if (last && last.state !== "succeeded") {
+        service.updateAttempt(hash, { state: "succeeded", outcome: { preimage: st.preimage, sha256FeeSat: st.feeSat } });
+      }
+      if (again) {
+        return ownPaid(st, x);
+      }
+      throw alreadyPaid(st.preimage);
+    }
+    if (st && (st.status === "IN_FLIGHT" || st.status === "INITIATED")) {
+      throw ownOnItsWay();
+    }
+    if (st && st.status === "FAILED" && last && last.state === "paying") {
+      service.updateAttempt(hash, { state: "failed", endedAt: now(), reason: st.failureReason, failCode: "not_paid" });
+    }
+    if (again && last) {
+      // Asking again finds out what became of a payment; it never starts
+      // another.
+      if (service.lastAttempt(hash).state === "failed") {
+        throw ownNotPaid(service.lastAttempt(hash).reason || (st && st.failureReason));
+      }
+      if (service.lastAttempt(hash).state === "paying") {
+        // Written as starting, and the node has no payment for it yet.
+        throw stillUncertain();
+      }
+    }
+    if (x.expiresAt <= now()) {
+      throw bad("This request has expired.");
+    }
+    if (!route || route.resumed) {
+      route = await service.ownRoute(x.amountMsat);
+      if (!route) {
+        throw refuse("own_bridge_unavailable", "Your bridge's SHA256 node can't pay this now. Try again in a minute.", 503);
+      }
+      if (!route.use) {
+        throw refuse(route.code, route.message);
+      }
+    }
+
+    service.addAttempt(x, { source: OWN_BRIDGE, state: "paying", startedAt: now(), feeLimitSat: route.routingFeeLimitSat });
+    inFlight.add(hash);
+    try {
+      let p;
+      try {
+        p = await service.ownPay(x.request, route.routingFeeLimitSat);
+      } catch (error) {
+        if (error.grpcCode !== undefined || error.status) {
+          // The node answered and did not send it.
+          const detail = String(error.message || "");
+          if (/already paid|already succeeded/i.test(detail)) {
+            service.updateAttempt(hash, { state: "failed", endedAt: now(), reason: detail, failCode: "not_paid" });
+            throw alreadyPaid();
+          }
+          if (/in transition|already in flight/i.test(detail)) {
+            throw ownOnItsWay();
+          }
+          service.updateAttempt(hash, { state: "failed", endedAt: now(), reason: detail, failCode: "not_paid" });
+          throw refuse("not_paid", `Nothing was paid: your bridge's SHA256 node refused it (${detail.replace(/\.$/, "")}).`);
+        }
+        if (/ECONNREFUSED|ENOTFOUND|EHOSTUNREACH|credentials/i.test(`${error.code || ""} ${error.message || ""}`)) {
+          service.updateAttempt(hash, { state: "failed", endedAt: now(), reason: "not answering", failCode: "not_paid" });
+          throw new ValidationError("Your bridge's SHA256 node is not answering, so nothing was paid. Try again in a minute.", 503);
+        }
+        // Cut off: it may have started. Asking again follows it.
+        throw stillUncertain();
+      }
+      const deadline = Date.now() + payWaitMs;
+      while (p && p.status !== "SUCCEEDED" && p.status !== "FAILED" && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, ownPollMs));
+        p = (await service.ownPayment(hash).catch(() => p)) || p;
+      }
+      if (p && p.status === "SUCCEEDED") {
+        try {
+          service.updateAttempt(hash, { state: "succeeded", outcome: { preimage: p.preimage, sha256FeeSat: p.feeSat } });
+        } catch (error) {
+          console.warn(`[bitcoin invoices] paid ${hash} from the bridge, but could not record it: ${error.message}`);
+        }
+        return ownPaid(p, x);
+      }
+      if (p && p.status === "FAILED") {
+        service.updateAttempt(hash, { state: "failed", endedAt: now(), reason: p.failureReason, failCode: "not_paid" });
+        throw ownNotPaid(p.failureReason);
+      }
+      throw ownOnItsWay();
+    } finally {
+      inFlight.delete(hash);
+    }
+  }
+
   async function payBitcoinLocked(x, max, again) {
+    const route = await ownBridgeRoute(x, again);
+    if (route) {
+      return payOwnLocked(x, again, route);
+    }
+    if (!max) {
+      throw bad("Say the most you agree to pay for this invoice.");
+    }
     const hash = x.paymentHash;
     const service = bitcoinInvoices();
     // Being paid by this dashboard right now: the service holds it.
@@ -1611,6 +1787,42 @@ function createMobile({
         description: inv.memo || "",
         reference: toHex(inv.rHash),
       });
+    }
+    // SHA256 invoices paid from this node's own bridge: payments of its
+    // SHA256 node, which LND's list here does not show. Nothing of this
+    // chain was spent on them.
+    let own = [];
+    try {
+      own = bitcoinInvoices().ownPayments();
+    } catch (error) {
+      own = [];
+    }
+    for (const o of own.slice(0, max)) {
+      const item = {
+        id: `pay:${o.paymentHash}`,
+        kind: "lightning",
+        direction: "out",
+        amountSat: 0,
+        feeSat: 0,
+        timestamp: o.at,
+        status: o.state === "paid" ? "complete" : o.state === "pending" ? "pending" : "failed",
+        description: o.description,
+        reference: o.paymentHash,
+        bitcoinInvoice: {
+          amountSat: o.amountSat,
+          description: o.description,
+          serviceLabel: "Your bridge",
+          state: o.state === "failed" ? "returned" : o.state,
+          source: OWN_BRIDGE,
+          sha256FeeSat: o.sha256FeeSat,
+        },
+      };
+      if (o.state === "paid" && o.preimage) {
+        item.preimage = o.preimage;
+      }
+      if (!items.some((i) => i.id === item.id)) {
+        items.push(item);
+      }
     }
     items.sort((a, b) => b.timestamp - a.timestamp);
     return { items: items.slice(0, max) };

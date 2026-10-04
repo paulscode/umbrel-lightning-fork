@@ -735,6 +735,30 @@ async function getPayments() {
     reversedPayments.unshift(link ? { ...payment, bitcoinInvoice: link } : payment);
   }
 
+  // SHA256 invoices paid from this node's own bridge: payments of its SHA256
+  // node, which LND's list here does not show. Nothing of this chain was
+  // spent on them.
+  let own = [];
+  try {
+    own = bitcoinInvoices ? bitcoinInvoices.ownPayments().filter((o) => o.state === "paid") : [];
+  } catch (error) {
+    own = [];
+  }
+  for (const o of own) {
+    reversedPayments.push({
+      paymentHash: o.paymentHash,
+      value: "0",
+      valueSat: "0",
+      feeSat: "0",
+      creationDate: String(o.at),
+      status: "SUCCEEDED",
+      paymentPreimage: o.preimage,
+      paymentRequest: "",
+      bitcoinInvoice: { amountSat: o.amountSat, description: o.description, serviceLabel: "Your bridge", source: "own_bridge" },
+    });
+  }
+  reversedPayments.sort((a, b) => Number(b.creationDate || 0) - Number(a.creationDate || 0));
+
   return reversedPayments;
 }
 

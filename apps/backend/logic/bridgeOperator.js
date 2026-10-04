@@ -512,6 +512,69 @@ function createBridgeOperator({
     return !s.enabled && !!(await idleNode());
   }
 
+  // This node's own bridge, as a way to pay a SHA256 invoice: its SHA256
+  // node pays it from its own channels, with no swap and no fee (the
+  // operator's own coin on both sides). {ready, outboundSat}, or null when
+  // there is no such node or it cannot be asked. Never an LND the operator
+  // runs themselves: that one is theirs to pay from with their own tools.
+  async function ownPayer() {
+    if (!sha256Node) {
+      return null;
+    }
+    let s;
+    try {
+      s = await status();
+    } catch (_) {
+      return null;
+    }
+    const node = s.sha256Node && s.sha256Node.mode === "supervised" ? s.sha256Node : (!s.enabled ? await idleNode() : null);
+    if (!node) {
+      return null;
+    }
+    return { ready: node.state === "ready" && !!node.synced, outboundSat: int(node.outboundSat) };
+  }
+
+  // A SHA256 payment on the bridge's node: {status, preimage, feeSat,
+  // valueSat, failureReason} as lnd's router reports it, or null when it has
+  // none for the hash.
+  function paymentOf(p) {
+    return {
+      status: String(p.status || ""),
+      preimage: /^[0-9a-f]{64}$/i.test(String(p.payment_preimage || "")) && !/^0+$/.test(p.payment_preimage) ? p.payment_preimage.toLowerCase() : "",
+      feeSat: int(p.fee_sat),
+      valueSat: int(p.value_sat),
+      failureReason: String(p.failure_reason || ""),
+    };
+  }
+
+  // Starts paying `request` from the bridge's SHA256 node, and answers with
+  // its first update. The router goes on paying after the answer: what
+  // became of it is sha256Payment's.
+  async function sha256Pay(request, feeLimitSat) {
+    if (!(await ownNode())) {
+      throw new ValidationError("This node's bridge has no SHA256 node of its own to pay from.", 409);
+    }
+    const update = await sha256Node("POST", "/v2/router/send", {
+      payment_request: request,
+      fee_limit_sat: String(feeLimitSat),
+      timeout_seconds: 60,
+      no_inflight_updates: false,
+    }, { firstMessage: true });
+    return paymentOf(update);
+  }
+
+  async function sha256Payment(paymentHash) {
+    const hash = Buffer.from(String(paymentHash), "hex").toString("base64url");
+    try {
+      return paymentOf(await sha256Node("GET", `/v2/router/track/${hash}?no_inflight_updates=false`, undefined, { firstMessage: true }));
+    } catch (error) {
+      if (error.grpcCode === 5 || /not found|unknown payment/i.test(lndMessage(error))) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
   // Payments the bridge has not finished: in flight, waiting, or stopped
   // for the operator; whether it is on, off and finishing them, or not up.
   // A lost one is final and does not count. Null when Lightning Fork
@@ -880,7 +943,7 @@ function createBridgeOperator({
     return { revoked: rootKeyId };
   }
 
-  return { overview, status, sha256Pubkey, setRate, depositAddress, openChannel, channels, closeChannel, withdraw, recoveryPhrase, channelBackup, issueCode, revokeCode, participants, idleNode, unfinished };
+  return { overview, status, sha256Pubkey, ownPayer, sha256Pay, sha256Payment, setRate, depositAddress, openChannel, channels, closeChannel, withdraw, recoveryPhrase, channelBackup, issueCode, revokeCode, participants, idleNode, unfinished };
 }
 
 // The instance the routes use, from the environment.
