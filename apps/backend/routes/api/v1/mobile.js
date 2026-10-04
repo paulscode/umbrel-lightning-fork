@@ -259,6 +259,10 @@ router.post(
 
 router.get("/activity", handle((req) => mobile.activity({ limit: req.query.limit })));
 
+// The currencies a price can be given in now: dollars always, the rest while
+// the conversion table answers.
+router.get("/currencies", handle(async () => ({ currencies: await priceLogic.getSupportedCurrencies() })));
+
 router.get(
   "/price",
   handle(async (req) => {

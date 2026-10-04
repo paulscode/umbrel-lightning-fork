@@ -39,7 +39,8 @@ stub("logic/bitcoinInvoices.js", {
     status: async () => ({ service, terms: { open: true, rate: 0.0049, spread: 0.01, minSat: 1, maxSat: 150000 }, reference: { rate: 0.005, premiumAllowed: 0.06, source: "Neoxa", volatilityAllowance: 0.01 } }),
   }),
 });
-for (const name of ["logic/mobileAccess.js", "logic/lightning.js", "services/lnd.js", "logic/peers.js", "logic/offers.js", "logic/price.js", "utils/x509.js"]) {
+stub("logic/price.js", { getSupportedCurrencies: async () => ["USD", "EUR"], getPrice: async () => 1 });
+for (const name of ["logic/mobileAccess.js", "logic/lightning.js", "services/lnd.js", "logic/peers.js", "logic/offers.js", "utils/x509.js"]) {
   stub(name, {});
 }
 
@@ -89,4 +90,9 @@ test("an error body carries its code and details", async () => {
   assert.equal(r.status, 409);
   assert.equal(r.body.code, "in_progress");
   assert.deepEqual(r.body.details, { retryAfterSeconds: 7 });
+});
+
+test("currencies lists what a price can be given in", async () => {
+  const r = await call("GET", "/currencies");
+  assert.deepEqual(r.body, { currencies: ["USD", "EUR"] });
 });

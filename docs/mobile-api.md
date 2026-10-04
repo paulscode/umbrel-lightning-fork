@@ -93,7 +93,8 @@ Every other call takes the key as `Authorization: Bearer lf_…`.
 | `GET /receive/invoice/<paymentHash>` | | `{state, amountSat, amountPaidSat, settledAt, expiresAt}`; `state` is `open`, `settled`, `canceled`, `accepted` or `expired` |
 | `POST /receive/offer` | `{description?, amountSat?}` | `{offer, offerId, amountSat, description, uri}` |
 | `GET /activity` | `?limit=1..100` | `{items: [{id, kind, direction, amountSat, feeSat, timestamp, status, confirmations?, description, reference, bitcoinInvoice?, preimage?}]}`, newest first |
-| `GET /price` | `?currency=USD` | `{currency, price}`, BTC in that currency, or `null` |
+| `GET /price` | `?currency=USD` | `{currency, price}`, BTCB2 in that currency, or `null` |
+| `GET /currencies` | | `{currencies}`, the codes `/price` can answer now: `USD` always, others while the conversion table answers |
 | `GET /channels` | | `{channels}`, as the dashboard shows them |
 | `POST /channels/open` | `{pubKey, host?, port?, amountSat, satPerVbyte?, isPrivate?, requestId?}` | `{fundingTxid, outputIndex, opening: true}` |
 | `POST /channels/close` | `{channelPoint, force?, requestId?}` | `{closing: true}` |
