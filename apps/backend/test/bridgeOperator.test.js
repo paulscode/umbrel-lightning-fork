@@ -685,3 +685,12 @@ test("the overview carries the copy only for a node this app runs", async () => 
   });
   assert.equal((await external.overview()).sha256Backup, null);
 });
+
+test("a bridge that is off and still finishing counts what it finishes", async () => {
+  const draining = { enabled: false, refusals: ["finishing the swaps already under way; quoting nothing"], swaps_in_flight: 2 };
+  const op = createBridgeOperator({ lightningFork: fakeNode({ "GET /v2/bridge/status": draining }) });
+  assert.equal(normaliseStatus(draining).draining, true);
+  assert.equal(await op.unfinished(), 2);
+  const off = createBridgeOperator({ lightningFork: fakeNode({ "GET /v2/bridge/status": { enabled: false, refusals: ["the bridge is not enabled on this node"] } }) });
+  assert.equal(await off.unfinished(), 0);
+});

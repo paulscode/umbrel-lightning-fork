@@ -46,6 +46,12 @@
 
       <!-- The bridge is off: what it is, what it takes, how to turn it on -->
       <template v-if="overview && overview.enabled === false">
+        <b-alert show variant="warning" v-if="overview.draining" class="small">
+          The bridge is off and finishing
+          {{ overview.swapsInFlight === 1 ? "a payment" : `${overview.swapsInFlight || "the"} payments` }}
+          already under way; it takes no new ones, and stops once they are
+          done.
+        </b-alert>
         <p>
           A bridge lets people pay invoices on the SHA256 chain's Lightning
           network with BTCB2, through your node. For each payment, they pay

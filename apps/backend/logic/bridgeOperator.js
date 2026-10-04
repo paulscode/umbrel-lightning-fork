@@ -181,6 +181,9 @@ function normaliseStatus(s) {
     rateSetAt: int(s.rate_set_at),
     rateExpiresAt: int(s.rate_expires_at),
     needsOperator: s.needs_operator || [],
+    // Off with swaps still being finished (Lightning Fork's drain): it
+    // quotes nothing, finishes them, and stops.
+    draining: !s.enabled && (s.refusals || []).some((r) => /^finishing the swaps/.test(r)),
     sha256Node: node && {
       mode: node.mode || "external",
       state: node.state || "",
@@ -468,11 +471,12 @@ function createBridgeOperator({
   }
 
   // Payments the bridge has not finished: in flight, or stopped for the
-  // operator. Null when Lightning Fork cannot be asked.
+  // operator; while on, or off and still finishing them. Null when
+  // Lightning Fork cannot be asked.
   async function unfinished() {
     try {
       const s = await status();
-      return s.enabled ? s.swapsInFlight + s.needsOperator.length : 0;
+      return s.enabled || s.draining ? s.swapsInFlight + s.needsOperator.length : 0;
     } catch (_) {
       return null;
     }
