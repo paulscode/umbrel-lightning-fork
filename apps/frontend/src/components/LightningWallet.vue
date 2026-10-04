@@ -1565,6 +1565,12 @@ export default {
         this.loading = false;
         return;
       }
+      if (decoded.blake2b === false) {
+        this.error =
+          "This is from a node on the SHA256 chain. Offers there can't be paid from here; ask for a SHA256 invoice (lnbc...) instead.";
+        this.loading = false;
+        return;
+      }
       if (kind === "offer") {
         if (!decoded.valid) {
           this.error = decoded.validationError || "This offer cannot be paid";

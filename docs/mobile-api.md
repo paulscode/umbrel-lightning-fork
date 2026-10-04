@@ -207,7 +207,7 @@ without checking it first (below).
   expired, the service closed or out of its bounds, the price past the
   allowed premium, no market rate. Show `message`. `messageCode` names the
   reason: `no_service`, `no_amount`, `expired`, `too_small`, `too_large`,
-  `rate`, `reference_unavailable`, `no_direction`, `unreachable` (or
+  `rate`, `reference_unavailable`, `no_direction`, `wrong_node`, `unreachable` (or
   another of the service's transport codes below), or the service's own
   code while it is closed (`disabled`, `no_rate`, …).
 
@@ -238,8 +238,9 @@ bitcoinInvoice: {amountSat, description, paymentHash}}`: `amountSat` and
 
 The service holds the payment until it has paid, which can take a while.
 After 90 seconds the answer is 504, `uncertain`, `code: "on_its_way"`, with
-`details.maxHoldHours` (how long it can stay held if the service never
-pays, after which it comes back); the payment goes on, and asking again
+`details.maxHoldHours` (about how long the service's request can hold it if
+the service never pays, at ten minutes a block, after which it comes back;
+a channel force-closed meanwhile can take longer); the payment goes on, and asking again
 (`resume`, the same id) finds it:
 
 - the node's own payment for the hash comes first: paid gives the proof,

@@ -33,7 +33,13 @@ const bitcoinInvoices = () => require("logic/bitcoinInvoices.js").instance();
 // set up, its name and the premium allowed. Never its credential, and
 // nothing asked of the service (that is /bitcoin-invoices).
 function bitcoinInvoicesSummary() {
-  const s = bitcoinInvoices().get();
+  let s;
+  try {
+    s = bitcoinInvoices().get();
+  } catch (error) {
+    // An unreadable settings file must not take /bootstrap down with it.
+    return null;
+  }
   return {
     configured: Boolean(s.service),
     label: s.service ? s.service.label || "" : "",
@@ -153,6 +159,9 @@ router.get(
   "/bitcoin-invoices",
   handle(async () => {
     const summary = bitcoinInvoicesSummary();
+    if (!summary) {
+      throw new ValidationError("The settings for paying SHA256 invoices can't be read.", 500);
+    }
     if (!summary.configured) {
       return { ...summary, terms: null };
     }

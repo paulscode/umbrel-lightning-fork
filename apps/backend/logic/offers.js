@@ -102,6 +102,10 @@ async function decode(bolt12) {
   return {
     type: res.type,
     forThisChain: Boolean(res.forThisChain),
+    // Whether it sets option_blake2b, read from the string: the chain fields
+    // can't tell an offer from the SHA256 chain apart (true, false, or null
+    // for an invoice request or a string that can't be read).
+    blake2b: require("../utils/bolt12Features.js").setsBlake2b(bolt12),
     valid: Boolean(res.valid),
     validationError: res.validationError || "",
     ours: Boolean(res.ours),

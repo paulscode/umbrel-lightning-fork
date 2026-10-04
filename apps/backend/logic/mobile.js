@@ -158,10 +158,22 @@ function msatOf(res) {
   return num(res.numMsat) || num(res.numSatoshis) * 1000;
 }
 
-function refuse(code, message, status = 400) {
+function refuse(code, message, status = 400, details = null) {
   const error = new ValidationError(message, status);
   error.refusal = code;
+  if (details) {
+    error.details = details;
+  }
   return error;
+}
+
+// Whether `preimage` (hex) is the proof for `paymentHash` (hex): what the
+// service says it settled with is not taken on its word.
+function provesPayment(preimage, paymentHash) {
+  if (!/^[0-9a-f]{64}$/i.test(String(preimage || ""))) {
+    return false;
+  }
+  return require("crypto").createHash("sha256").update(Buffer.from(preimage, "hex")).digest("hex") === String(paymentHash || "").toLowerCase();
 }
 
 // A send's failure as the phone should see it: a 400 with a sentence when the
@@ -1200,36 +1212,47 @@ function createMobile({
     }
     const ended = theirs && (ENDED_STATES.includes(theirs.state) || theirs.state === "not_found");
     const waiting = theirs && WAITING_STATES.includes(theirs.state);
+    // The service's proof, only if it proves this payment.
+    const proof = theirs && provesPayment(theirs.preimage, hash) ? theirs.preimage.toLowerCase() : "";
+    const lostMessage =
+      "The service paid the SHA256 invoice but did not collect your payment, which comes back to you. There is nothing for you to do; the service's operator has to look into it.";
     if (theirs && theirs.state === "settled") {
-      // Paid, by a payment the node's list no longer shows: the service's
-      // preimage is the proof.
-      if (again && theirs.preimage) {
+      if (!proof) {
+        // A settled swap with no proof of it: not believed, not acted on.
+        throw stillUncertain();
+      }
+      if (found && found.state === "failed") {
+        // Paid there, while this node's payment came back: the service
+        // did not collect.
+        if (last && last.state !== "lost") {
+          service.updateAttempt(hash, { state: "lost", endedAt: now() });
+        }
+        throw refuse("needs_operator", lostMessage, 409, { preimage: proof });
+      }
+      // Paid, by a payment the node's list no longer shows.
+      if (again) {
         return bitcoinPaid(
           {
             status: "succeeded",
             paymentHash: hash,
-            preimage: theirs.preimage,
+            preimage: proof,
             amountSat: last ? Math.ceil(num(last.amountMsat) / 1000) : 0,
             feeSat: 0,
           },
           x
         );
       }
-      throw alreadyPaid(theirs.preimage);
+      throw alreadyPaid(proof);
     }
-    if (theirs && theirs.state === "lost") {
+    if ((theirs && theirs.state === "lost") || (last && last.state === "lost")) {
       // The service paid the SHA256 invoice and did not collect the
       // payment for it, which comes back to this node: the operator's
-      // loss, nothing for the user to do.
+      // loss, nothing for the user to do. Final, whether or not the
+      // service can be asked again.
       if (last && last.state !== "lost") {
         service.updateAttempt(hash, { state: "lost", endedAt: now() });
       }
-      throw refuse(
-        "needs_operator",
-        "The service paid the SHA256 invoice but did not collect your payment, which comes back to you. There is nothing for you to do; the service's operator has to look into it.",
-        409,
-        theirs.preimage ? { preimage: theirs.preimage } : null
-      );
+      throw refuse("needs_operator", lostMessage, 409, proof ? { preimage: proof } : null);
     }
     if (last && last.state === "paying") {
       if (found && found.state === "failed") {

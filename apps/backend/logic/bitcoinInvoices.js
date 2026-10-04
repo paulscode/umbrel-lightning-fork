@@ -559,13 +559,26 @@ function createBitcoinInvoices({
     return records;
   }
 
+  // Past MAX_RECORDS, the oldest of those that never paid go first, then
+  // the oldest paid ones. Never one still under way (quoted or paying, or
+  // younger than the longest a payment can be held), which a later call
+  // resumes rather than starting another.
   function saveRecords() {
     const all = loadRecords();
     const hashes = Object.keys(all);
     if (hashes.length > MAX_RECORDS) {
-      // Those that never paid first, then the oldest.
-      const paid = (h) => (all[h].attempts || []).some((a) => a.state === "succeeded");
+      const last = (h) => {
+        const a = all[h].attempts || [];
+        return a.length ? a[a.length - 1] : null;
+      };
+      const paid = (h) => (all[h].attempts || []).some((a) => a.state === "succeeded" || a.state === "lost");
+      const holdSeconds = MAX_HOLD_BLOCKS * MINUTES_PER_BLOCK * 60;
+      const settled = (h) => {
+        const l = last(h);
+        return !(l && (l.state === "quoted" || l.state === "paying")) && now() - (all[h].at || 0) > holdSeconds;
+      };
       hashes
+        .filter(settled)
         .sort((a, b) => Number(paid(a)) - Number(paid(b)) || (all[a].at || 0) - (all[b].at || 0))
         .slice(0, hashes.length - MAX_RECORDS)
         .forEach((h) => delete all[h]);

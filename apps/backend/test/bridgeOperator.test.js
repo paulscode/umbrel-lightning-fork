@@ -709,3 +709,8 @@ test("unfinished is Lightning Fork's own count when it gives one, never a lost s
   const older = lndStatus({ swaps_in_flight: 1, needs_operator: ["x"] });
   assert.equal(await createBridgeOperator({ lightningFork: fakeNode({ "GET /v2/bridge/status": older }) }).unfinished(), 2, "an older Lightning Fork: as before");
 });
+
+test("a journal Lightning Fork can't read leaves unfinished unknown, not none", async () => {
+  const s = { enabled: false, unfinished: 0, refusals: ["the bridge is not enabled on this node", "its swap journal cannot be read, so whether a swap is unfinished is not known: corrupt"] };
+  assert.equal(await createBridgeOperator({ lightningFork: fakeNode({ "GET /v2/bridge/status": s }) }).unfinished(), null);
+});

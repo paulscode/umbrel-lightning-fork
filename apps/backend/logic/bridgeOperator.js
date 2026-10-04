@@ -488,6 +488,10 @@ function createBridgeOperator({
   async function unfinished() {
     try {
       const s = await status();
+      // Lightning Fork could not read its journal: unknown, not none.
+      if (s.refusals.some((r) => /whether a swap is unfinished is not known/.test(r))) {
+        return null;
+      }
       if (s.unfinished !== null) {
         return s.unfinished;
       }

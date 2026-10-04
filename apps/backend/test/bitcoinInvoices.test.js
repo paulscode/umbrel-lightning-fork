@@ -982,3 +982,70 @@ test("a swap the service lost is the operator's to resolve, not something to try
     await w.close();
   }
 });
+
+test("the service's word that it settled counts only with a preimage that proves it", async () => {
+  const w = await world();
+  try {
+    const x = bitcoinInvoice(w.ledger);
+    const est = await estimateOf(w, x.request);
+    const args = { request: x.request, maxIncomingSat: est.maxIncomingSat };
+    const quoted = await w.invoices.quote(x.request);
+    w.invoices.addAttempt({ ...x, amountMsat: 150000, paymentHash: x.hash, request: x.request }, { state: "paying", holdInvoice: quoted.holdInvoice, expiresAt: quoted.expiresAt, hash: quoted.hash });
+    w.service.behave.swapState = "settled";
+    w.ledger.swaps.get(x.hash).preimage = "00".repeat(32);
+    const later = w.restart();
+    await assert.rejects(() => later.mobile.payBitcoinInvoice({ ...args, resume: true }), (e) => e.statusCode === 504 && e.uncertain && !e.refusal);
+    assert.equal(w.lnd.sends.length, 0);
+  } finally {
+    await w.close();
+  }
+});
+
+test("settled there while this node's payment came back: the operator's, with the proof", async () => {
+  const w = await world();
+  try {
+    const x = bitcoinInvoice(w.ledger);
+    const est = await estimateOf(w, x.request);
+    const args = { request: x.request, maxIncomingSat: est.maxIncomingSat };
+    const quoted = await w.invoices.quote(x.request);
+    w.invoices.addAttempt({ ...x, amountMsat: 150000, paymentHash: x.hash, request: x.request }, { state: "paying", holdInvoice: quoted.holdInvoice, expiresAt: quoted.expiresAt, hash: quoted.hash });
+    const hold = { ...w.ledger.invoices.get(quoted.holdInvoice), request: quoted.holdInvoice };
+    assert.throws(() => failPayment(w.ledger, hold));
+    w.service.behave.swapState = "settled";
+    const later = w.restart();
+    await assert.rejects(
+      () => later.mobile.payBitcoinInvoice({ ...args, resume: true }),
+      (e) => e.refusal === "needs_operator" && e.details && e.details.preimage === x.preimage
+    );
+    assert.equal(later.invoices.lastAttempt(x.hash).state, "lost");
+    // Recorded lost, it is final even when the service can't be asked.
+    w.service.behave.swapDown = true;
+    const again = w.restart();
+    await assert.rejects(() => again.mobile.payBitcoinInvoice({ ...args, resume: true }), (e) => e.refusal === "needs_operator");
+    assert.equal(w.lnd.sends.length, 0);
+  } finally {
+    await w.close();
+  }
+});
+
+test("a full record keeps the attempt just made, and any still under way", () => {
+  const T = 2_000_000_000;
+  const payments = {};
+  for (let i = 0; i < 2000; i++) {
+    payments[`old${i}`] = { at: T - 30 * 86400 - i, attempts: [{ state: "succeeded" }] };
+  }
+  payments.held = { at: T - 30 * 86400, attempts: [{ state: "paying" }] };
+  let saved = null;
+  const invoices = createBitcoinInvoices({
+    read: (file) => (String(file).includes("payments") ? { payments: JSON.parse(JSON.stringify(payments)) } : null),
+    write: (file, data) => { if (String(file).includes("payments")) saved = data; },
+    now: () => T,
+    settingsFile: "settings.json",
+    paymentsFile: "payments.json",
+  });
+  invoices.addAttempt({ paymentHash: "new", request: "lnbc1", amountMsat: 1000 }, { state: "quoted" });
+  assert.ok(invoices.record("new"), "the attempt just added is kept");
+  assert.ok(invoices.record("held"), "one still paying is kept");
+  assert.equal(Object.keys(saved.payments).length, 2000);
+  assert.equal(saved.payments.old1999, undefined, "the oldest paid one went");
+});
