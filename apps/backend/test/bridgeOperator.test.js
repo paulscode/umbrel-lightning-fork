@@ -658,3 +658,30 @@ test("a node restored with the bridge off is said to have channels to recover", 
   });
   assert.equal((await op.overview()).sha256RestorePending, true);
 });
+
+test("the bridge node's channel backup copy is said as off, none, pending, failing or copied", () => {
+  const { sha256BackupView } = require("../logic/bridgeOperator.js");
+  const target = [{ provider: "dropbox", ready: true }];
+  assert.equal(sha256BackupView(null), null);
+  assert.deepEqual(sha256BackupView({ targets: [], hasBackup: true, state: {} }), { state: "off" });
+  assert.deepEqual(sha256BackupView({ targets: target, hasBackup: false, state: { failures: [] } }), { state: "none" });
+  assert.deepEqual(sha256BackupView({ targets: target, hasBackup: true, state: { failures: [] } }), { state: "pending" });
+  assert.deepEqual(sha256BackupView({ targets: target, hasBackup: true, state: { lastSuccess: 1791000000, failures: [] } }), { state: "copied", at: 1791000000 });
+  assert.deepEqual(sha256BackupView({ targets: target, hasBackup: true, state: { lastSuccess: 1, failures: [{ target: "dropbox", code: "upload", detail: "401" }] } }),
+    { state: "failing", detail: "dropbox: upload (401)" });
+});
+
+test("the overview carries the copy only for a node this app runs", async () => {
+  const st = { targets: [{ provider: "sftp", ready: true }], hasBackup: true, state: { lastSuccess: 5, failures: [] } };
+  const ours = createBridgeOperator({
+    lightningFork: fakeNode({ "GET /v2/bridge/status": lndStatus(), "GET /v2/bridge/info": { directions: [] }, "GET /v1/macaroon/ids": { root_key_ids: [] } }),
+    sha256Node: fakeNode({}),
+    sha256BackupStatus: () => st,
+  });
+  assert.deepEqual((await ours.overview()).sha256Backup, { state: "copied", at: 5 });
+  const external = createBridgeOperator({
+    lightningFork: fakeNode({ "GET /v2/bridge/status": lndStatus({}, { mode: "external" }), "GET /v2/bridge/info": { directions: [] }, "GET /v1/macaroon/ids": { root_key_ids: [] } }),
+    sha256BackupStatus: () => st,
+  });
+  assert.equal((await external.overview()).sha256Backup, null);
+});

@@ -658,6 +658,7 @@
           there is nothing else to keep. Its channels come back from its own
           channel backup; keep a recent copy, as you do for this node's.
         </small>
+        <small v-if="backupText" class="d-block mb-2" :class="`text-${backupText.variant}`">{{ backupText.text }}</small>
         <div class="d-flex flex-wrap mb-2">
           <b-button size="sm" variant="outline-primary" class="mr-2 mb-1" @click="downloadBackup">Download its channel backup</b-button>
           <b-button v-if="!recovery.shown && !recovery.confirming" size="sm" variant="outline-secondary" class="mb-1" @click="recovery.confirming = true">Show its own recovery phrase</b-button>
@@ -745,7 +746,8 @@ import {
   marketDifference,
   channelState,
   closeOptions,
-  feeRateInput
+  feeRateInput,
+  sha256BackupText
 } from "@/helpers/bridge";
 import QrCode from "@/components/Utility/QrCode";
 import InputCopy from "@/components/Utility/InputCopy";
@@ -820,6 +822,11 @@ export default {
     };
   },
   computed: {
+    backupText() {
+      return this.overview
+        ? sha256BackupText(this.overview.sha256Backup, this.overview.now)
+        : null;
+    },
     sendReady() {
       const amount = Number(this.send.amount);
       return (

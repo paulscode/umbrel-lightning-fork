@@ -173,4 +173,5 @@ if (!constants.IS_STARTOS) {
 
   channelBackup.completeSavedNextcloud();
   channelBackup.startWatcher();
+  channelBackup.startSha256Watcher();
 }

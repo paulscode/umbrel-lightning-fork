@@ -19,7 +19,7 @@ const stub = path.join(dir, "agent.sh");
 // (no arguments) stays up until killed, with or without a pubkey, as the real
 // one does: it records the missing identity itself after a grace period.
 fs.writeFileSync(stub, `#!/bin/sh
-printf '%s|%s\\n' "$*" "\${NODE_PUBKEY:-}" >> "${seen}"
+printf '%s|%s%s\\n' "$*" "\${NODE_PUBKEY:-}" "\${BACKUP_LOG_TAG:+|\$BACKUP_LOG_TAG|\$BACKUP_STATE_FILE|\$CHANNEL_BACKUP_FILE}" >> "${seen}"
 if [ -z "$*" ]; then
   trap 'exit 0' TERM
   while :; do sleep 0.05; done
@@ -112,5 +112,26 @@ test("the watcher runs before the identity is known, then with it, and follows a
     assert.ok(logs.some(m => /identity changed/.test(m)));
   } finally {
     cb.stopWatcher();
+  }
+});
+
+test("the bridge node's watcher waits for that node, then copies its backup with its identity", async () => {
+  reset();
+  const SHA = "02" + "ef".repeat(32);
+  cb.setSha256PubkeySource(async () => SHA);
+  const logs = [];
+  cb.startSha256Watcher(m => logs.push(m), {pollMs: 50, retryMs: 50, checkMs: 50});
+  try {
+    await new Promise(r => setTimeout(r, 200));
+    assert.deepEqual(runs(), [], "nothing runs while there is no SHA256 node");
+    fs.mkdirSync(path.join(dir, "sha256-node"));
+    assert.ok(await until(() => runs().length === 1), "started once the node exists");
+    assert.equal(runs()[0], [
+      "", SHA, "sha256-channel-backup",
+      path.join(dir, ".channel-backup-sha256-state.json"),
+      path.join(dir, "sha256-node/data/chain/bitcoin/mainnet/channel.backup"),
+    ].join("|"));
+  } finally {
+    cb.stopSha256Watcher();
   }
 });

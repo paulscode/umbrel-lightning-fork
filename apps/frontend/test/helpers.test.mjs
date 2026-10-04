@@ -102,3 +102,12 @@ test("an error's message is the server's sentence, never an HTML page", () => {
   );
   assert.equal(getErrorMessage(null, fallback), fallback);
 });
+
+test("the bridge node's backup copy is said in a sentence", () => {
+  assert.equal(bridge.sha256BackupText(null, 0), null);
+  assert.equal(bridge.sha256BackupText({ state: "off" }, 0).variant, "warning");
+  assert.match(bridge.sha256BackupText({ state: "failing", detail: "dropbox: upload (401)" }, 0).text, /failing: dropbox: upload \(401\)\.$/);
+  assert.equal(bridge.sha256BackupText({ state: "copied", at: 1000 }, 1000 + 7200).text,
+    "Copied off this server to your Channel backups targets 2 hours ago.");
+  assert.equal(bridge.sha256BackupText({ state: "odd" }, 0), null);
+});

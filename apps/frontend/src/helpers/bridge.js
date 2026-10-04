@@ -216,3 +216,45 @@ export function feeRateInput(text) {
     ? { ok: true, value: n }
     : { ok: false, value: undefined };
 }
+
+// The bridge node's channel backup copy off this server, as the overview
+// reports it (sha256Backup), in a sentence. Null where the window says
+// nothing (StartOS, whose health check says it).
+export function sha256BackupText(view, now) {
+  if (!view) {
+    return null;
+  }
+  switch (view.state) {
+    case "off":
+      return {
+        text:
+          "Not copied off this server: no target is set up in Channel backups. One set up there covers this node too.",
+        variant: "warning"
+      };
+    case "none":
+      return {
+        text:
+          "Copied off this server, to your Channel backups targets, once the node has a channel.",
+        variant: "muted"
+      };
+    case "pending":
+      return {
+        text: "Being copied off this server to your Channel backups targets.",
+        variant: "muted"
+      };
+    case "failing":
+      return {
+        text: `Its copy off this server is failing: ${view.detail}.`,
+        variant: "danger"
+      };
+    case "copied":
+      return {
+        text: `Copied off this server to your Channel backups targets ${duration(
+          now - view.at
+        )} ago.`,
+        variant: "success"
+      };
+    default:
+      return null;
+  }
+}

@@ -37,6 +37,12 @@ const statePath = () => path.join(lndDir(), ".channel-backup-state.json");
 const restoreDir = () => path.join(lndDir(), ".channel-backup-restore");
 const backupPath = () => constants.CHANNEL_BACKUP_FILE || path.join(lndDir(), "data/chain/bitcoin/mainnet/channel.backup");
 
+// The bridge's SHA256 node, which this app runs beside LND (sha256-lnd), and
+// the second agent that copies its channel.backup to the same targets.
+const sha256Dir = () => process.env.SHA256_LND_DIR || path.join(lndDir(), "sha256-node");
+const sha256BackupPath = () => path.join(sha256Dir(), "data/chain/bitcoin/mainnet/channel.backup");
+const sha256StatePath = () => path.join(lndDir(), ".channel-backup-sha256-state.json");
+
 // ---------- the configuration file
 
 function emptyOauth() {
@@ -573,8 +579,12 @@ async function saveProviderNow(provider, input) {
 // exits 7. Null until LND answers getinfo, which needs an unlocked wallet.
 const PUBKEY = /^0[23][0-9a-f]{64}$/;
 let pubkeySource = async () => (await require("services/lnd.js").getInfo()).identityPubkey;
+let sha256PubkeySource = async () => require("./bridgeOperator.js").instance().sha256Pubkey();
 const PUBKEY_TIMEOUT_MS = 10 * 1000;
-async function nodePubkey() {
+function nodePubkey() {
+  return pubkeyFrom(pubkeySource);
+}
+async function pubkeyFrom(source) {
   try {
     // Bounded: a hung LND must not hold up the runs queued behind this.
     let timer;
@@ -582,7 +592,7 @@ async function nodePubkey() {
       timer = setTimeout(() => reject(new Error("getinfo timed out")), PUBKEY_TIMEOUT_MS);
       timer.unref();
     });
-    const key = String((await Promise.race([pubkeySource(), timeout]).finally(() => clearTimeout(timer))) || "").toLowerCase();
+    const key = String((await Promise.race([source(), timeout]).finally(() => clearTimeout(timer))) || "").toLowerCase();
     return PUBKEY.test(key) ? key : null;
   } catch (error) {
     return null;
@@ -591,6 +601,10 @@ async function nodePubkey() {
 // For tests: where the pubkey comes from.
 function setPubkeySource(fn) {
   pubkeySource = fn;
+}
+
+function setSha256PubkeySource(fn) {
+  sha256PubkeySource = fn;
 }
 
 // Only what the agent needs: the rest of this process's environment holds
@@ -636,9 +650,9 @@ async function runAgentNow(args, timeoutMs) {
   });
 }
 
-function readState() {
+function readState(file = statePath()) {
   try {
-    const s = JSON.parse(fs.readFileSync(statePath(), "utf8"));
+    const s = JSON.parse(fs.readFileSync(file, "utf8"));
     return {
       attempt: Number(s.attempt) || 0,
       lastSuccess: typeof s.lastSuccess === "number" ? s.lastSuccess : null,
@@ -659,6 +673,20 @@ function status() {
     backupMtime = null;
   }
   return {targets, hasBackup: backupMtime !== null, backupMtime, state: readState()};
+}
+
+// The same, for the bridge's SHA256 node's copy.
+function sha256Status() {
+  const cfg = readConfig();
+  const targets = PROVIDERS.filter(p => cfg[p] && cfg[p].enabled).map(p => ({provider: p, ready: ready(p, cfg[p])}));
+  const hasBackup = (() => {
+    try {
+      return fs.statSync(sha256BackupPath()).size > 0;
+    } catch (error) {
+      return false;
+    }
+  })();
+  return {targets, hasBackup, state: readState(sha256StatePath())};
 }
 
 async function backupNow() {
@@ -736,77 +764,126 @@ function pulledBackup(provider) {
 // period that it cannot copy; restarted if it ever exits, or when the
 // identity appears or changes under it (a wallet created again without
 // restarting the app). Ended with the process.
-let watcher = null;
-let watcherWanted = false;
-let identityTimer = null;
-function startWatcher(log = m => console.log(`[channel-backup] ${m}`), {retryMs = WATCHER_RESTART_MS, checkMs = IDENTITY_CHECK_MS} = {}) {
-  watcherWanted = true;
-  let waiting = false;
-  const launch = async () => {
-    if (!watcherWanted || watcher) {
-      return;
-    }
-    const pubkey = await nodePubkey();
-    if (!watcherWanted || watcher) {
-      return;
-    }
-    // Started without the identity too: the agent then copies nothing but
-    // records, after its grace period, that it cannot, so the status does
-    // not keep showing an old copy as current. check() restarts it with the
-    // identity once LND reports it.
-    if (!pubkey && !waiting) {
-      log("waiting for LND to report the node's identity");
-      waiting = true;
-    }
-    if (pubkey) {
-      waiting = false;
-    }
-    const child = spawn("sh", [constants.BACKUP_AGENT], {env: agentEnv(pubkey), stdio: ["ignore", "inherit", "inherit"]});
-    child.pubkey = pubkey;
-    watcher = child;
-    child.on("exit", code => {
-      if (watcher === child) {
-        watcher = null;
+//
+// One per node: LND's, and the bridge's SHA256 node's (the same agent with
+// that node's file, identity and state).
+function createWatcher({identity, env = () => ({})}) {
+  let watcher = null;
+  let watcherWanted = false;
+  let identityTimer = null;
+  function start(log = m => console.log(`[channel-backup] ${m}`), {retryMs = WATCHER_RESTART_MS, checkMs = IDENTITY_CHECK_MS} = {}) {
+    watcherWanted = true;
+    let waiting = false;
+    const launch = async () => {
+      if (!watcherWanted || watcher) {
+        return;
       }
-      if (watcherWanted) {
-        log(`watcher exited (${code}); restarting in ${retryMs / 1000}s`);
-        setTimeout(launch, retryMs).unref();
+      const pubkey = await identity();
+      if (!watcherWanted || watcher) {
+        return;
       }
-    });
-    child.on("error", error => log(`watcher could not start: ${error.message}`));
-  };
-  const check = async () => {
-    const running = watcher;
-    if (!running) {
-      return;
+      // Started without the identity too: the agent then copies nothing but
+      // records, after its grace period, that it cannot, so the status does
+      // not keep showing an old copy as current. check() restarts it with the
+      // identity once LND reports it.
+      if (!pubkey && !waiting) {
+        log("waiting for LND to report the node's identity");
+        waiting = true;
+      }
+      if (pubkey) {
+        waiting = false;
+      }
+      const child = spawn("sh", [constants.BACKUP_AGENT], {env: {...agentEnv(pubkey), ...env()}, stdio: ["ignore", "inherit", "inherit"]});
+      child.pubkey = pubkey;
+      watcher = child;
+      child.on("exit", code => {
+        if (watcher === child) {
+          watcher = null;
+        }
+        if (watcherWanted) {
+          log(`watcher exited (${code}); restarting in ${retryMs / 1000}s`);
+          setTimeout(launch, retryMs).unref();
+        }
+      });
+      child.on("error", error => log(`watcher could not start: ${error.message}`));
+    };
+    const check = async () => {
+      const running = watcher;
+      if (!running) {
+        return;
+      }
+      const pubkey = await identity();
+      if (pubkey && pubkey !== running.pubkey && watcher === running) {
+        log("the node's identity changed; restarting the watcher");
+        running.kill("SIGTERM");
+      }
+    };
+    clearInterval(identityTimer);
+    identityTimer = setInterval(check, checkMs);
+    identityTimer.unref();
+    launch();
+    return stop;
+  }
+  function stop() {
+    watcherWanted = false;
+    clearInterval(identityTimer);
+    identityTimer = null;
+    if (watcher) {
+      watcher.kill("SIGTERM");
     }
-    const pubkey = await nodePubkey();
-    if (pubkey && pubkey !== running.pubkey && watcher === running) {
-      log("the node's identity changed; restarting the watcher");
-      running.kill("SIGTERM");
-    }
-  };
-  clearInterval(identityTimer);
-  identityTimer = setInterval(check, checkMs);
-  identityTimer.unref();
-  launch();
-  return stopWatcher;
+  }
+  return {start, stop};
 }
 
+const lndWatcher = createWatcher({identity: () => nodePubkey()});
+function startWatcher(log, opts) {
+  return lndWatcher.start(log, opts);
+}
 function stopWatcher() {
-  watcherWanted = false;
-  clearInterval(identityTimer);
-  identityTimer = null;
-  if (watcher) {
-    watcher.kill("SIGTERM");
+  lndWatcher.stop();
+}
+
+// The SHA256 node's, started once that node exists: nothing runs for it on
+// an install that never ran a bridge.
+const sha256Watcher = createWatcher({
+  identity: () => pubkeyFrom(sha256PubkeySource),
+  env: () => ({
+    CHANNEL_BACKUP_FILE: sha256BackupPath(),
+    BACKUP_STATE_FILE: sha256StatePath(),
+    BACKUP_LOCK_FILE: path.join(lndDir(), ".channel-backup-sha256.lock"),
+    BACKUP_RESTORE_DIR: path.join(lndDir(), ".channel-backup-sha256-restore"),
+    BACKUP_WORK_DIR: "/tmp/lnd-channel-backup-sha256",
+    BACKUP_LOG_TAG: "sha256-channel-backup",
+  }),
+});
+let sha256Waiter = null;
+function startSha256Watcher(log = m => console.log(`[sha256-channel-backup] ${m}`), {pollMs = IDENTITY_CHECK_MS, ...opts} = {}) {
+  const tryStart = () => {
+    if (fs.existsSync(sha256Dir())) {
+      clearInterval(sha256Waiter);
+      sha256Waiter = null;
+      sha256Watcher.start(log, opts);
+      return true;
+    }
+    return false;
+  };
+  if (!tryStart()) {
+    sha256Waiter = setInterval(tryStart, pollMs);
+    sha256Waiter.unref();
   }
+  return stopSha256Watcher;
+}
+function stopSha256Watcher() {
+  clearInterval(sha256Waiter);
+  sha256Waiter = null;
+  sha256Watcher.stop();
 }
 
 module.exports = {
   PROVIDERS, DEFAULT_FOLDER, InputError,
   readConfig, publicConfig, ready, saveProvider, authUrl, exchangeCode, extractAuthCode, tokenFromRefresh,
-  status, readState, backupNow, pull, pulledBackup, startWatcher, stopWatcher,
+  status, sha256Status, readState, backupNow, pull, pulledBackup, startWatcher, stopWatcher, startSha256Watcher, stopSha256Watcher,
   // for tests
   folder, port, line, normalizeKeyPem, scanHostKeys, validateConfig, rejectLocalOrOnion, hostOf,
-  setPubkeySource, nodePubkey, nextcloudDavUrl, completeSavedNextcloud,
+  setPubkeySource, setSha256PubkeySource, nodePubkey, nextcloudDavUrl, completeSavedNextcloud,
 };

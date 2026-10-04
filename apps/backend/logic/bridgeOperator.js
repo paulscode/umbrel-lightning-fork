@@ -347,6 +347,27 @@ function channelList(open, pending) {
   return out;
 }
 
+// The SHA256 node's channel backup copy, as the window says it: off (no
+// target), none yet, failing (with what), or when it was last copied.
+function sha256BackupView(st) {
+  if (!st) {
+    return null;
+  }
+  if (!st.targets || !st.targets.length) {
+    return { state: "off" };
+  }
+  if (st.state && st.state.failures && st.state.failures.length) {
+    return {
+      state: "failing",
+      detail: st.state.failures.map((f) => `${f.target}: ${f.code}${f.detail ? ` (${f.detail})` : ""}`).join("; "),
+    };
+  }
+  if (st.state && st.state.lastSuccess) {
+    return { state: "copied", at: st.state.lastSuccess };
+  }
+  return { state: st.hasBackup ? "pending" : "none" };
+}
+
 function freshRootKeyId(used, random = randomBytes) {
   const taken = new Set(used.map(String));
   const span = 2n ** 63n - 1n - FIRST_PARTICIPANT_ROOT_KEY_ID;
@@ -370,6 +391,7 @@ function createBridgeOperator({
   bridgeSwitch = null,        // logic/bridgeSwitch.js, where the page is the switch
   sha256Explorer = null,      // where links to the SHA256 chain go (logic/mempool.js)
   sha256RestorePending = async () => false, // its channel backup and no wallet
+  sha256BackupStatus = () => null, // its channel backup's copy off the box (Umbrel)
   now = () => Date.now() / 1000,
 }) {
   async function status() {
@@ -408,6 +430,19 @@ function createBridgeOperator({
         peers: int(info.num_peers),
         version: info.version || "",
       };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // The SHA256 node's identity, for its channel backup's folder; null when
+  // it does not answer.
+  async function sha256Pubkey() {
+    if (!sha256Node) {
+      return null;
+    }
+    try {
+      return (await sha256Node("GET", "/v1/getinfo")).identity_pubkey || null;
     } catch (_) {
       return null;
     }
@@ -526,6 +561,9 @@ function createBridgeOperator({
       // Restored from a backup with the bridge off: its channels wait for
       // the bridge to be turned on, which recreates its wallet.
       sha256RestorePending: !!restorePending && !idle,
+      sha256Backup: s.sha256Node && (s.sha256Node.mode === "supervised" || s.sha256Node.mode === "idle")
+        ? sha256BackupView(sha256BackupStatus())
+        : null,
       steps: s.enabled ? checklist(s, { participants: people ? people.length : null, now, serving }) : [],
     };
   }
@@ -780,7 +818,7 @@ function createBridgeOperator({
     return { revoked: rootKeyId };
   }
 
-  return { overview, status, setRate, depositAddress, openChannel, channels, closeChannel, withdraw, recoveryPhrase, channelBackup, issueCode, revokeCode, participants, idleNode, unfinished };
+  return { overview, status, sha256Pubkey, setRate, depositAddress, openChannel, channels, closeChannel, withdraw, recoveryPhrase, channelBackup, issueCode, revokeCode, participants, idleNode, unfinished };
 }
 
 // The instance the routes use, from the environment.
@@ -840,6 +878,8 @@ function instance() {
       const exists = (f) => fs.promises.stat(path.join(dataDir, f)).then((st) => st.size > 0, () => false);
       return (await exists("channel.backup")) && !(await exists("wallet.db"));
     },
+    // On StartOS the package copies it and says so in its health check.
+    sha256BackupStatus: constants.IS_STARTOS ? () => null : () => require("./channelBackup.js").sha256Status(),
   });
   return singleton;
 }
@@ -854,6 +894,7 @@ module.exports = {
   parsePeer,
   fundingTxid,
   channelList,
+  sha256BackupView,
   freshRootKeyId,
   lndMessage,
   instance,
