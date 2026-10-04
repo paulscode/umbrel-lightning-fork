@@ -5,10 +5,15 @@ const parse = (lndConfigString) => {
   const lines = lndConfigString.split(/\r?\n/).filter(line => line.trim() !== '');
   
   const configObject = {};
-  for (const line of lines) {
+  for (const raw of lines) {
+    const line = raw.trim();
     if (line.startsWith('#') || line.startsWith(';') || line.startsWith('[')) continue;
+    // a line that sets nothing (lnd itself would refuse it)
+    if (!line.includes('=')) continue;
     // only split on the first "=", to allow for "=" in values (e.g., alias=my node = awesome)
-    const [key, value] = line.split(/=(.*)/);
+    // keys trimmed too: "bridgerpc.enabled = true" is the key lnd reads
+    const [rawKey, value] = line.split(/=(.*)/);
+    const key = rawKey.trim();
     if (MULTILINE_KEYS.includes(key)) {
       if (! (key in configObject)) {
         configObject[key] = [];

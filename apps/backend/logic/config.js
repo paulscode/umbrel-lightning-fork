@@ -21,35 +21,78 @@ const deriveConfigObject = (userLndConfigObject, configObject) => {
   return mergeWith({}, DEFAULT_CONFIG, userLndConfigObject, configObject, mergeArraysAndRemoveDuplicates);
 }
 
+// The bridge's lines in umbrel-lnd.conf, from settings.json's `bridge`
+// section. Kept apart from `lnd`, which is Advanced Settings' and is replaced
+// whole whenever that form is saved, and added after everything else so a
+// stray line in lnd.conf cannot turn the bridge on or off. On: the bridge, in
+// the direction that pays SHA256 invoices, through the SHA256 node this app
+// runs for it (sha256-lnd in docker-compose.yml), at the address the app
+// gives it (BRIDGE_SHA256_RPCHOST; Lightning Fork's default otherwise).
+function bridgeConfig(bridge, rpchost = process.env.BRIDGE_SHA256_RPCHOST) {
+  if (!bridge || bridge.enabled !== true) {
+    return {};
+  }
+  return {
+    'bridgerpc.enabled': true,
+    'bridgerpc.tosha256': true,
+    'bridgerpc.sha256.supervised': true,
+    ...(rpchost ? {'bridgerpc.sha256.rpchost': rpchost} : {}),
+  };
+}
+
+async function readBridgeSettings() {
+  if (!(await diskService.fileExists(constants.JSON_SETTINGS_FILE))) {
+    return {};
+  }
+  const settings = await diskService.readJsonFile(constants.JSON_SETTINGS_FILE);
+  return (settings && settings.bridge) || {};
+}
+
 // take in a config object and return and lnd.conf string
 // whereby the umbrel json store has higher precedence
 // but we keep the unmanaged LND conf
-const deriveConfigFile = async (configObject) => {
+const deriveConfigFile = async (configObject, bridge = {}) => {
   let userLndConfig = {};
   
   if (await diskService.fileExists(constants.LND_CONF_FILEPATH)) {
     const userLndConfFile = await diskService.readUtf8File(constants.LND_CONF_FILEPATH);
     userLndConfig = lndConfig.parse(userLndConfFile);
   }
+  // Once the switch has been used, whether the bridge is on and which node
+  // it pays through are the switch's. Until then lnd.conf's own bridgerpc
+  // lines stand: that is how a bridge through an operator's own LND is set up
+  // here. Tuning (spread, limits) stays lnd.conf's either way.
+  if (typeof bridge.enabled === 'boolean') {
+    for (const key of Object.keys(userLndConfig)) {
+      if (key === 'bridgerpc.enabled' || key.startsWith('bridgerpc.sha256.')) {
+        delete userLndConfig[key];
+      }
+    }
+  }
 
-  const derivedConfigObject = deriveConfigObject(userLndConfig, configObject);
+  const derivedConfigObject = {...deriveConfigObject(userLndConfig, configObject), ...bridgeConfig(bridge)};
 
   return lndConfig.generate(derivedConfigObject);
 }
 
 // writes umbrel-lnd.conf and settings.json to disk
 // pass this function DEFAULT_CONFIG to reset the config to defaults
-async function writeLndConfig(configObject) {
-  const lndConfigString = await deriveConfigFile(configObject);
+// The bridge section is carried over unless a new one is given.
+async function writeLndConfig(configObject, bridge) {
+  const bridgeSettings = bridge === undefined ? await readBridgeSettings() : bridge;
+  const lndConfigString = await deriveConfigFile(configObject, bridgeSettings);
   await Promise.all([
     diskService.writePlainTextFile(constants.UMBREL_LND_CONF_FILEPATH, lndConfigString),
-    diskService.writeJsonFile(constants.JSON_SETTINGS_FILE, {lnd: Object.keys(configObject).length > 0 ? configObject : DEFAULT_CONFIG})
+    diskService.writeJsonFile(constants.JSON_SETTINGS_FILE, {
+      lnd: Object.keys(configObject).length > 0 ? configObject : DEFAULT_CONFIG,
+      ...(Object.keys(bridgeSettings).length > 0 ? {bridge: bridgeSettings} : {}),
+    })
   ]);
 }
 
 // checks to see if we need to regenerate umbrel-lnd.conf and/or settings.json on app start
 async function isUmbrelLndConfUpToDate(config) {
-  const newLndConfigString = await deriveConfigFile(config);
+  const newLndConfigString = await deriveConfigFile(config, await readBridgeSettings());
 
   let existingLndConfigString = await diskService.fileExists(constants.UMBREL_LND_CONF_FILEPATH)
                                 ? await diskService.readUtf8File(constants.UMBREL_LND_CONF_FILEPATH)
@@ -81,5 +124,7 @@ async function getManagedSettingsFromLndConf() {
 module.exports = {
   writeLndConfig,
   isUmbrelLndConfUpToDate,
+  readBridgeSettings,
+  bridgeConfig,
   getConfig
 }

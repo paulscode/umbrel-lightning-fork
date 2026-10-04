@@ -93,6 +93,9 @@
             <b-dropdown-item href="#" v-b-modal.bitcoin-invoices-modal
               >Paying SHA256 invoices</b-dropdown-item
             >
+            <b-dropdown-item href="#" v-b-modal.bridge-modal
+              >Run a bridge</b-dropdown-item
+            >
             <!-- On StartOS the service's interfaces, actions and backups
                  cover these, so the dashboard keeps to the node itself. -->
             <b-dropdown-item v-if="!isStartOS" href="#" v-b-modal.connect-wallet-modal @click="getLndConnectUrls"
@@ -358,6 +361,7 @@
     <mobile-app-modal />
     <mempool-modal />
     <bitcoin-invoices-modal />
+    <bridge-modal />
     <secret-words-modal v-if="!isStartOS" />
     <connect-wallet-modal v-if="!isStartOS" />
     <channel-backup-modal
@@ -386,6 +390,7 @@ import PeersModal from "@/views/Home/PeersModal";
 import MobileAppModal from "@/views/Home/MobileAppModal";
 import MempoolModal from "@/views/Home/MempoolModal";
 import BitcoinInvoicesModal from "@/views/Home/BitcoinInvoicesModal";
+import BridgeModal from "@/views/Home/BridgeModal";
 import ChannelManage from "@/components/Channels/Manage";
 
 import AdvancedSettingsModal from "./AdvancedSettingsModal.vue";
@@ -698,6 +703,7 @@ export default {
     MobileAppModal,
     MempoolModal,
     BitcoinInvoicesModal,
+    BridgeModal,
     AdvancedSettingsModal,
     NodeIdModal,
     SecretWordsModal,
