@@ -195,9 +195,9 @@ function createMempool({
     if (app && (await chainOf(app)) === "other") {
       throw badRequest(
         `${app.name} follows the other chain, not the BLAKE2b one: its ` +
-          "fee rates and transaction links would be Bitcoin's. It is " +
-          "connected to a Bitcoin node that has not upgraded; point it at " +
-          "a BLAKE2b node, or choose another app."
+          "fee rates and transaction links would be the SHA256 chain's. " +
+          "It is connected to a node on the SHA256 chain; point it at a " +
+          "node on the BLAKE2b chain, or choose another app."
       );
     }
     await store.write({ mempoolApp: id });
@@ -222,7 +222,7 @@ function createMempool({
   // explorer setting, which the page resolves to a port on its own host.
   async function explorer() {
     const app = findApp(await selectedId());
-    // Links into an app on the other chain would show Bitcoin's version of
+    // Links into an app on the other chain would show that chain's version of
     // a transaction, or none: fall back as if no app were chosen.
     if (app && (await chainOf(app)) !== "other") {
       return {

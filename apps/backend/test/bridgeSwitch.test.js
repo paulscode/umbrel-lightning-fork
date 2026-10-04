@@ -210,17 +210,18 @@ test("while on, the node in use is kept current, and stopped when it leaves the 
   const { sw, state } = harness({ nodes, settings: { lnd: LND, bridge: { enabled: true, sha256Node: "bitcoin-knots" } } });
 
   // Restored elsewhere: no config file. Written again.
-  assert.equal(await sw.reconcile(), "");
+  assert.equal((await sw.reconcile()).text, "");
   assert.match(state.conf, /10\.21\.21\.7:9332/);
   const writes = state.confs.length;
-  assert.equal(await sw.reconcile(), "");
+  assert.equal((await sw.reconcile()).text, "");
   assert.equal(state.confs.length, writes, "unchanged is left alone");
 
   // Bitcoin Knots switched to a BLAKE2b version in its own settings.
   byHost["10.21.21.7"].hash = ACT.hash;
   await nodes.survey({ fresh: true });
   const problem = await sw.reconcile();
-  assert.match(problem, /stopped rather than follow it/);
+  assert.match(problem.text, /stopped rather than follow it/);
+  assert.equal(problem.blocks, true);
   assert.equal(state.conf, null, "the SHA256 node no longer reads it");
   assert.match((await sw.info()).problem, /Bitcoin Knots is on the BLAKE2b chain now/);
 
@@ -231,14 +232,44 @@ test("while on, the node in use is kept current, and stopped when it leaves the 
   delete byHost["10.21.21.7"];
   await nodes.survey({ fresh: true });
   const before = state.conf;
-  assert.match(await sw.reconcile(), /not answering/);
+  const quiet = await sw.reconcile();
+  assert.match(quiet.text, /not answering/);
+  assert.equal(quiet.blocks, false);
   assert.equal(state.conf, before);
 });
 
-test("nothing is reconciled while the bridge is off", async () => {
-  const { sw, state } = harness({ settings: { lnd: LND, bridge: { enabled: false, sha256Node: "paulscode-knots-sha256" } } });
-  assert.equal(await sw.reconcile(), "");
-  assert.equal(state.confs.length, 0);
+test("off, a node never started is left alone, and one still running is kept right", async () => {
+  const fresh = harness({ settings: { lnd: LND, bridge: { enabled: false, sha256Node: "paulscode-knots-sha256" } } });
+  assert.equal((await fresh.sw.reconcile()).text, "");
+  assert.equal(fresh.state.confs.length, 0, "no config is made for a bridge that is off");
+
+  // Off after being on: the SHA256 node goes on running on its config, and
+  // a node that has left the SHA256 chain is still not followed.
+  const byHost = { "10.21.21.7": { hash: ACT.hash } };
+  const ran = harness({ nodes: fakeNodes(KNOTS, byHost), settings: { lnd: LND, bridge: { enabled: false, sha256Node: "bitcoin-knots" } } });
+  ran.state.conf = "old";
+  assert.match((await ran.sw.reconcile()).text, /stopped rather than follow it/);
+  assert.equal(ran.state.conf, null);
+});
+
+test("a chosen node that is uninstalled stops being read", async () => {
+  const { sw, state } = harness({ nodes: fakeNodes("", {}), settings: { lnd: LND, bridge: { enabled: true, sha256Node: "bitcoin-knots" } } });
+  state.conf = "old";
+  const p = await sw.reconcile();
+  assert.match(p.text, /no longer installed/);
+  assert.equal(p.blocks, true);
+  assert.equal(state.conf, null);
+});
+
+test("a reconcile cannot slip between choosing a node and saving the choice", async () => {
+  const byHost = { "10.21.21.64": { hash: SHA }, "10.21.21.7": { hash: SHA } };
+  const { sw, state } = harness({
+    nodes: fakeNodes(`${COMPANION};${KNOTS}`, byHost),
+    settings: { lnd: LND, bridge: { enabled: true, sha256Node: "paulscode-knots-sha256" } },
+  });
+  await Promise.all([sw.set(true, "bitcoin-knots"), sw.reconcile(), sw.reconcile()]);
+  assert.equal(state.settings.bridge.sha256Node, "bitcoin-knots");
+  assert.match(state.conf, /10\.21\.21\.7:9332/, "the new node, not the old one put back");
 });
 
 test("the node is not changed under unfinished payments", async () => {

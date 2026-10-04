@@ -55,10 +55,14 @@ router.post("/rate", handle((req) => {
 }));
 
 router.post("/sha256/address", handle(() => logic().depositAddress()));
-router.post("/sha256/channel", handle((req) => logic().openChannel({
-  peer: body(req).peer,
-  amountSat: body(req).amountSat,
-})));
+// JSON numbers only, as /rate: a form post from a page elsewhere carries
+// strings, and this one spends the SHA256 node's coins.
+router.post("/sha256/channel", handle((req) => {
+  if (typeof body(req).amountSat !== "number" || typeof body(req).peer !== "string") {
+    throw new ValidationError("Give the peer as text and the amount as a number of sats.", 400);
+  }
+  return logic().openChannel({ peer: body(req).peer, amountSat: body(req).amountSat });
+}));
 
 // The SHA256 node's recovery phrase. A POST, and only when the request says
 // it knows what it is asking for, so a stray GET or a prefetch never puts it
@@ -90,7 +94,9 @@ router.delete("/participants/:rootKeyId", handle((req) => logic().revokeCode(req
 // whether or not this page is open: soon after start (a restore, a
 // reinstalled node), then every few minutes (Bitcoin Knots switched chain).
 // Nothing happens on a node that does not bridge, or on StartOS.
-if (process.env.BRIDGE_SHA256_NODES) {
+// Every Umbrel install: a chosen node can be uninstalled, leaving the list
+// empty and the SHA256 node pointed at nothing.
+if (process.env.DASHBOARD_PLATFORM !== "startos") {
   const keep = () => bridgeSwitch.instance().reconcile().catch(() => {});
   setTimeout(keep, 30 * 1000).unref();
   setInterval(keep, 5 * 60 * 1000).unref();

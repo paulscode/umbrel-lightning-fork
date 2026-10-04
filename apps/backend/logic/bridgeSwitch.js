@@ -16,7 +16,8 @@ const { ValidationError } = require("../models/errors.js");
 const { confFor } = require("./sha256Nodes.js");
 
 const RESTART_REFUSED = "Lightning Fork is almost ready, please wait a few seconds and try again.";
-const NONE_INSTALLED = "The bridge's SHA256 node reads a full node on the SHA256 chain, and none is installed. Install Knots (SHA256) Companion from the PaulsCode.Com app store and let it sync, then restart Lightning Fork (so it finds it) and turn the bridge on here.";
+const RESTART_APP = "restart the Lightning Fork app (on the Umbrel home screen, right-click its icon, then Restart) so it finds it";
+const NONE_INSTALLED = `The bridge's SHA256 node reads a full node on the SHA256 chain, and none is installed. Install Knots (SHA256) Companion from the PaulsCode.Com app store and let it sync, then ${RESTART_APP}, and turn the bridge on here.`;
 
 // Why no installed node can be used, in a sentence.
 function unavailableSentence(list) {
@@ -24,7 +25,7 @@ function unavailableSentence(list) {
     return NONE_INSTALLED;
   }
   const why = list.map((n) => `${n.name}: ${n.detail}`).join("; ");
-  let todo = "Install Knots (SHA256) Companion from the PaulsCode.Com app store and let it sync, then restart Lightning Fork (so it finds it).";
+  let todo = `Install Knots (SHA256) Companion from the PaulsCode.Com app store and let it sync, then ${RESTART_APP}.`;
   if (list.some((n) => n.state === "behind")) {
     todo = "Wait for it to sync, then try again.";
   } else if (list.some((n) => n.state === "unreachable")) {
@@ -51,6 +52,16 @@ function createBridgeSwitch({
 }) {
   const umbrel = platform !== "startos";
 
+  // set and reconcile both write the SHA256 node's config: one at a time,
+  // so a reconcile between set's writing the new node and saving the choice
+  // cannot put the old one back.
+  let queue = Promise.resolve();
+  function serial(fn) {
+    const run = queue.then(fn);
+    queue = run.catch(() => {});
+    return run;
+  }
+
   async function bridgeSettings() {
     const settings = (await readSettings()) || {};
     return settings.bridge || {};
@@ -67,33 +78,48 @@ function createBridgeSwitch({
   // is removed, which stops the SHA256 node, rather than let it follow the
   // wrong chain with live channels. Returns what is wrong, or "".
   async function reconcile(list = null) {
+    return serial(() => reconcileNow(list));
+  }
+
+  async function reconcileNow(list) {
     if (!umbrel || !sha256Nodes) {
-      return "";
+      return { text: "", blocks: false };
     }
     const bridge = await bridgeSettings();
-    if (bridge.enabled !== true || !bridge.sha256Node) {
-      return "";
+    if (!bridge.sha256Node) {
+      return { text: "", blocks: false };
+    }
+    // Off, the SHA256 node goes on running on what it was given (it may
+    // hold channels), so what it reads is kept right then too; but with
+    // no config there is nothing running to keep.
+    if (bridge.enabled !== true && (await readSha256Conf()) === null) {
+      return { text: "", blocks: false };
     }
     const seen = (list || (await survey())).find((n) => n.id === bridge.sha256Node);
     const node = sha256Nodes.byId(bridge.sha256Node);
     if (!seen || !node) {
-      return `The node the bridge's node reads (${bridge.sha256Node}) is no longer installed. Choose another below, or reinstall it.`;
+      // Uninstalled: nothing to read; stop the node rather than let it
+      // retry a node that is gone.
+      if ((await readSha256Conf()) !== null) {
+        await removeSha256Conf();
+      }
+      return { text: `The node the bridge's node read is no longer installed, so the bridge's node is stopped. ${bridge.enabled === true ? "Choose another below, or reinstall it." : "Reinstall it, or choose another when you turn the bridge on."}`, blocks: true };
     }
     if (seen.state === "sha256") {
       const want = confFor(node);
       if ((await readSha256Conf()) !== want) {
         await writeSha256Conf(want);
       }
-      return "";
+      return { text: "", blocks: false };
     }
     if (["blake2b", "other-chain", "other-network", "lightning-fork"].includes(seen.state)) {
       if ((await readSha256Conf()) !== null) {
         await removeSha256Conf();
       }
-      return `${seen.name} is ${seen.detail} now, so the bridge's node has been stopped rather than follow it. Choose a node on the SHA256 chain below, or put ${seen.name} back on it.`;
+      return { text: `${seen.name} is ${seen.detail} now, so the bridge's node has been stopped rather than follow it. Choose a node on the SHA256 chain, or put ${seen.name} back on it.`, blocks: true };
     }
     // Behind or not answering: nothing to change, only to say.
-    return `${seen.name}: ${seen.detail}.`;
+    return { text: `${seen.name}: ${seen.detail}.`, blocks: false };
   }
 
   async function info() {
@@ -102,7 +128,7 @@ function createBridgeSwitch({
     }
     const bridge = await bridgeSettings();
     const list = await survey();
-    const problem = await reconcile(list).catch((error) => `Could not check the bridge's node: ${error.message}`);
+    const problem = await reconcile(list).catch((error) => ({ text: `Could not check the bridge's node: ${error.message}`, blocks: false }));
     const chosen = sha256Nodes ? sha256Nodes.pick(list, bridge.sha256Node) : null;
     return {
       on: bridge.enabled === true,
@@ -110,7 +136,8 @@ function createBridgeSwitch({
       // The node in use while on; the one that would be used otherwise.
       chosen: chosen ? chosen.id : null,
       inUse: bridge.enabled === true ? bridge.sha256Node || null : null,
-      problem,
+      problem: problem.text,
+      problemBlocks: problem.blocks,
       available: !!chosen,
       unavailable: chosen ? "" : unavailableSentence(list),
       backend: chosen ? chosen.name : "",
@@ -134,6 +161,10 @@ function createBridgeSwitch({
   }
 
   async function set(enabled, nodeId = null) {
+    return serial(() => setNow(enabled, nodeId));
+  }
+
+  async function setNow(enabled, nodeId) {
     if (!umbrel) {
       throw new ValidationError("On StartOS, turn the bridge on and off with the Bridge action.", 409);
     }

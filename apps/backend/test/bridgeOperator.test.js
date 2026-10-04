@@ -397,7 +397,7 @@ test("on StartOS codes are the package's to issue and revoke", async () => {
   assert.equal(o.manageParticipants, false);
   assert.equal(o.canIssueCodes, false);
   assert.equal(o.participants.length, 1, "still listed and counted");
-  await assert.rejects(op.issueCode("Alice"), /Bridge Code/);
+  await assert.rejects(op.issueCode("Alice"), /Add Bridge Participant/);
   await assert.rejects(op.revokeCode("5000"), /Remove Bridge Participant/);
   assert.ok(!lf.calls.some((c) => c.method !== "GET"), "nothing baked or deleted");
 
@@ -522,4 +522,30 @@ test("codes issued at once all keep their names", async () => {
     assert.equal(saved[i.rootKeyId].label, i.label);
   }
   assert.equal(n, 4);
+});
+
+test("the recovery answer carries the words and identity, not the root key", async () => {
+  const op = createBridgeOperator({
+    lightningFork: fakeNode({ "POST /v2/bridge/sha256seed": { mnemonic: ["abandon"], extended_master_key: "xprv9s21", identity_pubkey: NODE, birthday: "1", derivation: "x" } }),
+  });
+  const r = await op.recoveryPhrase();
+  assert.deepEqual(r, { mnemonic: ["abandon"], identityPubkey: NODE });
+  assert.doesNotMatch(JSON.stringify(r), /xprv/);
+});
+
+test("Lightning Fork not answering is a sentence, not a raw error", async () => {
+  const op = createBridgeOperator({ lightningFork: fakeNode({}), sha256Node: fakeNode({}) });
+  await assert.rejects(op.depositAddress(), (e) => e.statusCode === 503 && /not answering/.test(e.message));
+  const lf = fakeNode({ "GET /v1/getinfo": () => { throw new Error("connect ECONNREFUSED 127.0.0.1:8080"); } });
+  const codes = createBridgeOperator({ lightningFork: lf, participantUrl: "https://x.onion:8080" });
+  await assert.rejects(codes.issueCode("Al"), (e) => e.statusCode === 502 && /did not make the code/.test(e.message));
+});
+
+test("a node restored with the bridge off is said to have channels to recover", async () => {
+  const op = createBridgeOperator({
+    lightningFork: fakeNode({ "GET /v2/bridge/status": { enabled: false } }),
+    sha256Node: fakeNode({}),
+    sha256RestorePending: async () => true,
+  });
+  assert.equal((await op.overview()).sha256RestorePending, true);
 });

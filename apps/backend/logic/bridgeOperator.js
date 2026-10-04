@@ -264,6 +264,7 @@ function createBridgeOperator({
   platform = "umbrel",
   bridgeSwitch = null,        // logic/bridgeSwitch.js, where the page is the switch
   sha256Explorer = null,      // where links to the SHA256 chain go (logic/mempool.js)
+  sha256RestorePending = async () => false, // its channel backup and no wallet
   now = () => Date.now() / 1000,
 }) {
   async function status() {
@@ -314,7 +315,12 @@ function createBridgeOperator({
     if (!sha256Node) {
       return false;
     }
-    const s = await status();
+    let s;
+    try {
+      s = await status();
+    } catch (_) {
+      throw new ValidationError("Lightning Fork is not answering about the bridge yet. It may be starting up.", 503);
+    }
     if (s.sha256Node && s.sha256Node.mode === "supervised") {
       return true;
     }
@@ -364,13 +370,14 @@ function createBridgeOperator({
   // fails on its own, so the page always has the parts it can.
   async function overview() {
     const s = await status();
-    const [infoRes, market, people, toggle, idle, explorer] = await Promise.all([
+    const [infoRes, market, people, toggle, idle, explorer, restorePending] = await Promise.all([
       s.enabled ? lightningFork("GET", "/v2/bridge/info").catch(() => null) : null,
       s.enabled && reference ? reference.get().catch(() => null) : null,
       s.enabled ? participants() : null,
       bridgeSwitch ? bridgeSwitch.info().catch(() => null) : null,
       s.enabled ? null : idleNode(),
       sha256Explorer ? sha256Explorer().catch(() => null) : null,
+      s.enabled ? false : sha256RestorePending().catch(() => false),
     ]);
     if (idle) {
       s.sha256Node = idle;
@@ -405,8 +412,15 @@ function createBridgeOperator({
       // their names; two lists would drift apart.
       manageParticipants: platform !== "startos",
       canIssueCodes: platform !== "startos" && !!participantUrl,
+      // Not while the node it reads is in doubt (left the SHA256 chain,
+      // uninstalled): an address or channel there could be on the wrong
+      // chain.
       canManageSha256Node: !!sha256Node && !!s.sha256Node &&
-        (s.sha256Node.mode === "supervised" || s.sha256Node.mode === "idle"),
+        (s.sha256Node.mode === "supervised" || s.sha256Node.mode === "idle") &&
+        !(toggle && toggle.problem && toggle.problemBlocks),
+      // Restored from a backup with the bridge off: its channels wait for
+      // the bridge to be turned on, which recreates its wallet.
+      sha256RestorePending: !!restorePending && !idle,
       steps: s.enabled ? checklist(s, { participants: people ? people.length : null, now, serving }) : [],
     };
   }
@@ -470,12 +484,12 @@ function createBridgeOperator({
   async function recoveryPhrase() {
     try {
       const res = await lightningFork("POST", "/v2/bridge/sha256seed", {});
+      // The words and the identity they give, which the window shows;
+      // not the BIP32 root key lnd also returns, which it does not, and so
+      // need not cross to the browser at all.
       return {
         mnemonic: res.mnemonic || [],
-        extendedMasterKey: res.extended_master_key || "",
         identityPubkey: res.identity_pubkey || "",
-        birthday: int(res.birthday),
-        derivation: res.derivation || "",
       };
     } catch (error) {
       throw new ValidationError(lndMessage(error), 502);
@@ -502,7 +516,7 @@ function createBridgeOperator({
 
   function requireParticipants() {
     if (platform === "startos") {
-      throw new ValidationError("On StartOS, issue and revoke bridge codes with the Bridge Code and Remove Bridge Participant actions.", 409);
+      throw new ValidationError("On StartOS, issue and revoke bridge codes with the Add Bridge Participant and Remove Bridge Participant actions.", 409);
     }
   }
 
@@ -515,15 +529,23 @@ function createBridgeOperator({
     if (!participantUrl) {
       throw new ValidationError("This node has no address participants can reach it at yet.", 409);
     }
-    const [info, ids] = await Promise.all([
-      lightningFork("GET", "/v1/getinfo"),
-      lightningFork("GET", "/v1/macaroon/ids").then((r) => r.root_key_ids || []),
-    ]);
-    const rootKeyId = freshRootKeyId(ids);
-    const baked = await lightningFork("POST", "/v1/macaroon", {
-      permissions: PARTICIPANT_URIS.map((uri) => ({ entity: "uri", action: uri })),
-      root_key_id: rootKeyId,
-    });
+    let info;
+    let ids;
+    let baked;
+    let rootKeyId;
+    try {
+      [info, ids] = await Promise.all([
+        lightningFork("GET", "/v1/getinfo"),
+        lightningFork("GET", "/v1/macaroon/ids").then((r) => r.root_key_ids || []),
+      ]);
+      rootKeyId = freshRootKeyId(ids);
+      baked = await lightningFork("POST", "/v1/macaroon", {
+        permissions: PARTICIPANT_URIS.map((uri) => ({ entity: "uri", action: uri })),
+        root_key_id: rootKeyId,
+      });
+    } catch (error) {
+      throw new ValidationError(`Lightning Fork did not make the code: ${lndMessage(error)}`, 502);
+    }
     const code = encodeBridgeCode({
       label: name,
       url: participantUrl,
@@ -541,7 +563,11 @@ function createBridgeOperator({
     if (!/^\d{4,20}$/.test(String(rootKeyId)) || BigInt(rootKeyId) < FIRST_PARTICIPANT_ROOT_KEY_ID) {
       throw new ValidationError("That is not a participant's code.", 400);
     }
-    await lightningFork("DELETE", `/v1/macaroon/${rootKeyId}`);
+    try {
+      await lightningFork("DELETE", `/v1/macaroon/${rootKeyId}`);
+    } catch (error) {
+      throw new ValidationError(`Lightning Fork did not revoke the code: ${lndMessage(error)}`, 502);
+    }
     await withLabels((labels) => {
       delete labels[rootKeyId];
     });
@@ -599,6 +625,11 @@ function instance() {
     platform: constants.IS_STARTOS ? "startos" : "umbrel",
     bridgeSwitch: require("./bridgeSwitch.js").instance(),
     sha256Explorer: () => require("./mempool.js").sha256Explorer(),
+    sha256RestorePending: async () => {
+      const dataDir = path.join(sha256Dir, "data", "chain", "bitcoin", sha256Network);
+      const exists = (f) => fs.promises.stat(path.join(dataDir, f)).then((st) => st.size > 0, () => false);
+      return (await exists("channel.backup")) && !(await exists("wallet.db"));
+    },
   });
   return singleton;
 }

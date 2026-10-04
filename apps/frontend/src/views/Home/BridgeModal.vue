@@ -31,6 +31,11 @@
     </template>
 
     <div class="px-2 px-sm-3 pb-2 bridge">
+      <!-- At the top, and scrolled to when set: the window is long -->
+      <div ref="alerts">
+        <b-alert :show="Boolean(error)" variant="warning" class="small">{{ error }}</b-alert>
+        <b-alert :show="Boolean(notice)" variant="success" class="small">{{ notice }}</b-alert>
+      </div>
       <div v-if="!overview && !loadError" class="text-muted py-4 text-center">
         Loading…
       </div>
@@ -101,6 +106,19 @@
               :nodes="overview.toggle.nodes"
             ></sha256-node-list>
           </template>
+        </div>
+
+        <b-alert
+          :show="Boolean(overview.toggle && overview.toggle.problem)"
+          variant="danger"
+          class="small mt-3"
+          >{{ overview.toggle && overview.toggle.problem }}</b-alert
+        >
+        <div v-if="overview.sha256RestorePending" class="neu-card p-3 mt-3 small">
+          <b>Your bridge node was restored from a backup.</b> Its channels
+          are recovered when the bridge is turned on again: Lightning Fork
+          recreates the node from your recovery phrase and restores them
+          from the channel backup that came with it.
         </div>
 
         <!-- The node it had, still running -->
@@ -422,7 +440,7 @@
               <span>{{ directionName(d.name) }}</span>
               <span class="text-right">
                 {{ d.open ? `${percent(d.spread)} fee` : "Not serving" }}
-                <small class="d-block text-muted">{{ Number(d.minSat).toLocaleString() }} to {{ sats(d.maxSat) }} per payment</small>
+                <small class="d-block text-muted">{{ Number(d.minSat).toLocaleString() }} to {{ Number(d.maxSat).toLocaleString() }} {{ d.name === "toSHA256" ? "SHA256" : "BTCB2" }} sats per payment</small>
               </span>
             </div>
 
@@ -534,7 +552,7 @@
             </small>
           </template>
           <small v-else class="d-block text-muted">
-            In StartOS, issue codes with the <b>Bridge Code</b> action and
+            In StartOS, issue codes with the <b>Add Bridge Participant</b> action and
             revoke them with <b>Remove Bridge Participant</b>.
           </small>
         </div>
@@ -599,8 +617,7 @@
         </template>
       </div>
 
-      <b-alert :show="Boolean(error)" variant="warning" class="small mt-2">{{ error }}</b-alert>
-      <b-alert :show="Boolean(notice)" variant="success" class="small mt-2">{{ notice }}</b-alert>
+
     </div>
   </b-modal>
 </template>
@@ -764,6 +781,18 @@ export default {
       return bridgeUrl("/sha256/channel-backup");
     }
   },
+  watch: {
+    error(value) {
+      if (value) {
+        this.scrollTo("alerts");
+      }
+    },
+    notice(value) {
+      if (value) {
+        this.scrollTo("alerts");
+      }
+    }
+  },
   beforeDestroy() {
     this.stopTimer();
   },
@@ -803,6 +832,8 @@ export default {
       this.unavailableToggle = null;
       this.issuing = false;
       this.switching = false;
+      this.confirmRevoke = "";
+      this.revoking = "";
       this.overview = null;
       this.loadError = "";
       this.error = "";
@@ -840,8 +871,12 @@ export default {
         return;
       }
       if (overview.unavailable) {
+        // What was shown before is not what is so now (the bridge was
+        // just switched, or Lightning Fork is failing to start): only the
+        // sentence and, on Umbrel, the switch, so it can be turned off.
         this.loadError = overview.unavailable;
         this.unavailableToggle = overview.toggle || null;
+        this.overview = null;
         return;
       }
       this.unavailableToggle = null;
@@ -866,6 +901,11 @@ export default {
       });
     },
     showPanel(name) {
+      // Not while a channel is being opened: a fresh form would let it be
+      // opened twice.
+      if (this.channel.busy) {
+        return;
+      }
       this.error = "";
       this.panel = this.panel === name ? "" : name;
       if (this.panel === "deposit" && !this.deposit.address) {
@@ -985,7 +1025,7 @@ export default {
       );
       if (!ok) {
         this.error =
-          "Could not download the bridge node's channel backup. It has one once it has a channel.";
+          "Could not download the bridge node's channel backup: it may not be answering. Please try again.";
       }
     },
     async showRecovery() {
@@ -1029,14 +1069,16 @@ export default {
       this.switching = true;
       this.error = "";
       this.notice = "";
+      const before =
+        this.overview && this.overview.toggle ? this.overview.toggle.inUse : null;
       try {
         const res = await API.post(bridgeUrl("/enabled"), node ? { enabled, node } : { enabled });
         this.confirmSwitch = false;
         this.changingNode = false;
-        if (enabled && !res.data.restarting && res.data.node) {
+        if (enabled && !res.data.restarting && res.data.node && res.data.node !== before) {
           this.notice = "The bridge's node restarts to read the node you chose.";
-          this.load();
         }
+        this.load();
         if (res.data.restarting) {
           this.notice = enabled
             ? "Lightning Fork is restarting to turn the bridge on. This window catches up in a minute."
