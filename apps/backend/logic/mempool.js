@@ -45,17 +45,16 @@ const WRONG_CHAIN = "WRONG_CHAIN";
 const MAX_BODY_BYTES = 64 * 1024;
 
 // The public explorer for the BLAKE2b chain, whose page most people without
-// a Mempool app of their own watch: with no app chosen, the fee rates are the
-// ones it shows (and the node's own estimate when it does not answer), unless
-// the operator asks for the node's estimate alone. Mainnet only. Checked like
-// any app: its block at the first BLAKE2b height must be the BLAKE2b one.
+// a Mempool app of their own watch. An operator can choose it like an app:
+// the fee rates are then the ones it shows, and the node's own estimate when
+// it does not answer. Never by default: asking it tells it the node's
+// address. Mainnet only. Checked like any app: its block at the first
+// BLAKE2b height must be the BLAKE2b one.
 const PUBLIC_SOURCE = {
   id: "mempool.guide",
   name: "mempool.guide",
   api: process.env.PUBLIC_MEMPOOL_API || "https://mempool.guide",
 };
-// The choice that asks no public site anything.
-const NODE_ONLY = "node";
 const MAX_SANE_RATE = 100000; // sat/vB; anything above is a broken answer
 
 // The apps are on the LAN or the package bridge, so no proxy is used, and
@@ -194,21 +193,20 @@ function createMempool({
 
   // The chosen app's id, or "" for none. A choice naming an app the wrapper
   // no longer offers counts as none.
-  //
-  // "" (no choice, or none made yet) is the public source; NODE_ONLY is the
-  // node's own estimate with nothing asked of any public site.
+  // The public source counts only where it applies (mainnet).
   async function selectedId() {
     const state = await store.read();
     const id = typeof state.mempoolApp === "string" ? state.mempoolApp : "";
-    if (id === NODE_ONLY) {
-      return NODE_ONLY;
+    if (id === PUBLIC_SOURCE.id) {
+      return ACTIVATION[network()] ? id : "";
     }
     return findApp(id) ? id : "";
   }
 
   async function select(id) {
-    const app = id === "" || id === NODE_ONLY ? null : findApp(id);
-    if (id !== "" && id !== NODE_ONLY && !app) {
+    const isPublic = id === PUBLIC_SOURCE.id && Boolean(ACTIVATION[network()]);
+    const app = id === "" || isPublic ? null : findApp(id);
+    if (id !== "" && !isPublic && !app) {
       throw badRequest("Unknown Mempool app");
     }
     if (app && (await chainOf(app)) === "other") {
@@ -238,7 +236,7 @@ function createMempool({
       selected: await selectedId(),
       apps: listed,
       // Offered only where it applies: mainnet, the chain it follows.
-      publicSource: ACTIVATION[network()] ? { name: PUBLIC_SOURCE.name, url: PUBLIC_SOURCE.api } : null,
+      publicSource: ACTIVATION[network()] ? { id: PUBLIC_SOURCE.id, name: PUBLIC_SOURCE.name, url: PUBLIC_SOURCE.api } : null,
     };
   }
 
@@ -307,10 +305,10 @@ function createMempool({
   // a block at most.
   async function recommendedFees() {
     const id = await selectedId();
-    if (id === NODE_ONLY) {
+    if (!id) {
       return { app: "", name: "", fees: null };
     }
-    if (!id) {
+    if (id === PUBLIC_SOURCE.id) {
       return publicFees();
     }
     const app = findApp(id);
@@ -398,6 +396,5 @@ module.exports = {
   FEE_KEYS,
   ACTIVATION,
   PUBLIC_SOURCE,
-  NODE_ONLY,
   ...createMempool({ store: defaultStore }),
 };

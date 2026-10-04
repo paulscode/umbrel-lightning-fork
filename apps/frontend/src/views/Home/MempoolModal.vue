@@ -18,22 +18,22 @@
         this node's chain.
       </p>
       <b-form-radio-group v-model="choice" stacked class="mb-3" :disabled="saving">
-        <!-- No app of your own: the public explorer most people watch, or
-             the node alone. Off mainnet only the node, as before. -->
-        <b-form-radio v-if="publicSource" value="" class="mb-2">
-          <span class="font-bold">{{ publicSource.name }}</span>
-          <small class="d-block text-muted">
-            No app of your own. The rates {{ publicSource.name }}, the public
-            explorer for this chain, shows; your node's own estimate whenever it
-            does not answer. Asking it tells it your node's address, as visiting
-            it would. Transactions link there, after asking.
-          </small>
-        </b-form-radio>
-        <b-form-radio :value="publicSource ? 'node' : ''" class="mb-2">
+        <b-form-radio value="" class="mb-2">
           <span class="font-bold">Your node's own estimate</span>
           <small class="d-block text-muted">
             No app, and no public site asked for rates. Transactions link to
             mempool.guide, a public explorer for this chain, after asking.
+          </small>
+        </b-form-radio>
+        <!-- Opt-in only: asking a public site tells it the node's address.
+             Mainnet only. -->
+        <b-form-radio v-if="publicSource" :value="publicSource.id" class="mb-2">
+          <span class="font-bold">{{ publicSource.name }}</span>
+          <small class="d-block text-muted">
+            The rates {{ publicSource.name }}, the public explorer for this
+            chain, shows, as you would see them there; your node's own estimate
+            whenever it does not answer. Asking it tells it your node's
+            address, as visiting it would.
           </small>
         </b-form-radio>
         <b-form-radio
@@ -143,8 +143,7 @@ export default {
       // Read the rates once now: a wrong address shows here rather than
       // at the moment of sending, and an open form drops the old app's.
       await this.$store.dispatch("bitcoin/getMempoolFees");
-      const nodeOnly = this.choice === "node" || (!this.choice && !this.publicSource);
-      if (!nodeOnly) {
+      if (this.choice) {
         const result = this.mempoolFees;
         if (result && result.fees) {
           const f = result.fees;

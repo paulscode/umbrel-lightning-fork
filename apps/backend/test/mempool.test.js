@@ -280,16 +280,16 @@ test("the SHA256 chain's links go to an app on that chain, else mempool.space", 
   assert.equal((await make(APPS).sha256Explorer()).public, true);
 });
 
-const { PUBLIC_SOURCE, NODE_ONLY } = require("../logic/mempool.js");
+const { PUBLIC_SOURCE } = require("../logic/mempool.js");
 
-function publicFake({ chainHash = BLAKE2B, fees = { fastestFee: 3, halfHourFee: 2, hourFee: 1, economyFee: 1, minimumFee: 1 }, fail = null, choice = undefined, network = "mainnet" } = {}) {
+function publicFake({ chainHash = BLAKE2B, fees = { fastestFee: 3, halfHourFee: 2, hourFee: 1, economyFee: 1, minimumFee: 1 }, fail = null, choice = "mempool.guide", network = "mainnet" } = {}) {
   const asked = [];
   let clock = 1000;
   const m = createMempool({
     apps: () => [],
     fallbackExplorer: () => ({ port: "", hiddenService: "" }),
     badRequest: message => new Error(message),
-    store: { read: async () => (choice === undefined ? {} : { mempoolApp: choice }), write: async () => {} },
+    store: { read: async () => (choice === null ? {} : { mempoolApp: choice }), write: async () => {} },
     fetchJson: async url => { asked.push(url); if (fail) throw fail; return fees; },
     fetchText: async url => { asked.push(url); return chainHash; },
     network: () => network,
@@ -298,7 +298,7 @@ function publicFake({ chainHash = BLAKE2B, fees = { fastestFee: 3, halfHourFee: 
   return { m, asked, tick: ms => { clock += ms; } };
 }
 
-test("with no app chosen the rates are mempool.guide's, as its page shows them", async () => {
+test("chosen, mempool.guide's rates are the ones its page shows", async () => {
   const { m, asked } = publicFake();
   const r = await m.recommendedFees();
   assert.equal(r.app, PUBLIC_SOURCE.id);
@@ -326,10 +326,10 @@ test("mempool.guide on another chain is not used", async () => {
   assert.ok(!asked.some(u => u.endsWith("/fees/recommended")), "no rates fetched from it");
 });
 
-test("the node's own estimate alone asks no public site anything", async () => {
-  const { m, asked } = publicFake({ choice: NODE_ONLY });
+test("by default nothing is asked of mempool.guide: the node's own estimate", async () => {
+  const { m, asked } = publicFake({ choice: null });
   assert.deepEqual(await m.recommendedFees(), { app: "", name: "", fees: null });
-  assert.equal(await m.selectedId(), NODE_ONLY);
+  assert.equal(await m.selectedId(), "");
   assert.deepEqual(asked, []);
 });
 
@@ -351,15 +351,16 @@ test("mempool.guide's rates are cached like an app's", async () => {
   assert.equal(asked.filter(u => u.endsWith("/fees/recommended")).length, 2);
 });
 
-test("the node-only choice can be saved", async () => {
+test("mempool.guide is chosen like an app, on mainnet only", async () => {
   let saved;
-  const m = createMempool({
+  const make = (network) => createMempool({
     apps: () => [],
     badRequest: message => new Error(message),
     store: { read: async () => ({}), write: async next => { saved = next; } },
-    network: () => "mainnet",
+    network: () => network,
   });
-  await m.select(NODE_ONLY);
-  assert.deepEqual(saved, { mempoolApp: NODE_ONLY });
-  await assert.rejects(m.select("nonsense"), /Unknown Mempool app/);
+  await make("mainnet").select(PUBLIC_SOURCE.id);
+  assert.deepEqual(saved, { mempoolApp: PUBLIC_SOURCE.id });
+  await assert.rejects(make("regtest").select(PUBLIC_SOURCE.id), /Unknown Mempool app/);
+  await assert.rejects(make("mainnet").select("nonsense"), /Unknown Mempool app/);
 });
