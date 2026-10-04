@@ -75,10 +75,14 @@
           <template v-else-if="overview.toggle && overview.toggle.available">
             <template v-if="!confirmSwitch">
               <div class="mb-2">
-                The bridge's node reads
-                <b>{{ overview.toggle.backend }}</b>.
+                The bridge's node reads a full node on the SHA256 chain.
+                Found on this Umbrel:
               </div>
-              <b-button variant="success" size="sm" :disabled="switching" @click="confirmSwitch = true">Turn the bridge on</b-button>
+              <sha256-node-list
+                :nodes="overview.toggle.nodes"
+                v-model="chosenNode"
+              ></sha256-node-list>
+              <b-button variant="success" size="sm" :disabled="switching || !chosenNode" @click="confirmSwitch = true">Turn the bridge on</b-button>
             </template>
             <template v-else>
               <div class="mb-2">
@@ -86,12 +90,16 @@
                 The bridge's node is then created, which takes a few minutes
                 more the first time; this window follows along.
               </div>
-              <b-button variant="success" size="sm" class="mr-2" :disabled="switching" @click="setEnabled(true)">{{ switching ? "Turning it on…" : "Turn it on and restart" }}</b-button>
+              <b-button variant="success" size="sm" class="mr-2" :disabled="switching" @click="setEnabled(true, chosenNode)">{{ switching ? "Turning it on…" : "Turn it on and restart" }}</b-button>
               <b-button variant="link" size="sm" :disabled="switching" @click="confirmSwitch = false">Cancel</b-button>
             </template>
           </template>
           <template v-else-if="overview.toggle">
-            {{ overview.toggle.unavailable }}
+            <div class="mb-2">{{ overview.toggle.unavailable }}</div>
+            <sha256-node-list
+              v-if="overview.toggle.nodes.length"
+              :nodes="overview.toggle.nodes"
+            ></sha256-node-list>
           </template>
         </div>
 
@@ -267,11 +275,24 @@
                   <span>{{ node.synced ? `In sync at ${node.blockHeight.toLocaleString()}` : node.blockHeight ? `Catching up, at ${node.blockHeight.toLocaleString()}` : "—" }}</span>
                 </div>
                 <small v-if="node.state !== 'ready' && node.detail" class="d-block text-muted mt-1">{{ node.detail }}</small>
+                <div v-if="readsName" class="kv">
+                  <span>Reads</span>
+                  <span>{{ readsName }}</span>
+                </div>
                 <small v-if="node.mode === 'external'" class="d-block text-muted mt-1">
                   An LND you run yourself; manage its funds and channels with
                   your own tools.
                 </small>
 
+                <div v-if="otherUsableNodes.length" class="mt-2">
+                  <b-button v-if="!changingNode" size="sm" variant="link" class="px-0" @click="changingNode = true">Read another node</b-button>
+                  <template v-else>
+                    <sha256-node-list :nodes="overview.toggle.nodes" v-model="chosenNode"></sha256-node-list>
+                    <small class="d-block text-muted mb-1">The bridge's node restarts to read it; Lightning Fork does not.</small>
+                    <b-button size="sm" variant="outline-primary" class="mr-2" :disabled="switching || chosenNode === overview.toggle.inUse" @click="setEnabled(true, chosenNode)">Use this node</b-button>
+                    <b-button size="sm" variant="link" @click="changingNode = false">Cancel</b-button>
+                  </template>
+                </div>
                 <div v-if="overview.canManageSha256Node" class="mt-2 d-flex flex-wrap">
                   <b-button size="sm" variant="outline-primary" class="mr-2 mb-1" @click="showPanel('deposit')">Deposit address</b-button>
                   <b-button size="sm" variant="outline-primary" class="mr-2 mb-1" @click="showPanel('channel')">Open a channel</b-button>
@@ -293,6 +314,7 @@
             <qr-code :value="deposit.address" :size="160" class="mx-auto mb-3 mb-md-0" :showLogo="false"></qr-code>
             <div class="w-100 ml-0 ml-md-3">
               <input-copy size="sm" :value="deposit.address" class="mb-2"></input-copy>
+              <a :href="`${explorerBase}/address/${deposit.address}`" target="_blank" rel="noopener" class="small d-inline-block mb-2" @click="confirmExplorer">See it on {{ explorerName }}</a>
               <small class="d-block text-muted">
                 Send coins <b>on the SHA256 chain</b> to this address. Coins
                 sent on the BLAKE2b chain do not arrive here. A new address is
@@ -351,6 +373,7 @@
               transaction confirms on the SHA256 chain:
             </small>
             <input-copy size="sm" :value="channel.txid"></input-copy>
+            <a :href="`${explorerBase}/tx/${channel.txid}`" target="_blank" rel="noopener" class="small d-inline-block mt-1" @click="confirmExplorer">See it on {{ explorerName }}</a>
           </template>
         </div>
 
@@ -588,6 +611,7 @@ import {
 } from "@/helpers/bitcoin-invoices";
 import {
   bridgeUrl,
+  sha256ExplorerBase,
   directionName,
   STEPS,
   nodeState,
@@ -596,6 +620,7 @@ import {
 } from "@/helpers/bridge";
 import QrCode from "@/components/Utility/QrCode";
 import InputCopy from "@/components/Utility/InputCopy";
+import Sha256NodeList from "@/views/Home/Sha256NodeList";
 
 // How often the window asks again while it is open. Nothing is asked while
 // it is closed, so a node that never bridges pays nothing for it.
@@ -613,7 +638,7 @@ const emptyRecovery = () => ({
 // the steps to get it going, its SHA256 node, the rate and the people it
 // serves. Everything shown is read from the nodes each time, not remembered.
 export default {
-  components: { QrCode, InputCopy },
+  components: { QrCode, InputCopy, Sha256NodeList },
   data() {
     return {
       overview: null,
@@ -633,6 +658,8 @@ export default {
       confirmSwitch: false,
       switching: false,
       unavailableToggle: null,
+      chosenNode: null,
+      changingNode: false,
       // Bumped when the window opens or closes, so an answer that arrives
       // afterwards (a recovery phrase, a code) is dropped, not shown.
       generation: 0,
@@ -698,6 +725,28 @@ export default {
     statusDetail() {
       return this.serving ? "" : this.overview.serving.reason;
     },
+    readsName() {
+      const t = this.overview && this.overview.toggle;
+      if (!t || !t.inUse) {
+        return "";
+      }
+      const n = t.nodes.find(x => x.id === t.inUse);
+      return n ? n.name : "";
+    },
+    otherUsableNodes() {
+      const t = this.overview && this.overview.toggle;
+      if (!t || !t.on) {
+        return [];
+      }
+      return t.nodes.filter(n => n.state === "sha256" && n.id !== t.inUse);
+    },
+    explorerBase() {
+      return sha256ExplorerBase(this.overview && this.overview.sha256Explorer);
+    },
+    explorerName() {
+      const e = this.overview && this.overview.sha256Explorer;
+      return (e && e.name) || "mempool.space";
+    },
     toggleNow() {
       return this.overview && this.overview.toggle
         ? this.overview.toggle
@@ -754,6 +803,7 @@ export default {
       this.issued = null;
       this.recovery = emptyRecovery();
       this.confirmSwitch = false;
+      this.changingNode = false;
       this.load();
       this.stopTimer();
       this.timer = setInterval(() => this.load(), REFRESH_MS);
@@ -789,6 +839,10 @@ export default {
       this.unavailableToggle = null;
       this.loadError = "";
       this.overview = overview;
+      // The node choice starts at the one in use, or the one suggested.
+      if (overview.toggle && !this.changingNode && !this.confirmSwitch) {
+        this.chosenNode = overview.toggle.inUse || overview.toggle.chosen;
+      }
     },
     scrollTo(ref) {
       this.$nextTick(() => {
@@ -946,13 +1000,30 @@ export default {
         );
       }
     },
-    async setEnabled(enabled) {
+    // A public explorer learns what the operator looks at: asked first.
+    confirmExplorer(event) {
+      const e = this.overview && this.overview.sha256Explorer;
+      if (
+        (!e || e.public) &&
+        !window.confirm(
+          `This opens ${this.explorerName}, a public explorer for the SHA256 chain. Continue?`
+        )
+      ) {
+        event.preventDefault();
+      }
+    },
+    async setEnabled(enabled, node = null) {
       this.switching = true;
       this.error = "";
       this.notice = "";
       try {
-        const res = await API.post(bridgeUrl("/enabled"), { enabled });
+        const res = await API.post(bridgeUrl("/enabled"), node ? { enabled, node } : { enabled });
         this.confirmSwitch = false;
+        this.changingNode = false;
+        if (enabled && !res.data.restarting && res.data.node) {
+          this.notice = "The bridge's node restarts to read the node you chose.";
+          this.load();
+        }
         if (res.data.restarting) {
           this.notice = enabled
             ? "Lightning Fork is restarting to turn the bridge on. This window catches up in a minute."

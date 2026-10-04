@@ -43,7 +43,7 @@ router.get("/", handle(async () => {
 }));
 
 // On Umbrel, the switch: {enabled: true|false}. Restarts Lightning Fork.
-router.post("/enabled", handle((req) => bridgeSwitch.instance().set(body(req).enabled)));
+router.post("/enabled", handle((req) => bridgeSwitch.instance().set(body(req).enabled, body(req).node === undefined ? null : body(req).node)));
 
 // A JSON number only: a form post (which a page elsewhere could make) carries
 // strings.

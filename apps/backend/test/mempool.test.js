@@ -251,3 +251,26 @@ test("the selected app's name is given without asking any app", async () => {
   assert.equal(await m.selectedName(), "Mempool Pruned");
   assert.equal(fetched.length, before);
 });
+
+test("the SHA256 chain's links go to an app on that chain, else mempool.space", async () => {
+  const hashes = { "10.0.3.7": BITCOIN, "10.0.3.9": BLAKE2B };
+  const make = (apps) => createMempool({
+    apps: () => apps,
+    fallbackExplorer: () => ({ port: "", hiddenService: "" }),
+    badRequest: message => new Error(message),
+    store: { read: async () => ({}), write: async () => {} },
+    fetchJson: async () => { throw new Error("not used"); },
+    fetchText: async url => hashes[new URL(url).hostname],
+    network: () => "mainnet",
+  });
+  // Main node on the SHA256 chain with its Mempool, the companion with Mempool Pruned.
+  assert.deepEqual(await make(APPS).sha256Explorer(), {
+    app: "mempool", name: "Mempool Guide", url: "https://mempool.box.local", port: "", hiddenService: "abc.onion", public: false,
+  });
+  // Only Mempool Pruned, on the BLAKE2b chain: the public explorer.
+  const pub = await make([APPS[1]]).sha256Explorer();
+  assert.equal(pub.public, true);
+  assert.equal(pub.url, "https://mempool.space");
+  // No apps at all.
+  assert.equal((await make([]).sha256Explorer()).name, "mempool.space");
+});

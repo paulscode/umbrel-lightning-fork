@@ -76,7 +76,7 @@ function describeFetchError(error) {
   if (code === "ECONNREFUSED") return "refused the connection";
   if (code === "ECONNABORTED" || code === "ETIMEDOUT") return "did not answer in time";
   if (code === "ENOTFOUND" || code === "EAI_AGAIN") return "could not be found on the network";
-  if (code === WRONG_CHAIN) return "follows the other chain, not the BLAKE2b one: its fee rates and transactions are Bitcoin's. Choose another app, or the node's own estimate";
+  if (code === WRONG_CHAIN) return "follows the other chain, not the BLAKE2b one: its fee rates and transactions are the SHA256 chain's. Choose another app, or the node's own estimate";
   if (error && /not a fee rate|not an object/.test(error.message)) return `gave an answer that ${error.message.replace(/^the answer /, "")}`;
   return "did not answer";
 }
@@ -231,6 +231,26 @@ function createMempool({
     };
   }
 
+  // Where links to the SHA256 chain go (the bridge's SHA256 node: its
+  // deposit address, its channels' funding transactions). An installed
+  // Mempool app that follows that chain, which is the one the dashboard
+  // will not use for this chain; else the public mempool.space.
+  async function sha256Explorer() {
+    for (const app of known()) {
+      if ((await chainOf(app)) === "other") {
+        return {
+          app: app.id,
+          name: app.name,
+          url: app.uiUrl || "",
+          port: app.uiPort || "",
+          hiddenService: app.hiddenService || "",
+          public: false,
+        };
+      }
+    }
+    return { app: "", name: "mempool.space", url: "https://mempool.space", port: "", hiddenService: "", public: true };
+  }
+
   function parseFees(data) {
     if (!data || typeof data !== "object") {
       throw new Error("the answer is not an object");
@@ -283,7 +303,7 @@ function createMempool({
     return app ? app.name : "";
   }
 
-  return { settings, select, explorer, recommendedFees, selectedId, selectedName, chainOf };
+  return { settings, select, explorer, sha256Explorer, recommendedFees, selectedId, selectedName, chainOf };
 }
 
 // The JSON store, required lazily so the pure parts above load without

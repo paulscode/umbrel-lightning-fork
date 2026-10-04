@@ -263,6 +263,7 @@ function createBridgeOperator({
   writeLabels = async () => {},
   platform = "umbrel",
   bridgeSwitch = null,        // logic/bridgeSwitch.js, where the page is the switch
+  sha256Explorer = null,      // where links to the SHA256 chain go (logic/mempool.js)
   now = () => Date.now() / 1000,
 }) {
   async function status() {
@@ -363,12 +364,13 @@ function createBridgeOperator({
   // fails on its own, so the page always has the parts it can.
   async function overview() {
     const s = await status();
-    const [infoRes, market, people, toggle, idle] = await Promise.all([
+    const [infoRes, market, people, toggle, idle, explorer] = await Promise.all([
       s.enabled ? lightningFork("GET", "/v2/bridge/info").catch(() => null) : null,
       s.enabled && reference ? reference.get().catch(() => null) : null,
       s.enabled ? participants() : null,
       bridgeSwitch ? bridgeSwitch.info().catch(() => null) : null,
       s.enabled ? null : idleNode(),
+      sha256Explorer ? sha256Explorer().catch(() => null) : null,
     ]);
     if (idle) {
       s.sha256Node = idle;
@@ -386,6 +388,7 @@ function createBridgeOperator({
       ...s,
       platform,
       toggle,
+      sha256Explorer: explorer,
       directionsInfo,
       serving,
       market: market ? {
@@ -595,6 +598,7 @@ function instance() {
     },
     platform: constants.IS_STARTOS ? "startos" : "umbrel",
     bridgeSwitch: require("./bridgeSwitch.js").instance(),
+    sha256Explorer: () => require("./mempool.js").sha256Explorer(),
   });
   return singleton;
 }

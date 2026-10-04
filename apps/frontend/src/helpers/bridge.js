@@ -127,3 +127,39 @@ export function marketDifference(difference) {
 function capitalise(s) {
   return s ? s[0].toUpperCase() + s.slice(1) : s;
 }
+
+// A node on the SHA256 chain, as the switch found it (logic/sha256Nodes.js).
+export const SHA256_NODE_STATES = {
+  sha256: { text: "On the SHA256 chain", variant: "success" },
+  blake2b: { text: "On the BLAKE2b chain", variant: "muted" },
+  "lightning-fork": {
+    text: "Lightning Fork reads it, on the BLAKE2b chain",
+    variant: "muted"
+  },
+  behind: { text: "Still syncing", variant: "warning" },
+  "other-network": { text: "Not on mainnet", variant: "muted" },
+  unreachable: { text: "Not answering", variant: "warning" }
+};
+
+export function sha256NodeState(state) {
+  return SHA256_NODE_STATES[state] || { text: state, variant: "muted" };
+}
+
+// Where a link to the SHA256 chain goes, from the overview's sha256Explorer:
+// the Mempool app on that chain (its onion when the page is opened over Tor,
+// its address, or its port on this host), or the public explorer.
+export function sha256ExplorerBase(explorer) {
+  if (!explorer) {
+    return "https://mempool.space";
+  }
+  if (window.location.origin.endsWith(".onion") && explorer.hiddenService) {
+    return `http://${explorer.hiddenService}`;
+  }
+  if (explorer.url) {
+    return explorer.url.replace(/\/+$/, "");
+  }
+  if (explorer.port) {
+    return `${window.location.protocol}//${window.location.hostname}:${explorer.port}`;
+  }
+  return "https://mempool.space";
+}
