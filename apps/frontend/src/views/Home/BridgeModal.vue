@@ -514,26 +514,38 @@
           </template>
         </div>
 
-        <!-- Rate -->
+        <!-- Rate and fees -->
         <div ref="bridge-rate" class="mb-4">
-          <h6 class="font-weight-bold">Rate</h6>
+          <h6 class="font-weight-bold">Rate and fees</h6>
           <div class="neu-card p-3">
-            <div class="kv">
-              <span>Your rate</span>
-              <span class="text-right">
-                {{ overview.rate > 0 ? rateText(overview.rate) : "Not set" }}
-                <small v-if="overview.rate > 0" class="d-block text-muted">{{ costPerBitcoinSat(overview.rate) }}</small>
-              </span>
-            </div>
-            <small class="d-block mb-2" :class="`text-${rateAgeOf.variant}`">{{ rateAgeOf.text }}</small>
-            <div v-if="overview.market" class="kv">
-              <span>On {{ overview.market.source || "the market" }}</span>
-              <span class="text-right">
-                {{ rateText(overview.market.rate) }}
-                <small v-if="overview.rate > 0" class="d-block text-muted">{{ marketDifference(overview.market.difference) }}</small>
-              </span>
-            </div>
-            <small v-else class="d-block text-muted mb-2">The market rate is not available right now.</small>
+            <template v-if="overview.rateSource === 'neoxa'">
+              <div class="kv">
+                <span>From the market (Neoxa)</span>
+                <span class="text-right">
+                  {{ overview.rate > 0 ? rateText(overview.rate) : "Not read yet" }}
+                  <small v-if="overview.rate > 0" class="d-block text-muted">{{ costPerBitcoinSat(overview.rate) }}</small>
+                </span>
+              </div>
+              <small class="d-block mb-2" :class="`text-${marketLineOf.variant}`">{{ marketLineOf.text }}</small>
+            </template>
+            <template v-else>
+              <div class="kv">
+                <span>Your rate</span>
+                <span class="text-right">
+                  {{ overview.rate > 0 ? rateText(overview.rate) : "Not set" }}
+                  <small v-if="overview.rate > 0" class="d-block text-muted">{{ costPerBitcoinSat(overview.rate) }}</small>
+                </span>
+              </div>
+              <small class="d-block mb-2" :class="`text-${rateAgeOf.variant}`">{{ rateAgeOf.text }}</small>
+              <div v-if="overview.market" class="kv">
+                <span>On {{ overview.market.source || "the market" }}</span>
+                <span class="text-right">
+                  {{ rateText(overview.market.rate) }}
+                  <small v-if="overview.rate > 0" class="d-block text-muted">{{ marketDifference(overview.market.difference) }}</small>
+                </span>
+              </div>
+              <small v-else class="d-block text-muted mb-2">The market rate is not available right now.</small>
+            </template>
             <div v-for="d in overview.directionsInfo" :key="d.name" class="kv">
               <span>{{ directionName(d.name) }}</span>
               <span class="text-right">
@@ -542,38 +554,70 @@
               </span>
             </div>
 
-            <label class="small font-weight-bold mt-2 mb-1" for="bridge-rate-input">New rate (BTC (SHA256) for 1 BTCB2)</label>
-            <div class="d-flex flex-wrap align-items-center">
-              <b-form-input
-                id="bridge-rate-input"
-                v-model="rateInput"
-                type="number"
-                step="any"
-                min="0"
-                class="neu-input rate-input mr-2 mb-1"
-                placeholder="0.00483"
-                :disabled="savingRate"
-                @keyup.enter="setRate"
-              ></b-form-input>
-              <b-button
-                v-if="overview.market"
-                size="sm"
-                variant="link"
-                class="mr-2 mb-1 px-0"
-                :disabled="savingRate"
-                @click="rateInput = String(overview.market.rate)"
-                >Use the market rate</b-button
-              >
-              <b-button
-                size="sm"
-                variant="outline-primary"
-                class="mb-1"
-                :disabled="savingRate || !(Number(rateInput) > 0)"
-                @click="setRate"
-                >{{ savingRate ? "Setting…" : overview.rate > 0 ? "Renew rate" : "Set rate" }}</b-button
-              >
+            <template v-if="overview.rateSource !== 'neoxa'">
+              <label class="small font-weight-bold mt-2 mb-1" for="bridge-rate-input">New rate (BTC (SHA256) for 1 BTCB2)</label>
+              <div class="d-flex flex-wrap align-items-center">
+                <b-form-input
+                  id="bridge-rate-input"
+                  v-model="rateInput"
+                  type="number"
+                  step="any"
+                  min="0"
+                  class="neu-input rate-input mr-2 mb-1"
+                  placeholder="0.00483"
+                  :disabled="savingRate"
+                  @keyup.enter="setRate"
+                ></b-form-input>
+                <b-button
+                  v-if="overview.market"
+                  size="sm"
+                  variant="link"
+                  class="mr-2 mb-1 px-0"
+                  :disabled="savingRate"
+                  @click="rateInput = String(overview.market.rate)"
+                  >Use the market rate</b-button
+                >
+                <b-button
+                  size="sm"
+                  variant="outline-primary"
+                  class="mb-1"
+                  :disabled="savingRate || !(Number(rateInput) > 0)"
+                  @click="setRate"
+                  >{{ savingRate ? "Setting…" : overview.rate > 0 ? "Renew rate" : "Set rate" }}</b-button
+                >
+              </div>
+              <small v-if="Number(rateInput) > 0" class="d-block text-muted">{{ costPerBitcoinSat(rateInput) }}</small>
+            </template>
+
+            <!-- Where the rate comes from and the fees: Umbrel's switch -->
+            <div v-if="toggleNow && toggleNow.pricing" class="mt-3 pt-2 border-top-subtle">
+              <div class="kv">
+                <span>Pricing</span>
+                <span class="text-right">
+                  {{ pricingSummary(toggleNow.pricing) }}
+                  <b-button v-if="!pricing.open" size="sm" variant="link" class="px-0 d-block ml-auto" @click="openPricing">Change</b-button>
+                </span>
+              </div>
+              <div v-if="pricing.open">
+                <b-form-radio-group v-model="pricing.rateSource" stacked class="small mb-2" :disabled="pricing.busy">
+                  <b-form-radio value="neoxa">The market (Neoxa), read live: nothing is quoted while it cannot be read</b-form-radio>
+                  <b-form-radio value="fixed">My own rate, which I keep current (it expires after an hour)</b-form-radio>
+                </b-form-radio-group>
+                <label class="small font-weight-bold mb-1" for="bridge-fee">Fee, both directions (%)</label>
+                <b-form-input id="bridge-fee" v-model="pricing.fee" type="number" step="0.1" min="0.4" max="19.9" class="neu-input rate-input mb-1" :disabled="pricing.busy"></b-form-input>
+                <small class="d-block text-muted mb-2">1.5% stays inside what payers allow by default (5% over the market) even when the bridge runs low and charges up to three times its fee.</small>
+                <label class="small font-weight-bold mb-1" for="bridge-fee-sha">{{ directionName("toSHA256") }}: fee if different (%)</label>
+                <b-form-input id="bridge-fee-sha" v-model="pricing.feeToSHA256" type="number" step="0.1" min="0.4" max="19.9" class="neu-input rate-input mb-2" placeholder="Same" :disabled="pricing.busy"></b-form-input>
+                <label class="small font-weight-bold mb-1" for="bridge-fee-b2b">{{ directionName("toBLAKE2b") }}: fee if different (%)</label>
+                <b-form-input id="bridge-fee-b2b" v-model="pricing.feeToBLAKE2b" type="number" step="0.1" min="0.4" max="19.9" class="neu-input rate-input mb-2" placeholder="Same" :disabled="pricing.busy"></b-form-input>
+                <small class="d-block text-muted mb-2">Saving restarts Lightning Fork while the bridge is on.</small>
+                <b-button size="sm" variant="primary" class="mr-2" :disabled="pricing.busy" @click="savePricing">{{ pricing.busy ? "Saving…" : "Save" }}</b-button>
+                <b-button size="sm" variant="link" :disabled="pricing.busy" @click="pricing.open = false">Cancel</b-button>
+              </div>
             </div>
-            <small v-if="Number(rateInput) > 0" class="d-block text-muted">{{ costPerBitcoinSat(rateInput) }}</small>
+            <small v-else-if="overview.platform === 'startos'" class="d-block text-muted mt-2">
+              Choose where the rate comes from and your fees with the Bridge action in StartOS.
+            </small>
           </div>
         </div>
 
@@ -754,7 +798,8 @@ import {
   channelState,
   closeOptions,
   feeRateInput,
-  sha256BackupText
+  sha256BackupText,
+  marketLine
 } from "@/helpers/bridge";
 import QrCode from "@/components/Utility/QrCode";
 import InputCopy from "@/components/Utility/InputCopy";
@@ -786,6 +831,16 @@ const emptySend = () => ({
   txid: ""
 });
 
+// The Pricing form, closed.
+const emptyPricing = () => ({
+  open: false,
+  busy: false,
+  rateSource: "neoxa",
+  fee: "",
+  feeToSHA256: "",
+  feeToBLAKE2b: ""
+});
+
 const emptyRecovery = () => ({
   confirming: false,
   shown: false,
@@ -811,6 +866,7 @@ export default {
       send: emptySend(),
       rateInput: "",
       savingRate: false,
+      pricing: emptyPricing(),
       newLabel: "",
       issuing: false,
       issued: null,
@@ -860,6 +916,9 @@ export default {
     },
     nodeStateOf() {
       return nodeState(this.node ? this.node.state : "");
+    },
+    marketLineOf() {
+      return marketLine(this.overview);
     },
     rateAgeOf() {
       return rateAge(this.overview);
@@ -1165,6 +1224,49 @@ export default {
         this.error = getErrorMessage(error, "Nothing was sent. Please try again.");
       }
       this.send.busy = false;
+    },
+    pricingSummary(p) {
+      const pct = f => `${Math.round(f * 1000) / 10}%`;
+      const source = p.rateSource === "fixed" ? "your own rate" : "the market rate";
+      const fees =
+        p.feeToSHA256 || p.feeToBLAKE2b
+          ? `${pct(p.feeToSHA256 || p.fee)} paying SHA256 invoices, ${pct(p.feeToBLAKE2b || p.fee)} paying BLAKE2b invoices`
+          : `${pct(p.fee)} fee`;
+      return `${source[0].toUpperCase()}${source.slice(1)}, ${fees}`;
+    },
+    openPricing() {
+      const p = this.toggleNow.pricing;
+      const pct = f => (f ? String(Math.round(f * 1000) / 10) : "");
+      this.pricing = {
+        ...emptyPricing(),
+        open: true,
+        rateSource: p.rateSource,
+        fee: pct(p.fee),
+        feeToSHA256: pct(p.feeToSHA256),
+        feeToBLAKE2b: pct(p.feeToBLAKE2b)
+      };
+    },
+    async savePricing() {
+      const frac = v => (String(v).trim() === "" ? null : Number(v) / 100);
+      this.pricing.busy = true;
+      this.error = "";
+      this.notice = "";
+      try {
+        const res = await API.post(bridgeUrl("/pricing"), {
+          rateSource: this.pricing.rateSource,
+          fee: frac(this.pricing.fee),
+          feeToSHA256: frac(this.pricing.feeToSHA256),
+          feeToBLAKE2b: frac(this.pricing.feeToBLAKE2b)
+        });
+        this.pricing = emptyPricing();
+        this.load();
+        if (res.data.restarting) {
+          this.notice = "Lightning Fork is restarting with the new pricing. This window catches up in a minute.";
+        }
+      } catch (error) {
+        this.error = getErrorMessage(error, "Could not save the pricing. Please try again.");
+        this.pricing.busy = false;
+      }
     },
     async setDirections(toBLAKE2b) {
       this.switching = true;

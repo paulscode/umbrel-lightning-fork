@@ -317,3 +317,36 @@ test("it stops paying BLAKE2b invoices only with nothing unfinished", async () =
   assert.equal(h.state.settings.bridge.toBLAKE2b, true);
   assert.equal(h.state.stops, 0);
 });
+
+test("pricing: saved while off, applied with a restart while on, and checked", async () => {
+  const { pricingOf, validPricing } = require("../logic/bridgeSwitch.js");
+  assert.deepEqual(pricingOf(undefined), { rateSource: "neoxa", fee: 0.015, feeToSHA256: null, feeToBLAKE2b: null });
+
+  const off = harness();
+  let res = await off.sw.setPricing({ rateSource: "fixed", fee: 0.012, feeToBLAKE2b: 0.008 });
+  assert.equal(res.restarting, false);
+  assert.deepEqual(off.state.settings.bridge.pricing, { rateSource: "fixed", fee: 0.012, feeToSHA256: null, feeToBLAKE2b: 0.008 });
+  assert.equal(off.state.stops, 0);
+  assert.equal((await off.sw.info()).pricing.rateSource, "fixed");
+
+  const on = harness({ settings: { lnd: LND, bridge: { enabled: true, sha256Node: "paulscode-knots-sha256" } } });
+  res = await on.sw.setPricing({ rateSource: "neoxa", fee: 0.02 });
+  assert.equal(res.restarting, true);
+  assert.equal(on.state.stops, 1);
+  assert.equal(on.state.settings.bridge.enabled, true);
+  // The same again changes nothing and restarts nothing.
+  res = await on.sw.setPricing({ rateSource: "neoxa", fee: 0.02 });
+  assert.equal(res.restarting, false);
+  assert.equal(on.state.stops, 1);
+
+  for (const bad of [
+    { rateSource: "coinbase", fee: 0.015 },
+    { rateSource: "neoxa" },
+    { rateSource: "neoxa", fee: 0.002 },
+    { rateSource: "neoxa", fee: 1.5 },
+    { rateSource: "neoxa", fee: 0.015, feeToSHA256: -1 },
+  ]) {
+    assert.throws(() => validPricing(bad), /fee|rate/);
+  }
+  await assert.rejects(harness({ platform: "startos" }).sw.setPricing({ rateSource: "neoxa", fee: 0.015 }), /StartOS/);
+});

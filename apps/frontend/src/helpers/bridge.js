@@ -40,6 +40,11 @@ export const STEPS = {
     hint:
       "How much BTC (SHA256) one BTCB2 buys through your bridge. It has to be renewed before it expires."
   },
+  market: {
+    title: "Market rate",
+    hint:
+      "Read from Neoxa every 30 seconds. While it cannot be read, or its two prices disagree, the bridge quotes nothing."
+  },
   participants: {
     title: "Invite participants",
     hint:
@@ -104,6 +109,33 @@ export function rateAge(overview) {
     text: capitalise(parts.join(", ")),
     variant: overview.rateState === "ageing" ? "warning" : "muted"
   };
+}
+
+// The market rate's state in words, with how it should look: why nothing is
+// quoted, or when it was read, its cross-check and how far the market has just
+// moved (which widens the fee).
+export function marketLine(overview) {
+  if (!overview) {
+    return { text: "", variant: "muted" };
+  }
+  if (overview.marketRefusal) {
+    return { text: capitalise(overview.marketRefusal), variant: "danger" };
+  }
+  if (!(overview.rate > 0)) {
+    return { text: "Reading the market", variant: "warning" };
+  }
+  const parts = [];
+  if (overview.rateSetAt) {
+    parts.push(`read ${duration(Math.max(0, overview.now - overview.rateSetAt))} ago`);
+  }
+  if (overview.rateCrossCheck > 0) {
+    const gap = Math.abs(overview.rateCrossCheck / overview.rate - 1);
+    parts.push(`its BTCB2_USDC price agrees within ${(gap * 100).toFixed(1)}%`);
+  }
+  if (overview.rateVolatility >= 0.005) {
+    parts.push(`it moved ${(overview.rateVolatility * 100).toFixed(1)}% in the last minutes, which is added to the fee`);
+  }
+  return { text: capitalise(parts.join("; ")), variant: "muted" };
 }
 
 // How the rate compares with the market, from the payer's side: a higher

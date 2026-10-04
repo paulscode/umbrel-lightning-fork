@@ -49,6 +49,11 @@ router.post("/enabled", handle((req) => bridgeSwitch.instance().set(body(req).en
 // {toBLAKE2b: true|false}. Restarts Lightning Fork while the bridge is on.
 router.post("/directions", handle((req) => bridgeSwitch.instance().setDirections(body(req).toBLAKE2b)));
 
+// On Umbrel, where the rate comes from and the fees: {rateSource:
+// "neoxa"|"fixed", fee, feeToSHA256, feeToBLAKE2b} (fractions; the last two
+// null for the fee). Restarts Lightning Fork while the bridge is on.
+router.post("/pricing", handle((req) => bridgeSwitch.instance().setPricing(body(req))));
+
 // A JSON number only: a form post (which a page elsewhere could make) carries
 // strings.
 router.post("/rate", handle((req) => {

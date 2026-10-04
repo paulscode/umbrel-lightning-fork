@@ -10,6 +10,7 @@ const {
   createBridgeOperator,
   lndRest,
   normaliseStatus,
+  marketRefusal,
   checklist,
   servingFrom,
   rateState,
@@ -713,4 +714,43 @@ test("unfinished is Lightning Fork's own count when it gives one, never a lost s
 test("a journal Lightning Fork can't read leaves unfinished unknown, not none", async () => {
   const s = { enabled: false, unfinished: 0, refusals: ["the bridge is not enabled on this node", "its swap journal cannot be read, so whether a swap is unfinished is not known: corrupt"] };
   assert.equal(await createBridgeOperator({ lightningFork: fakeNode({ "GET /v2/bridge/status": s }) }).unfinished(), null);
+});
+
+test("following the market, the rate step is the market being readable", () => {
+  const market = normaliseStatus(lndStatus({
+    rate_source: "neoxa", rate: 0.0060173, rate_cross_check: 0.0060057,
+    rate_volatility: 0.004, fee_to_sha256: 0.015, fee_to_blake2b: 0.01,
+    rate_set_at: "1791000090", rate_expires_at: "1791000180",
+  }));
+  assert.equal(market.rateSource, "neoxa");
+  assert.equal(market.rateCrossCheck, 0.0060057);
+  assert.equal(market.feeToSHA256, 0.015);
+  assert.equal(market.feeToBLAKE2b, 0.01);
+  assert.equal(rateState(market, 1791000100), "market");
+  // A reading's short life never reads as ageing or expired: the next one
+  // replaces it.
+  assert.equal(rateState(market, 1791000500), "market");
+  let steps = checklist(market, { participants: 1, now: () => 1791000100 });
+  assert.deepEqual(steps.map((x) => x.id), ["node", "fund", "channel", "market", "participants", "serving"]);
+  assert.equal(steps.find((x) => x.id === "market").done, true);
+
+  const unreadable = normaliseStatus(lndStatus({
+    rate_source: "neoxa", rate: 0.0060173,
+    refusals: ["quoting nothing while the market's two readings disagree: price sources disagree: …"],
+  }));
+  assert.equal(rateState(unreadable, 1791000100), "market_unavailable");
+  steps = checklist(unreadable, { participants: 1, now: () => 1791000100 });
+  const step = steps.find((x) => x.id === "market");
+  assert.equal(step.done, false);
+  assert.match(step.detail, /disagree/);
+  assert.match(marketRefusal(unreadable), /^quoting nothing/);
+
+  const first = normaliseStatus(lndStatus({ rate_source: "neoxa", rate: 0, refusals: ["no rate yet: reading the market"] }));
+  assert.equal(rateState(first, 1791000100), "market_unavailable");
+
+  // A Lightning Fork too old to name its source had only the operator's own.
+  const old = normaliseStatus(lndStatus());
+  assert.equal(old.rateSource, "fixed");
+  assert.equal(old.feeToSHA256, null);
+  assert.equal(checklist(old, { participants: 1, now: () => 1791000100 }).some((x) => x.id === "rate"), true);
 });

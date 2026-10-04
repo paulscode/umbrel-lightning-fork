@@ -186,6 +186,18 @@ function normaliseStatus(s) {
     rate: int(s.rate),
     rateSetAt: int(s.rate_set_at),
     rateExpiresAt: int(s.rate_expires_at),
+    // Where the rate comes from: "neoxa" (the market, read live) or "fixed"
+    // (the operator's own). A Lightning Fork too old to say had only the
+    // operator's own.
+    rateSource: s.rate_source || "fixed",
+    // Following the market: the cross-check's reading (BTCB2_USDC over
+    // BTC/USD) and how far the market moved in the last minutes.
+    rateCrossCheck: Number(s.rate_cross_check) || 0,
+    rateVolatility: Number(s.rate_volatility) || 0,
+    // Each direction's fee before the market and the position widen it;
+    // null from a Lightning Fork too old to say.
+    feeToSHA256: Number(s.fee_to_sha256) || null,
+    feeToBLAKE2b: Number(s.fee_to_blake2b) || null,
     needsOperator: s.needs_operator || [],
     // Off with swaps still being finished (Lightning Fork's drain): it
     // quotes nothing, finishes them, and stops.
@@ -247,7 +259,12 @@ function checklist(status, { participants = null, now = () => Date.now() / 1000,
   });
 
   const rate = rateState(status, now());
-  steps.push({ id: "rate", done: rate === "fresh" || rate === "ageing", detail: "" });
+  if (status.rateSource === "neoxa") {
+    // Nothing to set: the step is the market being readable.
+    steps.push({ id: "market", done: rate === "market", detail: rate === "market" ? "" : marketRefusal(status) });
+  } else {
+    steps.push({ id: "rate", done: rate === "fresh" || rate === "ageing", detail: "" });
+  }
 
   if (participants !== null) {
     steps.push({ id: "participants", done: participants > 0, detail: "" });
@@ -277,9 +294,23 @@ function servingFrom(status, directionsInfo) {
   return { directions: open, reason: open.length ? "" : status.refusals[0] || "" };
 }
 
-// How current the rate is: "unset", "fresh", "ageing" (past three quarters of
+// Lightning Fork's refusals for want of a market rate (lnrpc/bridgerpc
+// rateRefusal).
+const MARKET_REFUSAL = /^(no rate yet: reading the market|quoting nothing (without a current market rate|while the market))/;
+
+// Why there is no market rate to trade at, or "".
+function marketRefusal(status) {
+  return (status.refusals || []).find((r) => MARKET_REFUSAL.test(r)) || "";
+}
+
+// How current the rate is. Following the market: "market" (read and usable)
+// or "market_unavailable" (the bridge quotes nothing; marketRefusal says
+// why). The operator's own: "unset", "fresh", "ageing" (past three quarters of
 // its life, time to look at it) or "expired" (the bridge refuses quotes).
 function rateState(status, now) {
+  if (status.rateSource === "neoxa") {
+    return status.rate > 0 && !marketRefusal(status) ? "market" : "market_unavailable";
+  }
   if (!(status.rate > 0)) {
     return "unset";
   }
@@ -572,6 +603,7 @@ function createBridgeOperator({
         difference: s.rate > 0 && market.rate > 0 ? s.rate / market.rate - 1 : null,
       } : null,
       rateState: rateState(s, now()),
+      marketRefusal: marketRefusal(s),
       now: now(),
       participants: people,
       // On StartOS the package's own actions issue and revoke codes and keep
@@ -921,6 +953,7 @@ module.exports = {
   checklist,
   servingFrom,
   rateState,
+  marketRefusal,
   parsePeer,
   fundingTxid,
   channelList,

@@ -31,13 +31,40 @@ const deriveConfigObject = (userLndConfigObject, configObject) => {
 // (BRIDGE_SHA256_RPCHOST; Lightning Fork's default otherwise). Off, once it
 // has had a node: that node still, so that a payment left unfinished is
 // finished through it (Lightning Fork quotes nothing, and stops once done).
+// The bridge's pricing lines, from the dashboard's Pricing setting: where the
+// rate comes from and the fees, each only when chosen (Lightning Fork's
+// defaults otherwise: the market, 1.5% each way).
+const PRICING_KEYS = {
+  fee: 'bridgerpc.spread',
+  feeToSHA256: 'bridgerpc.fee.tosha256',
+  feeToBLAKE2b: 'bridgerpc.fee.toblake2b',
+};
+function pricingConfig(pricing) {
+  if (!pricing || typeof pricing !== 'object') {
+    return {};
+  }
+  const out = {};
+  if (pricing.rateSource === 'neoxa' || pricing.rateSource === 'fixed') {
+    out['bridgerpc.ratesource'] = pricing.rateSource;
+  }
+  for (const [field, key] of Object.entries(PRICING_KEYS)) {
+    if (typeof pricing[field] === 'number' && pricing[field] > 0) {
+      out[key] = pricing[field];
+    }
+  }
+  return out;
+}
+
 function bridgeConfig(bridge, rpchost = process.env.BRIDGE_SHA256_RPCHOST) {
   if (!bridge || typeof bridge.enabled !== 'boolean') {
     return {};
   }
+  // Off with a node too: a payment left unfinished is checked against the
+  // price before it is paid.
   const node = {
     'bridgerpc.sha256.supervised': true,
     ...(rpchost ? {'bridgerpc.sha256.rpchost': rpchost} : {}),
+    ...pricingConfig(bridge.pricing),
   };
   if (bridge.enabled !== true) {
     return bridge.sha256Node ? node : {};
@@ -75,6 +102,11 @@ const deriveConfigFile = async (configObject, bridge = {}) => {
   if (typeof bridge.enabled === 'boolean') {
     for (const key of Object.keys(userLndConfig)) {
       if (key === 'bridgerpc.enabled' || key === 'bridgerpc.tosha256' || key === 'bridgerpc.toblake2b' || key.startsWith('bridgerpc.sha256.')) {
+        delete userLndConfig[key];
+      }
+      // Once the Pricing setting has been saved, the rate source and fees
+      // are its too: a fee cleared there must not survive in lnd.conf.
+      if (bridge.pricing && (key === 'bridgerpc.ratesource' || Object.values(PRICING_KEYS).includes(key))) {
         delete userLndConfig[key];
       }
     }

@@ -142,6 +142,7 @@ function createBridgeSwitch({
       available: !!chosen,
       unavailable: chosen ? "" : unavailableSentence(list),
       backend: chosen ? chosen.name : "",
+      pricing: pricingOf(bridge.pricing),
     };
   }
 
@@ -280,7 +281,85 @@ function createBridgeSwitch({
     return { toBLAKE2b, restarting: true };
   }
 
-  return { info, set, setDirections, reconcile };
+  // Where the rate comes from and the fees: {rateSource: "neoxa"|"fixed",
+  // fee, feeToSHA256, feeToBLAKE2b}, fees as fractions, the per-direction
+  // ones null for the fee. Saved while off; applied at once, with a
+  // restart, while on.
+  async function setPricing(pricing) {
+    return serial(() => setPricingNow(pricing));
+  }
+
+  async function setPricingNow(pricing) {
+    if (!umbrel) {
+      throw new ValidationError("On StartOS, set the rate source and fees with the Bridge action.", 409);
+    }
+    const next = validPricing(pricing);
+    const settings = (await readSettings()) || {};
+    const lnd = settings.lnd && Object.keys(settings.lnd).length > 0 ? settings.lnd : defaultLnd;
+    const before = settings.bridge || {};
+    const same = JSON.stringify(pricingOf(before.pricing)) === JSON.stringify(next);
+    if (same && before.pricing) {
+      return { pricing: next, restarting: false };
+    }
+    const bridge = { ...before, pricing: next };
+    if (before.enabled !== true) {
+      await writeLndConfig(lnd, bridge);
+      return { pricing: next, restarting: false };
+    }
+    await applyAndRestart(lnd, bridge, before);
+    return { pricing: next, restarting: true };
+  }
+
+  return { info, set, setDirections, setPricing, reconcile };
+}
+
+// Lightning Fork's own defaults, which the Pricing setting starts from.
+const DEFAULT_PRICING = { rateSource: "neoxa", fee: 0.015, feeToSHA256: null, feeToBLAKE2b: null };
+
+// The routing budget a fee must clear, and the most it may be (Lightning
+// Fork's limits, lnrpc/bridgerpc/config_active.go).
+const ROUTING_BUDGET = 0.003;
+const MAX_FEE = 0.2;
+
+// A saved pricing, with the defaults for whatever it does not say.
+function pricingOf(saved) {
+  const p = saved && typeof saved === "object" ? saved : {};
+  return {
+    rateSource: p.rateSource === "fixed" ? "fixed" : "neoxa",
+    fee: typeof p.fee === "number" && p.fee > 0 ? p.fee : DEFAULT_PRICING.fee,
+    feeToSHA256: typeof p.feeToSHA256 === "number" && p.feeToSHA256 > 0 ? p.feeToSHA256 : null,
+    feeToBLAKE2b: typeof p.feeToBLAKE2b === "number" && p.feeToBLAKE2b > 0 ? p.feeToBLAKE2b : null,
+  };
+}
+
+// What the form sent, checked: a fee Lightning Fork would refuse keeps it from
+// starting.
+function validPricing(pricing) {
+  if (!pricing || typeof pricing !== "object") {
+    throw new ValidationError("Send the rate source and fees.", 400);
+  }
+  if (pricing.rateSource !== "neoxa" && pricing.rateSource !== "fixed") {
+    throw new ValidationError("The rate comes from the market (neoxa) or your own rate (fixed).", 400);
+  }
+  const fee = (value, name, required) => {
+    if (value === null || value === undefined || value === "") {
+      if (required) {
+        throw new ValidationError(`Enter the ${name}.`, 400);
+      }
+      return null;
+    }
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= ROUTING_BUDGET || n >= MAX_FEE) {
+      throw new ValidationError(`The ${name} must be over ${ROUTING_BUDGET * 100}% (the routing budget) and under ${MAX_FEE * 100}%.`, 400);
+    }
+    return Number(n.toFixed(6));
+  };
+  return {
+    rateSource: pricing.rateSource,
+    fee: fee(pricing.fee, "fee", true),
+    feeToSHA256: fee(pricing.feeToSHA256, "fee for paying SHA256 invoices", false),
+    feeToBLAKE2b: fee(pricing.feeToBLAKE2b, "fee for paying BLAKE2b invoices", false),
+  };
 }
 
 // The SHA256 node's config file, written whole and readable only by the
@@ -350,4 +429,4 @@ function instance() {
   return singleton;
 }
 
-module.exports = { createBridgeSwitch, instance, unavailableSentence, sha256ConfWriter, sha256ConfReader };
+module.exports = { createBridgeSwitch, instance, unavailableSentence, sha256ConfWriter, sha256ConfReader, pricingOf, validPricing };

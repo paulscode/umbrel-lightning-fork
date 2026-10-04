@@ -111,3 +111,12 @@ test("the bridge node's backup copy is said in a sentence", () => {
     "Copied off this server to your Channel backups targets 2 hours ago.");
   assert.equal(bridge.sha256BackupText({ state: "odd" }, 0), null);
 });
+
+test("the market rate's line says why nothing is quoted, or how it stands", () => {
+  assert.equal(bridge.marketLine({ marketRefusal: "quoting nothing while the market settles: …" }).variant, "danger");
+  assert.match(bridge.marketLine({ marketRefusal: "no rate yet: reading the market" }).text, /^No rate yet/);
+  assert.equal(bridge.marketLine({ rate: 0 }).text, "Reading the market");
+  const line = bridge.marketLine({ rate: 0.006, rateSetAt: 1000, now: 1012, rateCrossCheck: 0.00603, rateVolatility: 0.012 });
+  assert.equal(line.variant, "muted");
+  assert.match(line.text, /^Read 12 seconds ago; its BTCB2_USDC price agrees within 0\.5%; it moved 1\.2% in the last minutes/);
+});
