@@ -24,6 +24,9 @@ const operator = {
   openChannel: async (a) => { calls.push(["channel", a]); return { txid: "ab" }; },
   recoveryPhrase: async () => { calls.push(["recovery"]); return { mnemonic: ["w"] }; },
   channelBackup: async () => Buffer.from([1, 2, 3]),
+  channels: async () => ({ channels: [] }),
+  closeChannel: async (a) => { calls.push(["close", a]); return { txid: "cd" }; },
+  withdraw: async (a) => { calls.push(["withdraw", a]); return { txid: "ef" }; },
 };
 stub("logic/bridgeOperator.js", { instance: () => operator });
 const toggle = { on: true, nodes: [] };
@@ -31,6 +34,7 @@ stub("logic/bridgeSwitch.js", {
   instance: () => ({
     info: async () => toggle,
     set: async (enabled, node) => { calls.push(["enabled", enabled, node]); return { on: enabled }; },
+    setDirections: async (toBLAKE2b) => { calls.push(["directions", toBLAKE2b]); return { toBLAKE2b }; },
     reconcile: async () => ({ text: "" }),
   }),
 });
@@ -106,4 +110,29 @@ test("the channel backup downloads as a file", async () => {
   assert.equal(r.status, 200);
   assert.match(r.headers.get("content-disposition"), /attachment; filename="sha256-node-channel.backup"/);
   assert.deepEqual([...r.body], [1, 2, 3]);
+});
+
+test("closing a channel and sending coins take JSON types, never form strings", async () => {
+  calls.length = 0;
+  const cp = `${"ab".repeat(32)}:1`;
+  assert.equal((await call("POST", "/sha256/channels/close", { channelPoint: cp, force: "true" })).status, 400);
+  assert.equal((await call("POST", "/sha256/channels/close", { channelPoint: cp, force: "true" }, true)).status, 400);
+  assert.equal((await call("POST", "/sha256/channels/close", { channelPoint: cp, satPerVbyte: "5" })).status, 400);
+  assert.equal((await call("POST", "/sha256/withdraw", { address: "bc1q", amountSat: "5000" })).status, 400);
+  assert.equal((await call("POST", "/sha256/withdraw", { address: "bc1q", sendAll: "true" }, true)).status, 400);
+  assert.deepEqual(calls, [], "nothing reached the logic");
+
+  assert.equal((await call("POST", "/sha256/channels/close", { channelPoint: cp })).body.txid, "cd");
+  assert.equal((await call("POST", "/sha256/withdraw", { address: "bc1q", sendAll: true })).body.txid, "ef");
+  assert.equal((await call("GET", "/sha256/channels")).status, 200);
+  assert.deepEqual(calls, [
+    ["close", { channelPoint: cp, force: false, satPerVbyte: undefined }],
+    ["withdraw", { address: "bc1q", amountSat: undefined, sendAll: true, satPerVbyte: undefined }],
+  ]);
+});
+
+test("the directions switch passes what it was given to the switch", async () => {
+  calls.length = 0;
+  assert.equal((await call("POST", "/directions", { toBLAKE2b: true })).status, 200);
+  assert.deepEqual(calls, [["directions", true]]);
 });

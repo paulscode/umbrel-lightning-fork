@@ -25,18 +25,28 @@ const deriveConfigObject = (userLndConfigObject, configObject) => {
 // section. Kept apart from `lnd`, which is Advanced Settings' and is replaced
 // whole whenever that form is saved, and added after everything else so a
 // stray line in lnd.conf cannot turn the bridge on or off. On: the bridge, in
-// the direction that pays SHA256 invoices, through the SHA256 node this app
-// runs for it (sha256-lnd in docker-compose.yml), at the address the app
-// gives it (BRIDGE_SHA256_RPCHOST; Lightning Fork's default otherwise).
+// the direction that pays SHA256 invoices (and the one paying BLAKE2b
+// invoices, when chosen), through the SHA256 node this app runs for it
+// (sha256-lnd in docker-compose.yml), at the address the app gives it
+// (BRIDGE_SHA256_RPCHOST; Lightning Fork's default otherwise). Off, once it
+// has had a node: that node still, so that a payment left unfinished is
+// finished through it (Lightning Fork quotes nothing, and stops once done).
 function bridgeConfig(bridge, rpchost = process.env.BRIDGE_SHA256_RPCHOST) {
-  if (!bridge || bridge.enabled !== true) {
+  if (!bridge || typeof bridge.enabled !== 'boolean') {
     return {};
+  }
+  const node = {
+    'bridgerpc.sha256.supervised': true,
+    ...(rpchost ? {'bridgerpc.sha256.rpchost': rpchost} : {}),
+  };
+  if (bridge.enabled !== true) {
+    return bridge.sha256Node ? node : {};
   }
   return {
     'bridgerpc.enabled': true,
     'bridgerpc.tosha256': true,
-    'bridgerpc.sha256.supervised': true,
-    ...(rpchost ? {'bridgerpc.sha256.rpchost': rpchost} : {}),
+    ...(bridge.toBLAKE2b === true ? {'bridgerpc.toblake2b': true} : {}),
+    ...node,
   };
 }
 

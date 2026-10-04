@@ -343,6 +343,16 @@ test("lndRest pins the node's certificate and sends the macaroon", async (t) => 
         res.writeHead(400, { "Content-Type": "application/json" });
         return res.end(JSON.stringify({ code: 3, message: "invalid_request: a rate must be positive" }));
       }
+      if (req.url.startsWith("/v1/channels/")) {
+        // A stream that goes on: answered by its first message.
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.write(JSON.stringify({ result: { close_pending: { txid: Buffer.from("ab".repeat(32), "hex").toString("base64") } } }) + "\n");
+        return;
+      }
+      if (req.url === "/v1/stream-error") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({ error: { code: 2, message: "cannot coop close channel with active htlcs" } }) + "\n");
+      }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ enabled: true }));
     });
@@ -370,6 +380,105 @@ test("lndRest pins the node's certificate and sends the macaroon", async (t) => 
   // Missing credentials are a 503 with a sentence, not a crash.
   const missing = lndRest({ base, certFile: cert, macaroonFile: path.join(dir, "nope") });
   await assert.rejects(missing("GET", "/v2/bridge/status"), (e) => e.statusCode === 503);
+
+  // The first macaroon that exists, narrowest first.
+  const operatorFile = path.join(dir, "operator.macaroon");
+  const either = lndRest({ base, certFile: cert, macaroonFile: [operatorFile, macaroonFile] });
+  await either("GET", "/v2/bridge/status");
+  assert.equal(seen.macaroon, "020103", "the admin one while there is no other");
+  fs.writeFileSync(operatorFile, Buffer.from([9, 9]));
+  await either("GET", "/v2/bridge/status");
+  assert.equal(seen.macaroon, "0909");
+
+  // A stream is answered by its first message, without waiting for its end.
+  const update = await call("DELETE", `/v1/channels/${"cd".repeat(32)}/0`, undefined, { firstMessage: true });
+  assert.ok(update.close_pending);
+  await assert.rejects(call("POST", "/v1/stream-error", {}, { firstMessage: true }), /active htlcs/);
+});
+
+const CP = `${"ab".repeat(32)}:1`;
+function sha256Channels({ active = true, htlcs = 0 } = {}) {
+  return {
+    "GET /v1/channels": { channels: [{ channel_point: CP, remote_pubkey: NODE, capacity: "500000", local_balance: "400000", remote_balance: "90000", active, pending_htlcs: new Array(htlcs).fill({}) }] },
+    "GET /v1/channels/pending": {
+      pending_open_channels: [{ channel: { channel_point: `${"cd".repeat(32)}:0`, remote_node_pub: NODE, capacity: "100000", local_balance: "99000" } }],
+      waiting_close_channels: [{ channel: { channel_point: `${"ef".repeat(32)}:0`, remote_node_pub: NODE, capacity: "200000" }, closing_txid: "11".repeat(32) }],
+      pending_force_closing_channels: [{ channel: { channel_point: `${"12".repeat(32)}:0`, remote_node_pub: NODE, capacity: "300000" }, closing_txid: "22".repeat(32), blocks_til_maturity: 140 }],
+    },
+  };
+}
+
+test("the bridge node's channels are listed open and pending", async () => {
+  const op = createBridgeOperator({
+    lightningFork: fakeNode({ "GET /v2/bridge/status": lndStatus() }),
+    sha256Node: fakeNode(sha256Channels()),
+  });
+  const { channels } = await op.channels();
+  assert.deepEqual(channels.map((c) => c.state), ["active", "opening", "closing", "force-closing"]);
+  assert.equal(channels[0].localSat, 400000);
+  assert.equal(channels[3].blocksTilMaturity, 140);
+  assert.equal(channels[2].closingTxid, "11".repeat(32));
+});
+
+test("a channel is closed by its point, with its peer or forced, never under a payment", async () => {
+  const closes = [];
+  const routes = (opts) => ({
+    ...sha256Channels(opts),
+    [`DELETE /v1/channels/${"ab".repeat(32)}/1`]: () => {
+      closes.push("coop");
+      return { close_pending: { txid: Buffer.from("01".repeat(32), "hex").toString("base64") } };
+    },
+    [`DELETE /v1/channels/${"ab".repeat(32)}/1?force=true`]: () => {
+      closes.push("force");
+      return { close_pending: { txid: Buffer.from("02".repeat(32), "hex").toString("base64") } };
+    },
+    [`DELETE /v1/channels/${"ab".repeat(32)}/1?sat_per_vbyte=7`]: () => {
+      closes.push("coop 7");
+      return { close_pending: {} };
+    },
+  });
+  const make = (status, opts) => createBridgeOperator({
+    lightningFork: fakeNode({ "GET /v2/bridge/status": status }),
+    sha256Node: fakeNode(routes(opts)),
+  });
+  const op = make(lndStatus());
+  assert.deepEqual(await op.closeChannel({ channelPoint: CP }), { txid: "01".repeat(32) });
+  assert.deepEqual(await op.closeChannel({ channelPoint: CP, force: true }), { txid: "02".repeat(32) });
+  await op.closeChannel({ channelPoint: CP, satPerVbyte: 7 });
+  assert.deepEqual(closes, ["coop", "force", "coop 7"]);
+
+  await assert.rejects(op.closeChannel({ channelPoint: CP, force: true, satPerVbyte: 7 }), /leave the fee rate out/);
+  await assert.rejects(op.closeChannel({ channelPoint: "nope" }), (e) => e.statusCode === 400);
+  await assert.rejects(op.closeChannel({ channelPoint: `${"99".repeat(32)}:0` }), (e) => e.statusCode === 404);
+  await assert.rejects(op.closeChannel({ channelPoint: `${"cd".repeat(32)}:0` }), /still opening/);
+  await assert.rejects(op.closeChannel({ channelPoint: `${"ef".repeat(32)}:0` }), /already closing/);
+  await assert.rejects(make(lndStatus(), { active: false }).closeChannel({ channelPoint: CP }), /force the close/);
+
+  const busy = make(lndStatus({ swaps_in_flight: 1 }));
+  await assert.rejects(busy.closeChannel({ channelPoint: CP, force: true }), (e) => e.statusCode === 409 && /not finished/.test(e.message));
+  assert.equal(closes.length, 3, "nothing closed under a payment");
+
+  const external = createBridgeOperator({ lightningFork: fakeNode({}) });
+  await assert.rejects(external.closeChannel({ channelPoint: CP }), /your own tools/);
+});
+
+test("coins are sent from the bridge node: an amount or everything", async () => {
+  const sent = [];
+  const op = createBridgeOperator({
+    lightningFork: fakeNode({ "GET /v2/bridge/status": lndStatus() }),
+    sha256Node: fakeNode({ "POST /v1/transactions": (body) => { sent.push(body); return { txid: "aa".repeat(32) }; } }),
+  });
+  const addr = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4";
+  assert.deepEqual(await op.withdraw({ address: addr, amountSat: 50000 }), { txid: "aa".repeat(32) });
+  await op.withdraw({ address: addr, sendAll: true, satPerVbyte: 3 });
+  assert.deepEqual(sent, [
+    { addr, amount: "50000", target_conf: 6 },
+    { addr, send_all: true, sat_per_vbyte: "3" },
+  ]);
+  await assert.rejects(op.withdraw({ address: "x y", amountSat: 1 }), /not an address/);
+  await assert.rejects(op.withdraw({ address: addr, amountSat: 1.5 }), /whole number/);
+  await assert.rejects(op.withdraw({ address: addr, amountSat: 10, satPerVbyte: 0 }), /sats per vbyte/);
+  assert.equal(sent.length, 2);
 });
 
 test("the SHA256 node's channel backup is the packed bytes lnd exports", async () => {

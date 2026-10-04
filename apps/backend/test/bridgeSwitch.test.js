@@ -291,3 +291,29 @@ test("two writes at once both land, the last one standing", async () => {
   assert.ok(["a\n", "b\n"].includes(fs.readFileSync(file, "utf8")));
   assert.deepEqual(fs.readdirSync(dir), ["bridge-sha256.conf"]);
 });
+
+test("paying BLAKE2b invoices is saved while off and applied with a restart while on", async () => {
+  const off = harness({ settings: { lnd: LND, bridge: { enabled: false, sha256Node: "paulscode-knots-sha256" } } });
+  assert.deepEqual(await off.sw.setDirections(true), { toBLAKE2b: true, restarting: false });
+  assert.equal(off.state.settings.bridge.toBLAKE2b, true);
+  assert.equal(off.state.stops, 0);
+  assert.equal((await off.sw.info()).toBLAKE2b, true);
+
+  const on = harness({ settings: { lnd: LND, bridge: { enabled: true, sha256Node: "paulscode-knots-sha256" } } });
+  assert.deepEqual(await on.sw.setDirections(true), { toBLAKE2b: true, restarting: true });
+  assert.equal(on.state.stops, 1);
+  assert.deepEqual(await on.sw.setDirections(true), { toBLAKE2b: true, restarting: false }, "already so");
+  assert.equal(on.state.stops, 1);
+  assert.deepEqual(on.state.settings.lnd, LND);
+
+  await assert.rejects(on.sw.setDirections("yes"), (e) => e.statusCode === 400);
+  const startos = harness({ platform: "startos" });
+  await assert.rejects(startos.sw.setDirections(true), /Bridge action/);
+});
+
+test("it stops paying BLAKE2b invoices only with nothing unfinished", async () => {
+  const h = harness({ settings: { lnd: LND, bridge: { enabled: true, toBLAKE2b: true, sha256Node: "paulscode-knots-sha256" } }, unfinished: async () => 2 });
+  await assert.rejects(h.sw.setDirections(false), (e) => e.statusCode === 409 && /2 payments/.test(e.message));
+  assert.equal(h.state.settings.bridge.toBLAKE2b, true);
+  assert.equal(h.state.stops, 0);
+});

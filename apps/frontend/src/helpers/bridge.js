@@ -164,3 +164,55 @@ export function sha256ExplorerBase(explorer) {
   }
   return "https://mempool.space";
 }
+
+// One of the bridge node's channels as the window lists it
+// (logic/bridgeOperator.js channelList): what it is doing, and how it looks.
+export const CHANNEL_STATES = {
+  active: { text: "Open", variant: "success" },
+  inactive: { text: "Open, peer not connected", variant: "warning" },
+  opening: { text: "Opening", variant: "warning" },
+  closing: { text: "Closing", variant: "muted" },
+  "force-closing": { text: "Closing (forced)", variant: "muted" }
+};
+
+export function channelState(channel) {
+  const s = CHANNEL_STATES[channel && channel.state] || {
+    text: (channel && channel.state) || "Unknown",
+    variant: "muted"
+  };
+  if (
+    channel &&
+    channel.state === "force-closing" &&
+    channel.blocksTilMaturity > 0
+  ) {
+    const n = channel.blocksTilMaturity;
+    return {
+      ...s,
+      text: `${s.text}: its coins are spendable in ${n.toLocaleString()} ${
+        n === 1 ? "block" : "blocks"
+      }`
+    };
+  }
+  return s;
+}
+
+// Whether a channel can be closed from the window, and how.
+export function closeOptions(channel) {
+  if (!channel || !["active", "inactive"].includes(channel.state)) {
+    return { closable: false, coop: false };
+  }
+  return { closable: true, coop: channel.state === "active" };
+}
+
+// A fee rate field: empty for the node's own estimate, else a whole number
+// of sat/vB. Null when what was typed is neither.
+export function feeRateInput(text) {
+  const t = String(text === undefined || text === null ? "" : text).trim();
+  if (!t) {
+    return { ok: true, value: undefined };
+  }
+  const n = Number(t);
+  return Number.isInteger(n) && n >= 1 && n <= 10000
+    ? { ok: true, value: n }
+    : { ok: false, value: undefined };
+}

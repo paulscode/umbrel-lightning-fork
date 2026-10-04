@@ -45,6 +45,10 @@ router.get("/", handle(async () => {
 // On Umbrel, the switch: {enabled: true|false}. Restarts Lightning Fork.
 router.post("/enabled", handle((req) => bridgeSwitch.instance().set(body(req).enabled, body(req).node === undefined ? null : body(req).node)));
 
+// On Umbrel, whether the bridge also pays BLAKE2b invoices for BTC (SHA256):
+// {toBLAKE2b: true|false}. Restarts Lightning Fork while the bridge is on.
+router.post("/directions", handle((req) => bridgeSwitch.instance().setDirections(body(req).toBLAKE2b)));
+
 // A JSON number only: a form post (which a page elsewhere could make) carries
 // strings.
 router.post("/rate", handle((req) => {
@@ -62,6 +66,25 @@ router.post("/sha256/channel", handle((req) => {
     throw new ValidationError("Give the peer as text and the amount as a number of sats.", 400);
   }
   return logic().openChannel({ peer: body(req).peer, amountSat: body(req).amountSat });
+}));
+
+router.get("/sha256/channels", handle(() => logic().channels()));
+// JSON types only, as /sha256/channel.
+router.post("/sha256/channels/close", handle((req) => {
+  const { channelPoint, force = false, satPerVbyte } = body(req);
+  if (typeof channelPoint !== "string" || typeof force !== "boolean" || (satPerVbyte !== undefined && typeof satPerVbyte !== "number")) {
+    throw new ValidationError("Give the channel point as text, force as true or false, and any fee rate as a number.", 400);
+  }
+  return logic().closeChannel({ channelPoint, force, satPerVbyte });
+}));
+router.post("/sha256/withdraw", handle((req) => {
+  const { address, amountSat, sendAll = false, satPerVbyte } = body(req);
+  if (typeof address !== "string" || typeof sendAll !== "boolean" ||
+    (!sendAll && typeof amountSat !== "number") ||
+    (satPerVbyte !== undefined && typeof satPerVbyte !== "number")) {
+    throw new ValidationError("Give the address as text, and the amount and any fee rate as numbers.", 400);
+  }
+  return logic().withdraw({ address, amountSat, sendAll, satPerVbyte });
 }));
 
 // The SHA256 node's recovery phrase. A POST, and only when the request says

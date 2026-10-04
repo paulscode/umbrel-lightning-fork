@@ -4,9 +4,10 @@
 // The bridge itself lives in Lightning Fork (its bridgerpc sub-server); this
 // reads it and drives it through its REST routes. When Lightning Fork runs the
 // bridge's SHA256 Lightning node for the operator (bridgerpc.sha256.supervised)
-// this also talks to that node directly, with its own admin macaroon, for the
-// things an operator does with a node: a deposit address and a channel. The
-// bridge never holds that macaroon; it bakes a narrow one of its own.
+// this also talks to that node directly, for the things an operator does with a
+// node: a deposit address, a channel opened or closed, coins sent away. With
+// the narrow operator.macaroon Lightning Fork bakes for this console where it
+// can be read, never the bridge's own.
 //
 // Nothing here runs unless the page is opened, so a node that never bridges
 // pays nothing for it.
@@ -36,15 +37,37 @@ const REQUEST_TIMEOUT_MS = 20 * 1000;
 // packages agree on these).
 const SHA256_REST_PORT = 8089;
 
+// The first of `files` that can be read.
+async function readFirst(readFile, files) {
+  let last;
+  for (const f of files) {
+    try {
+      return await readFile(f);
+    } catch (error) {
+      last = error;
+      if (error.code !== "ENOENT") {
+        break;
+      }
+    }
+  }
+  throw last;
+}
+
 // An lnd REST client for one node: its certificate is the only CA accepted,
-// and its macaroon goes on every call. Read per call, so a regenerated
+// and its macaroon goes on every call: the first of several that exists, when
+// given several, the narrowest first. Read per call, so a regenerated
 // certificate or macaroon is picked up without a restart.
+//
+// { firstMessage: true } is for a streaming call (lnd's REST gateway writes
+// one JSON object a line): it answers with the first message and hangs up, as
+// `lncli closechannel --block=false` does. What was asked carries on in lnd.
 function lndRest({ base, certFile, macaroonFile, readFile = fs.promises.readFile }) {
-  return async function call(method, route, body) {
+  const macaroonFiles = [].concat(macaroonFile);
+  return async function call(method, route, body, { firstMessage = false } = {}) {
     let ca;
     let macaroon;
     try {
-      [ca, macaroon] = await Promise.all([readFile(certFile), readFile(macaroonFile)]);
+      [ca, macaroon] = await Promise.all([readFile(certFile), readFirst(readFile, macaroonFiles)]);
     } catch (error) {
       const e = new ValidationError("This node's credentials for it cannot be read yet.", 503);
       e.code = "credentials";
@@ -55,6 +78,8 @@ function lndRest({ base, certFile, macaroonFile, readFile = fs.promises.readFile
     const payload = body === undefined ? null : JSON.stringify(body);
 
     return new Promise((resolve, reject) => {
+      // Set once a stream's first message has answered.
+      let done = false;
       const req = https.request(url, {
         method,
         ca,
@@ -65,21 +90,49 @@ function lndRest({ base, certFile, macaroonFile, readFile = fs.promises.readFile
         },
       }, (res) => {
         let raw = "";
+        const ok = res.statusCode >= 200 && res.statusCode < 300;
+        // A stream's message: {"result": ...} or {"error": ...}.
+        const settleStream = (line) => {
+          done = true;
+          let msg;
+          try {
+            msg = JSON.parse(line);
+          } catch (_) {
+            return reject(new Error(`unreadable reply from ${url.pathname}`));
+          }
+          if (msg && msg.error) {
+            const e = new Error(msg.error.message || "the call failed");
+            e.grpcCode = msg.error.code;
+            return reject(e);
+          }
+          return resolve((msg && msg.result) || {});
+        };
         res.setEncoding("utf8");
         res.on("data", (chunk) => {
           raw += chunk;
           if (raw.length > 4 * 1024 * 1024) {
             req.destroy(new Error("reply too large"));
           }
+          const nl = raw.indexOf("\n");
+          if (firstMessage && ok && !done && nl >= 0) {
+            settleStream(raw.slice(0, nl));
+            req.destroy();
+          }
         });
         res.on("end", () => {
+          if (done) {
+            return;
+          }
+          if (firstMessage && ok) {
+            return raw.trim() ? settleStream(raw.trim()) : reject(new Error(`${url.pathname} ended without an answer`));
+          }
           let data = null;
           try {
             data = raw ? JSON.parse(raw) : {};
           } catch (_) {
             return reject(new Error(`unreadable reply from ${url.pathname}`));
           }
-          if (res.statusCode >= 200 && res.statusCode < 300) {
+          if (ok) {
             return resolve(data);
           }
           const e = new Error((data && (data.message || data.error)) || `HTTP ${res.statusCode}`);
@@ -89,7 +142,11 @@ function lndRest({ base, certFile, macaroonFile, readFile = fs.promises.readFile
         });
       });
       req.on("timeout", () => req.destroy(new Error(`${url.pathname} did not answer in time`)));
-      req.on("error", reject);
+      req.on("error", (error) => {
+        if (!done) {
+          reject(error);
+        }
+      });
       if (payload) {
         req.write(payload);
       }
@@ -240,6 +297,54 @@ function fundingTxid(point) {
     return Buffer.from(point.funding_txid_bytes, "base64").reverse().toString("hex");
   }
   return "";
+}
+
+// A fee rate as the forms send it: absent, or a whole number of sat/vB.
+function feeRate(value) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1 || n > 10000) {
+    throw new ValidationError("The fee rate is a whole number of sats per vbyte.", 400);
+  }
+  return n;
+}
+
+// The SHA256 node's channels as the window lists them, open and pending.
+function channelList(open, pending) {
+  const sat = (v) => int(v);
+  const out = (open.channels || []).map((c) => ({
+    channelPoint: c.channel_point,
+    remotePubkey: c.remote_pubkey,
+    capacitySat: sat(c.capacity),
+    localSat: sat(c.local_balance),
+    remoteSat: sat(c.remote_balance),
+    state: c.active ? "active" : "inactive",
+    htlcs: (c.pending_htlcs || []).length,
+  }));
+  const add = (list, state, extra = () => ({})) => {
+    for (const p of list || []) {
+      const c = p.channel || {};
+      out.push({
+        channelPoint: c.channel_point,
+        remotePubkey: c.remote_node_pub,
+        capacitySat: sat(c.capacity),
+        localSat: sat(c.local_balance),
+        remoteSat: sat(c.remote_balance),
+        state,
+        htlcs: 0,
+        ...extra(p),
+      });
+    }
+  };
+  add(pending.pending_open_channels, "opening");
+  add(pending.waiting_close_channels, "closing", (p) => ({ closingTxid: p.closing_txid || "" }));
+  add(pending.pending_force_closing_channels, "force-closing", (p) => ({
+    closingTxid: p.closing_txid || "",
+    blocksTilMaturity: int(p.blocks_til_maturity),
+  }));
+  return out;
 }
 
 function freshRootKeyId(used, random = randomBytes) {
@@ -481,6 +586,107 @@ function createBridgeOperator({
     }
   }
 
+  async function channels() {
+    await requireSha256Node();
+    try {
+      const [open, pending] = await Promise.all([
+        sha256Node("GET", "/v1/channels"),
+        sha256Node("GET", "/v1/channels/pending"),
+      ]);
+      return { channels: channelList(open, pending) };
+    } catch (error) {
+      throw new ValidationError(`The SHA256 node did not list its channels: ${lndMessage(error)}`, 502);
+    }
+  }
+
+  // Not while a payment through the bridge is unfinished: it may be
+  // riding on this channel, and closing it under one turns a payment the
+  // bridge is finishing into one settled on chain.
+  async function requireNothingUnfinished(what) {
+    const open = await unfinished();
+    if (open === null) {
+      throw new ValidationError(`Lightning Fork is not answering about the bridge, so whether a payment through it is unfinished is not known. ${what} once it answers.`, 503);
+    }
+    if (open > 0) {
+      throw new ValidationError(`${open} ${open === 1 ? "payment" : "payments"} through the bridge ${open === 1 ? "is" : "are"} not finished. ${what} once none is in progress or needs you.`, 409);
+    }
+  }
+
+  // Closes one of the SHA256 node's channels: with its peer, or alone
+  // (force), which locks the node's share for a while.
+  async function closeChannel({ channelPoint, force = false, satPerVbyte = null }) {
+    await requireSha256Node();
+    const m = String(channelPoint || "").match(/^([0-9a-f]{64}):(\d{1,5})$/);
+    if (!m) {
+      throw new ValidationError("Name the channel by its channel point (txid:index).", 400);
+    }
+    if (typeof force !== "boolean") {
+      throw new ValidationError("Say whether to force the close.", 400);
+    }
+    const rate = feeRate(satPerVbyte);
+    if (force && rate !== null) {
+      throw new ValidationError("A forced close pays the fee its commitment transaction already has; leave the fee rate out.", 400);
+    }
+    await requireNothingUnfinished("Close the channel");
+    const { channels: list } = await channels();
+    const chan = list.find((c) => c.channelPoint === channelPoint);
+    if (!chan) {
+      throw new ValidationError("The bridge node has no such channel.", 404);
+    }
+    if (chan.state !== "active" && chan.state !== "inactive") {
+      throw new ValidationError(chan.state === "opening" ? "The channel is still opening; it can be closed once it is open." : "The channel is already closing.", 409);
+    }
+    if (!force && chan.state === "inactive") {
+      throw new ValidationError("Its peer is not connected, so the channel cannot be closed with it now. Wait for the peer, or force the close.", 409);
+    }
+    const query = new URLSearchParams();
+    if (force) {
+      query.set("force", "true");
+    } else if (rate !== null) {
+      query.set("sat_per_vbyte", String(rate));
+    }
+    try {
+      const update = await sha256Node("DELETE", `/v1/channels/${m[1]}/${m[2]}${query.toString() ? `?${query}` : ""}`, undefined, { firstMessage: true });
+      const pendingTxid = update.close_pending && update.close_pending.txid;
+      return { txid: pendingTxid ? Buffer.from(pendingTxid, "base64").reverse().toString("hex") : "" };
+    } catch (error) {
+      if (/did not answer in time/.test(error.message)) {
+        return { txid: "", slow: true };
+      }
+      throw new ValidationError(`The channel was not closed: ${lndMessage(error)}`, 502);
+    }
+  }
+
+  // Sends coins on the SHA256 chain out of the bridge node: an amount, or
+  // all of it.
+  async function withdraw({ address, amountSat = null, sendAll = false, satPerVbyte = null }) {
+    await requireSha256Node();
+    const addr = String(address || "").trim();
+    if (!/^[A-Za-z0-9]{14,90}$/.test(addr)) {
+      throw new ValidationError("That is not an address.", 400);
+    }
+    if (typeof sendAll !== "boolean") {
+      throw new ValidationError("Say whether to send everything.", 400);
+    }
+    const amount = Number(amountSat);
+    if (!sendAll && (!Number.isInteger(amount) || amount < 1)) {
+      throw new ValidationError("Give the amount as a whole number of sats.", 400);
+    }
+    const rate = feeRate(satPerVbyte);
+    const req = { addr, ...(sendAll ? { send_all: true } : { amount: String(amount) }) };
+    if (rate !== null) {
+      req.sat_per_vbyte = String(rate);
+    } else {
+      req.target_conf = 6;
+    }
+    try {
+      const res = await sha256Node("POST", "/v1/transactions", req);
+      return { txid: res.txid || "" };
+    } catch (error) {
+      throw new ValidationError(`Nothing was sent: ${lndMessage(error)}`, 502);
+    }
+  }
+
   async function recoveryPhrase() {
     try {
       const res = await lightningFork("POST", "/v2/bridge/sha256seed", {});
@@ -574,7 +780,7 @@ function createBridgeOperator({
     return { revoked: rootKeyId };
   }
 
-  return { overview, status, setRate, depositAddress, openChannel, recoveryPhrase, channelBackup, issueCode, revokeCode, participants, idleNode, unfinished };
+  return { overview, status, setRate, depositAddress, openChannel, channels, closeChannel, withdraw, recoveryPhrase, channelBackup, issueCode, revokeCode, participants, idleNode, unfinished };
 }
 
 // The instance the routes use, from the environment.
@@ -598,13 +804,17 @@ function instance() {
       certFile: constants.LND_CERT_FILE,
       macaroonFile: constants.LND_ADMIN_MACAROON_FILE,
     }),
-    // Umbrel mounts the node's directory; StartOS hands copies over
-    // (SHA256_TLS_FILE, SHA256_MACAROON_FILE) and mounts nothing of it.
+    // Umbrel mounts the node's directory and Lightning Fork's, where the
+    // console's operator.macaroon is (the node's admin one only until
+    // Lightning Fork has baked it); StartOS hands copies over
+    // (SHA256_TLS_FILE, SHA256_MACAROON_FILE) and mounts nothing of either.
     sha256Node: lndRest({
       base: process.env.SHA256_LND_REST || `https://${host}:${SHA256_REST_PORT}`,
       certFile: process.env.SHA256_TLS_FILE || path.join(sha256Dir, "tls.cert"),
-      macaroonFile: process.env.SHA256_MACAROON_FILE ||
+      macaroonFile: process.env.SHA256_MACAROON_FILE || [
+        path.join(lndDir, "data", "chain", "bitcoin", sha256Network, "bridge", "sha256", "operator.macaroon"),
         path.join(sha256Dir, "data", "chain", "bitcoin", sha256Network, "admin.macaroon"),
+      ],
     }),
     reference: createReferenceRate(),
     participantUrl: onion && onion !== "unset.onion" && onion !== "notyetset.onion"
@@ -643,6 +853,7 @@ module.exports = {
   rateState,
   parsePeer,
   fundingTxid,
+  channelList,
   freshRootKeyId,
   lndMessage,
   instance,

@@ -132,6 +132,7 @@ function createBridgeSwitch({
     const chosen = sha256Nodes ? sha256Nodes.pick(list, bridge.sha256Node) : null;
     return {
       on: bridge.enabled === true,
+      toBLAKE2b: bridge.toBLAKE2b === true,
       nodes: list.map((n) => ({ id: n.id, name: n.name, state: n.state, detail: n.detail })),
       // The node in use while on; the one that would be used otherwise.
       chosen: chosen ? chosen.id : null,
@@ -218,6 +219,12 @@ function createBridgeSwitch({
       return { on: enabled, restarting: false, node: next.sha256Node || null };
     }
 
+    await applyAndRestart(lnd, next, before);
+    return { on: enabled, restarting: true, node: next.sha256Node || null };
+  }
+
+  // Writes both files and restarts Lightning Fork to read them.
+  async function applyAndRestart(lnd, next, before) {
     await writeLndConfig(lnd, next);
     try {
       await stopDaemon();
@@ -233,10 +240,47 @@ function createBridgeSwitch({
       // policy starts it again with what was just written, which is how a
       // bridge that keeps it from starting is turned off from here.
     }
-    return { on: enabled, restarting: true, node: next.sha256Node || null };
   }
 
-  return { info, set, reconcile };
+  // Whether the bridge also pays BLAKE2b invoices for BTC (SHA256): payers
+  // on the SHA256 chain pay the bridge's node, and Lightning Fork pays their
+  // invoice from its own channels. Saved while off, for when it is on;
+  // applied at once, with a restart, while on.
+  async function setDirections(toBLAKE2b) {
+    return serial(() => setDirectionsNow(toBLAKE2b));
+  }
+
+  async function setDirectionsNow(toBLAKE2b) {
+    if (!umbrel) {
+      throw new ValidationError("On StartOS, choose the directions with the Bridge action.", 409);
+    }
+    if (typeof toBLAKE2b !== "boolean") {
+      throw new ValidationError("Say whether the bridge should pay BLAKE2b invoices.", 400);
+    }
+    const settings = (await readSettings()) || {};
+    const lnd = settings.lnd && Object.keys(settings.lnd).length > 0 ? settings.lnd : defaultLnd;
+    const before = settings.bridge || {};
+    if ((before.toBLAKE2b === true) === toBLAKE2b) {
+      return { toBLAKE2b, restarting: false };
+    }
+    // As for turning the whole bridge off: Lightning Fork would finish
+    // such a payment all the same, but this is the rule the operator knows.
+    if (!toBLAKE2b && before.enabled === true) {
+      const open = await unfinished();
+      if (open > 0) {
+        throw new ValidationError(`${open} ${open === 1 ? "payment" : "payments"} through the bridge ${open === 1 ? "is" : "are"} not finished. Stop paying BLAKE2b invoices once none is in progress or needs you.`, 409);
+      }
+    }
+    const next = { ...before, toBLAKE2b };
+    if (before.enabled !== true) {
+      await writeLndConfig(lnd, next);
+      return { toBLAKE2b, restarting: false };
+    }
+    await applyAndRestart(lnd, next, before);
+    return { toBLAKE2b, restarting: true };
+  }
+
+  return { info, set, setDirections, reconcile };
 }
 
 // The SHA256 node's config file, written whole and readable only by the

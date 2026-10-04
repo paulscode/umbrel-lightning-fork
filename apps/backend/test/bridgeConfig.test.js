@@ -69,6 +69,20 @@ test("the SHA256 node's address goes in when the app gives one", () => {
   assert.deepEqual(config.bridgeConfig({ enabled: false }, "10.21.21.68:10019"), {});
 });
 
+test("off, a bridge that has had a node keeps it, to finish what is unfinished", () => {
+  assert.deepEqual(config.bridgeConfig({ enabled: false, sha256Node: "paulscode-knots-sha256", toBLAKE2b: true }, "10.21.21.68:10019"), {
+    "bridgerpc.sha256.supervised": true,
+    "bridgerpc.sha256.rpchost": "10.21.21.68:10019",
+  });
+  assert.deepEqual(config.bridgeConfig({ sha256Node: "paulscode-knots-sha256" }, "10.21.21.68:10019"), {}, "the switch never used");
+});
+
+test("paying BLAKE2b invoices adds its direction", () => {
+  assert.equal(config.bridgeConfig({ enabled: true, toBLAKE2b: true })["bridgerpc.toblake2b"], true);
+  assert.equal(config.bridgeConfig({ enabled: true })["bridgerpc.toblake2b"], undefined);
+  assert.equal(config.bridgeConfig({ enabled: true, toBLAKE2b: true })["bridgerpc.tosha256"], true);
+});
+
 test("a bridge set up by hand in lnd.conf stands until the switch is used", async () => {
   const byHand = [
     "bridgerpc.enabled=true",

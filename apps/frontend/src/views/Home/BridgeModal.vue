@@ -322,7 +322,9 @@
                 <div v-if="overview.canManageSha256Node" class="mt-2 d-flex flex-wrap">
                   <b-button size="sm" variant="outline-primary" class="mr-2 mb-1" @click="showPanel('deposit')">Deposit address</b-button>
                   <b-button size="sm" variant="outline-primary" class="mr-2 mb-1" @click="showPanel('channel')">Open a channel</b-button>
-                  <b-button size="sm" variant="outline-primary" class="mb-1" @click="showPanel('connect')">Node address</b-button>
+                  <b-button size="sm" variant="outline-primary" class="mr-2 mb-1" @click="showPanel('connect')">Node address</b-button>
+                  <b-button size="sm" variant="outline-primary" class="mr-2 mb-1" @click="showPanel('channels')">Channels</b-button>
+                  <b-button size="sm" variant="outline-primary" class="mb-1" @click="showPanel('send')">Send coins</b-button>
                 </div>
               </template>
               <small v-else class="d-block text-muted mt-1">
@@ -414,6 +416,95 @@
             It takes no incoming connections, so other nodes cannot reach it
             to open a channel to it: open channels from it instead.
           </small>
+        </div>
+
+        <div v-if="panel === 'channels'" class="neu-card p-3 mb-3" ref="panel">
+          <div class="font-weight-bold mb-2">The bridge node's channels</div>
+          <div v-if="chans.loading" class="text-muted small">Asking the node…</div>
+          <small v-else-if="!chans.list.length" class="d-block text-muted">No channels yet.</small>
+          <div v-for="c in chans.list" :key="c.channelPoint" class="channel-row py-2">
+            <div class="kv">
+              <span :title="c.remotePubkey">{{ shortKey(c.remotePubkey) }}</span>
+              <span :class="`text-${channelState(c).variant}`">{{ channelState(c).text }}</span>
+            </div>
+            <div class="kv">
+              <span>{{ sats(c.capacitySat) }}</span>
+              <small class="text-muted">{{ sats(c.localSat) }} yours, {{ sats(c.remoteSat) }} theirs</small>
+            </div>
+            <a v-if="c.closingTxid" :href="`${explorerBase}/tx/${c.closingTxid}`" target="_blank" rel="noopener" class="small" @click="confirmExplorer">Its closing transaction on {{ explorerName }}</a>
+            <template v-if="closeOptions(c).closable">
+              <b-button v-if="chans.closing !== c.channelPoint" size="sm" variant="link" class="px-0 text-danger" :disabled="chans.busy" @click="startClose(c)">Close…</b-button>
+              <div v-else class="mt-1">
+                <small class="d-block mb-2">
+                  Its {{ sats(c.localSat) }} come back to the node's on-chain
+                  balance once the closing transaction confirms<template v-if="chans.force">,
+                  and a forced close locks them for up to two weeks first</template>.
+                  The bridge pays SHA256 invoices out of its channels, so
+                  with no other channel it stops serving.
+                </small>
+                <b-form-checkbox v-model="chans.force" :disabled="chans.busy || !closeOptions(c).coop" class="small mb-1">
+                  Force the close (without the peer){{ closeOptions(c).coop ? "" : ": its peer is not connected" }}
+                </b-form-checkbox>
+                <template v-if="!chans.force">
+                  <label class="small font-weight-bold mb-1" :for="`bridge-close-fee-${c.channelPoint}`">Fee rate (optional)</label>
+                  <b-input-group append="sat/vB" class="mb-2 fee-input">
+                    <b-form-input :id="`bridge-close-fee-${c.channelPoint}`" v-model="chans.fee" type="number" min="1" step="1" class="neu-input" placeholder="estimate" :disabled="chans.busy"></b-form-input>
+                  </b-input-group>
+                </template>
+                <b-button size="sm" variant="danger" class="mr-2" :disabled="chans.busy || !feeRateInput(chans.force ? '' : chans.fee).ok" @click="closeChannel(c)">{{ chans.busy ? "Closing…" : "Close the channel" }}</b-button>
+                <b-button size="sm" variant="link" :disabled="chans.busy" @click="chans.closing = ''">Cancel</b-button>
+              </div>
+            </template>
+          </div>
+          <template v-if="chans.txid">
+            <small class="d-block mt-2 mb-1">The channel is closing. Its closing transaction:</small>
+            <input-copy size="sm" :value="chans.txid"></input-copy>
+            <a :href="`${explorerBase}/tx/${chans.txid}`" target="_blank" rel="noopener" class="small d-inline-block mt-1" @click="confirmExplorer">See it on {{ explorerName }}</a>
+          </template>
+          <small v-else-if="chans.slow" class="d-block mt-2 text-muted">
+            The node is still agreeing the close with its peer; the channel
+            shows as closing once it has.
+          </small>
+        </div>
+
+        <div v-if="panel === 'send' && node" class="neu-card p-3 mb-3" ref="panel">
+          <div class="font-weight-bold mb-2">Send coins from the bridge node</div>
+          <template v-if="!send.txid">
+            <label class="small font-weight-bold mb-1" for="bridge-send-address">Address on the SHA256 chain</label>
+            <b-form-input id="bridge-send-address" v-model="send.address" class="neu-input mb-2" spellcheck="false" :disabled="send.busy || send.confirming"></b-form-input>
+            <label class="small font-weight-bold mb-1" for="bridge-send-amount">Amount</label>
+            <b-input-group append="sats" class="mb-1">
+              <b-form-input id="bridge-send-amount" v-model="send.amount" type="number" min="1" step="1" class="neu-input" :disabled="send.all || send.busy || send.confirming"></b-form-input>
+            </b-input-group>
+            <b-form-checkbox v-model="send.all" class="small mb-2" :disabled="send.busy || send.confirming">Send everything ({{ sats(node.onchainConfirmedSat) }}, less the fee)</b-form-checkbox>
+            <label class="small font-weight-bold mb-1" for="bridge-send-fee">Fee rate (optional)</label>
+            <b-input-group append="sat/vB" class="mb-1 fee-input">
+              <b-form-input id="bridge-send-fee" v-model="send.fee" type="number" min="1" step="1" class="neu-input" placeholder="estimate" :disabled="send.busy || send.confirming"></b-form-input>
+            </b-input-group>
+            <small class="d-block text-muted mb-2">
+              From the node's on-chain balance only; coins in its channels
+              stay there. Addresses on the two chains look the same: check
+              that this one is for the SHA256 chain.
+            </small>
+            <div v-if="!send.confirming" class="d-flex justify-content-end">
+              <b-button variant="primary" :disabled="!sendReady" @click="send.confirming = true">Review</b-button>
+            </div>
+            <div v-else>
+              <small class="d-block mb-2">
+                Send <b>{{ send.all ? "everything on chain" : sats(Number(send.amount)) }}</b>
+                on the SHA256 chain to <b class="text-break">{{ send.address.trim() }}</b>,
+                at {{ send.fee.trim() ? `${send.fee.trim()} sat/vB` : "the node's fee estimate" }}?
+                This cannot be undone.
+              </small>
+              <b-button variant="danger" size="sm" class="mr-2" :disabled="send.busy" @click="sendCoins">{{ send.busy ? "Sending…" : "Send" }}</b-button>
+              <b-button variant="link" size="sm" :disabled="send.busy" @click="send.confirming = false">Back</b-button>
+            </div>
+          </template>
+          <template v-else>
+            <small class="d-block mb-2">Sent. The transaction:</small>
+            <input-copy size="sm" :value="send.txid"></input-copy>
+            <a :href="`${explorerBase}/tx/${send.txid}`" target="_blank" rel="noopener" class="small d-inline-block mt-1" @click="confirmExplorer">See it on {{ explorerName }}</a>
+          </template>
         </div>
 
         <!-- Rate -->
@@ -602,6 +693,15 @@
         v-if="toggleNow && toggleNow.on && !(overview && overview.enabled === false)"
         class="mt-4 pt-3 border-top-subtle"
       >
+        <div class="mb-3">
+          <div class="font-weight-bold small mb-1">{{ directionName("toBLAKE2b") }}</div>
+          <small class="d-block text-muted mb-2">
+            <template v-if="toggleNow.toBLAKE2b">On: payers on the SHA256 chain pay your bridge node, and Lightning Fork pays their BLAKE2b invoices from its own channels.</template>
+            <template v-else>The other way round: payers on the SHA256 chain pay your bridge node, and Lightning Fork pays their BLAKE2b invoices from its own channels, which puts back on the bridge node what paying SHA256 invoices spends. It needs room to receive on the bridge node's channels and to send on Lightning Fork's.</template>
+            Changing it restarts Lightning Fork.
+          </small>
+          <b-button size="sm" :variant="toggleNow.toBLAKE2b ? 'outline-danger' : 'outline-primary'" :disabled="switching" @click="setDirections(!toggleNow.toBLAKE2b)">{{ switching ? "Restarting…" : toggleNow.toBLAKE2b ? "Stop paying BLAKE2b invoices" : "Pay BLAKE2b invoices too" }}</b-button>
+        </div>
         <template v-if="!confirmSwitch">
           <b-button variant="link" size="sm" class="text-danger px-0" @click="confirmSwitch = true">Turn the bridge off</b-button>
         </template>
@@ -632,7 +732,8 @@ import {
   percent,
   sats,
   rateText,
-  costPerBitcoinSat
+  costPerBitcoinSat,
+  shortKey
 } from "@/helpers/bitcoin-invoices";
 import {
   bridgeUrl,
@@ -641,7 +742,10 @@ import {
   STEPS,
   nodeState,
   rateAge,
-  marketDifference
+  marketDifference,
+  channelState,
+  closeOptions,
+  feeRateInput
 } from "@/helpers/bridge";
 import QrCode from "@/components/Utility/QrCode";
 import InputCopy from "@/components/Utility/InputCopy";
@@ -650,6 +754,27 @@ import Sha256NodeList from "@/views/Home/Sha256NodeList";
 // How often the window asks again while it is open. Nothing is asked while
 // it is closed, so a node that never bridges pays nothing for it.
 const REFRESH_MS = 15 * 1000;
+
+const emptyChans = () => ({
+  loading: false,
+  list: [],
+  closing: "",
+  force: false,
+  fee: "",
+  busy: false,
+  txid: "",
+  slow: false
+});
+
+const emptySend = () => ({
+  address: "",
+  amount: "",
+  all: false,
+  fee: "",
+  confirming: false,
+  busy: false,
+  txid: ""
+});
 
 const emptyRecovery = () => ({
   confirming: false,
@@ -672,6 +797,8 @@ export default {
       panel: "",
       deposit: { loading: false, address: "" },
       channel: { peer: "", amount: "", busy: false, txid: "" },
+      chans: emptyChans(),
+      send: emptySend(),
       rateInput: "",
       savingRate: false,
       newLabel: "",
@@ -693,6 +820,15 @@ export default {
     };
   },
   computed: {
+    sendReady() {
+      const amount = Number(this.send.amount);
+      return (
+        !this.send.busy &&
+        this.send.address.trim().length > 0 &&
+        (this.send.all || (Number.isInteger(amount) && amount > 0)) &&
+        feeRateInput(this.send.fee).ok
+      );
+    },
     ...mapState({
       maxReceive: state => state.lightning.maxReceive,
       maxSend: state => state.lightning.maxSend,
@@ -803,6 +939,10 @@ export default {
     costPerBitcoinSat,
     directionName,
     marketDifference,
+    shortKey,
+    channelState,
+    closeOptions,
+    feeRateInput,
     satsOrDash(n) {
       return Number(n) >= 0 ? sats(n) : "—";
     },
@@ -854,6 +994,8 @@ export default {
       this.recovery = emptyRecovery();
       this.issued = null;
       this.deposit = { loading: false, address: "" };
+      this.chans = emptyChans();
+      this.send = emptySend();
     },
     stopTimer() {
       if (this.timer) {
@@ -901,9 +1043,9 @@ export default {
       });
     },
     showPanel(name) {
-      // Not while a channel is being opened: a fresh form would let it be
-      // opened twice.
-      if (this.channel.busy) {
+      // Not while a channel is being opened or closed, or coins sent: a
+      // fresh form would let it be done twice.
+      if (this.channel.busy || this.chans.busy || this.send.busy) {
         return;
       }
       this.error = "";
@@ -913,6 +1055,13 @@ export default {
       }
       if (this.panel === "channel") {
         this.channel = { peer: "", amount: "", busy: false, txid: "" };
+      }
+      if (this.panel === "channels") {
+        this.chans = emptyChans();
+        this.loadChannels();
+      }
+      if (this.panel === "send") {
+        this.send = emptySend();
       }
       if (this.panel) {
         this.scrollTo("panel");
@@ -931,6 +1080,85 @@ export default {
           "Could not get an address from the bridge node. Please try again."
         );
       }
+    },
+    async loadChannels() {
+      this.chans.loading = true;
+      // API.get answers nothing, rather than an error, when it fails.
+      const res = await API.get(bridgeUrl("/sha256/channels"));
+      if (res && Array.isArray(res.channels)) {
+        this.chans.list = res.channels;
+      } else {
+        this.panel = "";
+        this.error = "Could not list the bridge node's channels. Please try again.";
+      }
+      this.chans.loading = false;
+    },
+    startClose(c) {
+      this.chans.closing = c.channelPoint;
+      this.chans.force = !closeOptions(c).coop;
+      this.chans.fee = "";
+    },
+    async closeChannel(c) {
+      const fee = feeRateInput(this.chans.force ? "" : this.chans.fee);
+      if (!fee.ok) {
+        return;
+      }
+      this.chans.busy = true;
+      this.error = "";
+      try {
+        const res = await API.post(bridgeUrl("/sha256/channels/close"), {
+          channelPoint: c.channelPoint,
+          force: this.chans.force,
+          ...(fee.value ? { satPerVbyte: fee.value } : {})
+        });
+        this.chans.txid = res.data.txid || "";
+        this.chans.slow = !!res.data.slow;
+        this.chans.closing = "";
+        this.loadChannels();
+        this.load();
+      } catch (error) {
+        this.error = getErrorMessage(error, "Could not close the channel. Please try again.");
+      }
+      this.chans.busy = false;
+    },
+    async sendCoins() {
+      const fee = feeRateInput(this.send.fee);
+      if (!this.sendReady || !fee.ok) {
+        return;
+      }
+      this.send.busy = true;
+      this.error = "";
+      try {
+        const res = await API.post(bridgeUrl("/sha256/withdraw"), {
+          address: this.send.address.trim(),
+          sendAll: this.send.all,
+          ...(this.send.all ? {} : { amountSat: Number(this.send.amount) }),
+          ...(fee.value ? { satPerVbyte: fee.value } : {})
+        });
+        this.send.txid = res.data.txid;
+        this.load();
+      } catch (error) {
+        this.send.confirming = false;
+        this.error = getErrorMessage(error, "Nothing was sent. Please try again.");
+      }
+      this.send.busy = false;
+    },
+    async setDirections(toBLAKE2b) {
+      this.switching = true;
+      this.error = "";
+      this.notice = "";
+      try {
+        const res = await API.post(bridgeUrl("/directions"), { toBLAKE2b });
+        this.load();
+        if (res.data.restarting) {
+          this.notice = toBLAKE2b
+            ? "Lightning Fork is restarting to pay BLAKE2b invoices too. This window catches up in a minute."
+            : "Lightning Fork is restarting to stop paying BLAKE2b invoices.";
+        }
+      } catch (error) {
+        this.error = getErrorMessage(error, "Could not change the bridge. Please try again.");
+      }
+      this.switching = false;
     },
     async openChannel() {
       this.channel.busy = true;
@@ -1101,6 +1329,12 @@ export default {
 
 <style lang="scss" scoped>
 .bridge {
+  .channel-row + .channel-row {
+    border-top: 1px solid rgba(128, 128, 128, 0.2);
+  }
+  .fee-input {
+    max-width: 16rem;
+  }
   .kv {
     display: flex;
     justify-content: space-between;
