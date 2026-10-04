@@ -19,7 +19,7 @@ const stub = path.join(dir, "agent.sh");
 // (no arguments) stays up until killed, with or without a pubkey, as the real
 // one does: it records the missing identity itself after a grace period.
 fs.writeFileSync(stub, `#!/bin/sh
-printf '%s|%s%s\\n' "$*" "\${NODE_PUBKEY:-}" "\${BACKUP_LOG_TAG:+|\$BACKUP_LOG_TAG|\$BACKUP_STATE_FILE|\$CHANNEL_BACKUP_FILE}" >> "${seen}"
+printf '%s|%s%s\\n' "$*" "\${NODE_PUBKEY:-}" "\${BACKUP_LOG_TAG:+|\$BACKUP_LOG_TAG|\$BACKUP_STATE_FILE|\$CHANNEL_BACKUP_FILE|\$BACKUP_KEEP_FIRST}" >> "${seen}"
 if [ -z "$*" ]; then
   trap 'exit 0' TERM
   while :; do sleep 0.05; done
@@ -130,6 +130,7 @@ test("the bridge node's watcher waits for that node, then copies its backup with
       "", SHA, "sha256-channel-backup",
       path.join(dir, ".channel-backup-sha256-state.json"),
       path.join(dir, "sha256-node/data/chain/bitcoin/mainnet/channel.backup"),
+      "1",
     ].join("|"));
   } finally {
     cb.stopSha256Watcher();

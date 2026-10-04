@@ -854,6 +854,10 @@ const sha256Watcher = createWatcher({
     BACKUP_RESTORE_DIR: path.join(lndDir(), ".channel-backup-sha256-restore"),
     BACKUP_WORK_DIR: "/tmp/lnd-channel-backup-sha256",
     BACKUP_LOG_TAG: "sha256-channel-backup",
+    // Recreated from the same seed, it writes to the old node's folder:
+    // keep what is there before its first copy (the app's backups leave
+    // out the record of having done so).
+    BACKUP_KEEP_FIRST: "1",
   }),
 });
 let sha256Waiter = null;
