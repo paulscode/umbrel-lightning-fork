@@ -226,9 +226,9 @@ only if, decoded by the node:
    bid and best ask), fetched over Tor when the node has a Tor proxy, and
    **without it nothing is paid**;
 6. it has at least 20 seconds left;
-7. it holds the payment for at most 1008 blocks of this chain (its final
-   CLTV, about a week), the longest it can stay held if the service never
-   pays.
+7. it holds the payment for at most 2016 blocks of this chain (its final
+   CLTV; LND's own maximum, about two weeks), the longest it can stay held
+   if the service never pays.
 
 Success is `{status: "succeeded", paymentHash, preimage, amountSat, feeSat,
 bitcoinInvoice: {amountSat, description, paymentHash}}`: `amountSat` and

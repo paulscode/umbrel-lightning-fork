@@ -39,10 +39,11 @@ const INFO_TTL_MS = 30 * 1000;
 // activity as one that paid a SHA256 invoice.
 const MAX_RECORDS = 2000;
 // The longest the service's request may hold a payment, as its final CLTV
-// in this chain's blocks (about a week at ten minutes a block). The service
-// needs a margin over the SHA256 chain's side; much more than this would
-// tie up the user's money for longer than anyone should agree to unasked.
-const MAX_HOLD_BLOCKS = 1008;
+// in this chain's blocks: LND's own max_cltv_expiry (about two weeks at ten
+// minutes a block), which the service's quotes are sized under too. Its
+// margin over the SHA256 chain's side is large on purpose, so this is a
+// ceiling against a service configured past what LND routes, not a target.
+const MAX_HOLD_BLOCKS = 2016;
 const MINUTES_PER_BLOCK = 10;
 
 // The service's states after which an attempt has ended without paying,
