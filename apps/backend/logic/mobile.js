@@ -6,6 +6,7 @@
 // the default instance at the bottom loads the real ones lazily.
 const { ValidationError } = require("../models/errors.js");
 const { parseAddress, otherNetwork } = require("../utils/bitcoinAddress.js");
+const { setsBlake2b: bolt12SetsBlake2b } = require("../utils/bolt12Features.js");
 const {
   routingFeeLimit,
   MIN_HOLD_SECONDS,
@@ -14,6 +15,7 @@ const {
   NO_AMOUNT,
   NO_SERVICE,
   INVALID_HOLD,
+  holdHours,
 } = require("./bitcoinInvoices.js");
 
 const DEFAULT_INVOICE_EXPIRY = 3600;
@@ -211,9 +213,24 @@ function failure(error, message, { resume = false } = {}) {
   return bad(message);
 }
 
-function unsupported(message) {
-  return { kind: "unsupported", message };
+function unsupported(message, messageCode = null) {
+  return { kind: "unsupported", message, messageCode };
 }
+
+// An offer or a BOLT 12 invoice from a node on the SHA256 chain: only its
+// BOLT 11 invoices can be paid, through the service.
+const SHA256_OFFER =
+  "This is an offer from a node on the SHA256 chain. Offers there can't be paid from here; ask for a SHA256 invoice (lnbc...) instead, which can be paid through a service.";
+
+// A unified request whose Lightning part can't be paid: its address is not
+// offered instead. It may be the SHA256 chain's, where coins sent from this
+// chain would not reach the recipient as they expect.
+const NO_ADDRESS_FALLBACK =
+  "Its Lightning part can't be paid from here, so its address isn't offered instead: the request may be from the SHA256 chain, where coins sent from this chain would not reach the recipient.";
+
+// A bridge code: what the dashboard takes to pay SHA256 invoices.
+const BRIDGE_CODE =
+  "This is a code for a service that pays SHA256 invoices. Add it in the dashboard, under Paying SHA256 invoices.";
 
 function friendlyPayError(error) {
   const detail = detailOf(error).toLowerCase();
@@ -445,7 +462,7 @@ function createMobile({
       if (capable(options, BITCOIN_INVOICE_CAPABILITY)) {
         return bitcoinInvoiceTarget(request, res);
       }
-      throw bad(NOT_UPGRADED);
+      throw refuse("sha256_invoice", NOT_UPGRADED);
     }
     const created = num(res.timestamp);
     const expiry = num(res.expiry) || DEFAULT_INVOICE_EXPIRY;
@@ -506,6 +523,11 @@ function createMobile({
     }
     if (!res.forThisChain) {
       throw bad("This offer is for a different network.");
+    }
+    // The two chains share a genesis, so the chain fields can't tell an
+    // offer from the SHA256 chain apart: option_blake2b does.
+    if ((res.type === "offer" || res.type === "invoice") && bolt12SetsBlake2b(text) === false) {
+      throw refuse("sha256_offer", SHA256_OFFER);
     }
     if (res.type === "offer") {
       if (!res.valid) {
@@ -605,20 +627,25 @@ function createMobile({
     const invoice = get("lightning");
     try {
       if (offer) {
-        lightning = await decodeOffer(offer.trim());
+        lightning = await decodeOffer(offer.trim().replace(/\s+/g, ""));
       } else if (invoice) {
         lightning = await decodeBolt11(invoice.trim().replace(/^lightning:/i, "").toLowerCase(), options);
       }
     } catch (error) {
-      if (!onchain) {
+      // A Lightning part that can't be read, or is the SHA256 chain's,
+      // says nothing good about the address: it is not offered instead.
+      if (!onchain || unavailable(error) || !(error instanceof ValidationError)) {
         throw error;
       }
-      lightning = null;
+      throw refuse(error.refusal || "no_fallback", `${String(error.message).replace(/\.$/, "")}. ${NO_ADDRESS_FALLBACK}`);
     }
-    // A SHA256 invoice's address is a Bitcoin address: coins of this chain
+    // A SHA256 invoice's address is the SHA256 chain's: coins of this chain
     // sent there would not reach the recipient as they expect. No fallback.
     if (lightning && lightning.kind === "bitcoin-invoice") {
       return lightning;
+    }
+    if (lightning && lightning.kind === "unsupported" && onchain) {
+      throw refuse(lightning.messageCode || "no_fallback", `${String(lightning.message).replace(/\.$/, "")}. ${NO_ADDRESS_FALLBACK}`);
     }
     if (lightning && lightning.kind !== "unsupported" && !lightning.expired && !lightning.ours) {
       return { ...lightning, fallback: onchain };
@@ -656,6 +683,9 @@ function createMobile({
     }
     if (compactLower.startsWith("lnr1")) {
       return unsupported("This is a request to be paid by an offer, not something to pay.");
+    }
+    if (compactLower.startsWith("lfbridge:")) {
+      return unsupported(BRIDGE_CODE, "bridge_code");
     }
     if (compactLower.startsWith("lnurl")) {
       return unsupported("LNURL is not supported yet. Ask for an invoice or an offer instead.");
@@ -985,13 +1015,20 @@ function createMobile({
     return run;
   }
 
-  function alreadyPaid() {
-    return refuse("already_paid", "This invoice has already been paid.", 409);
+  function alreadyPaid(preimage = "") {
+    const error = refuse("already_paid", "This invoice has already been paid.", 409);
+    if (preimage) {
+      error.details = { preimage };
+    }
+    return error;
   }
 
   // The answer while a payment is still held by the service, which keeps it
-  // until it has paid the SHA256 invoice. Asking again finds out more.
-  function onItsWay() {
+  // until it has paid the SHA256 invoice. Asking again finds out more, and
+  // is answered the same while it is still held. `details.maxHoldHours`:
+  // the longest it can stay held if the service never pays, after which it
+  // comes back.
+  function onItsWay(hash) {
     const waiting = new ValidationError(
       "Your payment is on its way and the SHA256 invoice is being paid. Check your activity in a little while.",
       504
@@ -1000,6 +1037,11 @@ function createMobile({
     waiting.recheck = true;
     // Told apart from an uncertain answer: this one is known to be under way.
     waiting.refusal = "on_its_way";
+    const last = hash ? bitcoinInvoices().lastAttempt(hash) : null;
+    const hours = last ? holdHours(last.cltvExpiry) : null;
+    if (hours) {
+      waiting.details = { maxHoldHours: hours };
+    }
     return waiting;
   }
 
@@ -1063,6 +1105,7 @@ function createMobile({
       destination: String(res.destination || "").toLowerCase(),
       blake2b: surelySetsBlake2b(res.features),
       amountMsat: msatOf(res),
+      cltvExpiry: num(res.cltvExpiry),
       expiresAt: created + (num(res.expiry) || DEFAULT_INVOICE_EXPIRY),
     };
   }
@@ -1109,8 +1152,9 @@ function createMobile({
   async function payBitcoinLocked(x, max, again) {
     const hash = x.paymentHash;
     const service = bitcoinInvoices();
+    // Being paid by this dashboard right now: the service holds it.
     if (inFlight.has(hash)) {
-      throw stillUncertain();
+      throw onItsWay(hash);
     }
     let found;
     try {
@@ -1130,8 +1174,9 @@ function createMobile({
       }
       throw alreadyPaid();
     }
+    // The node's payment to the service is out and held: on its way.
     if (found && found.state === "in_flight") {
-      throw stillUncertain();
+      throw onItsWay(hash);
     }
 
     // The node has no payment for the hash in flight or paid.
@@ -1156,7 +1201,35 @@ function createMobile({
     const ended = theirs && (ENDED_STATES.includes(theirs.state) || theirs.state === "not_found");
     const waiting = theirs && WAITING_STATES.includes(theirs.state);
     if (theirs && theirs.state === "settled") {
-      throw alreadyPaid();
+      // Paid, by a payment the node's list no longer shows: the service's
+      // preimage is the proof.
+      if (again && theirs.preimage) {
+        return bitcoinPaid(
+          {
+            status: "succeeded",
+            paymentHash: hash,
+            preimage: theirs.preimage,
+            amountSat: last ? Math.ceil(num(last.amountMsat) / 1000) : 0,
+            feeSat: 0,
+          },
+          x
+        );
+      }
+      throw alreadyPaid(theirs.preimage);
+    }
+    if (theirs && theirs.state === "lost") {
+      // The service paid the SHA256 invoice and did not collect the
+      // payment for it, which comes back to this node: the operator's
+      // loss, nothing for the user to do.
+      if (last && last.state !== "lost") {
+        service.updateAttempt(hash, { state: "lost", endedAt: now() });
+      }
+      throw refuse(
+        "needs_operator",
+        "The service paid the SHA256 invoice but did not collect your payment, which comes back to you. There is nothing for you to do; the service's operator has to look into it.",
+        409,
+        theirs.preimage ? { preimage: theirs.preimage } : null
+      );
     }
     if (last && last.state === "paying") {
       if (found && found.state === "failed") {
@@ -1176,6 +1249,10 @@ function createMobile({
     // another. One that came back is answered as such, and a new attempt
     // is the user's to make.
     if (again && last && service.lastAttempt(hash).state === "failed") {
+      const ended = service.lastAttempt(hash);
+      if (ended.failCode === "not_paid") {
+        throw refuse("not_paid", `Nothing was paid: ${String(ended.reason || "your node could not pay the service").replace(/\.$/, "")}. You can try again.`);
+      }
       throw refuse(
         "returned",
         "The service could not pay the SHA256 invoice, and your payment came back. Nothing was paid; you can try again."
@@ -1225,7 +1302,8 @@ function createMobile({
           throw refuse(
             "in_progress",
             `The service is still holding its last price for this invoice. Try again in ${seconds} seconds.`,
-            409
+            409,
+            { retryAfterSeconds: seconds }
           );
         }
         throw error;
@@ -1258,7 +1336,13 @@ function createMobile({
     }
 
     const amountSat = Math.ceil(y.amountMsat / 1000);
-    service.updateAttempt(hash, { state: "paying", amountMsat: y.amountMsat, maxIncomingSat: max, startedAt: now() });
+    service.updateAttempt(hash, {
+      state: "paying",
+      amountMsat: y.amountMsat,
+      maxIncomingSat: max,
+      cltvExpiry: y.cltvExpiry || null,
+      startedAt: now(),
+    });
     inFlight.add(hash);
     const payment = Promise.resolve()
       .then(() => lnd().sendPayment(y.request, undefined, amountSat, routingFeeLimit(amountSat)))
@@ -1289,10 +1373,15 @@ function createMobile({
           }
           const result = failure(error, friendlyBitcoinPayError(error), { resume: again });
           if (!result.uncertain) {
-            // The node's payment came back: nothing was paid, and a new
-            // attempt may be made once the service has ended this one.
-            service.updateAttempt(hash, { state: "failed", endedAt: now(), reason: result.message });
-            result.refusal = "returned";
+            // Nothing was paid, and a new attempt may be made once the
+            // service has ended this one. Either the service turned the
+            // payment back (it could not pay the SHA256 invoice), or this
+            // node never got it there (no route, not enough balance, not
+            // answering): only the first is "returned".
+            const turnedBack = /incorrect payment details|incorrect_payment_details/i.test(detailOf(error));
+            const failCode = turnedBack ? "returned" : "not_paid";
+            service.updateAttempt(hash, { state: "failed", endedAt: now(), reason: result.message, failCode });
+            result.refusal = failCode;
           }
           throw result;
         }
@@ -1310,7 +1399,7 @@ function createMobile({
       // Still held. The payment goes on, and its outcome is recorded when
       // it comes; asking again finds it.
       payment.catch(() => {});
-      throw onItsWay();
+      throw onItsWay(hash);
     }
     if (outcome.error) {
       throw outcome.error;
@@ -1392,26 +1481,13 @@ function createMobile({
     };
   }
 
-  // The SHA256 invoice a payment paid through the service, by the
-  // attempts on record: {amountSat, description}, or null.
+  // The SHA256 invoice a payment paid through the service, or null.
   function bitcoinInvoiceOf(p) {
-    let record = null;
     try {
-      record = bitcoinInvoices().record(p.paymentHash);
+      return bitcoinInvoices().linkOf(p.paymentHash, p.paymentRequest);
     } catch (error) {
       return null;
     }
-    if (!record) {
-      return null;
-    }
-    const request = String(p.paymentRequest || "").toLowerCase();
-    const paid = record.attempts.some(
-      (a) => a.holdInvoice && (request ? String(a.holdInvoice).toLowerCase() === request : ["paying", "failed", "succeeded"].includes(a.state))
-    );
-    if (!paid) {
-      return null;
-    }
-    return { amountSat: Math.ceil(num(record.amountMsat) / 1000), description: record.description || "" };
   }
 
   // The latest on-chain transactions, Lightning payments and settled
@@ -1487,6 +1563,7 @@ function createMobile({
         item.bitcoinInvoice = {
           amountSat: link.amountSat,
           description: link.description,
+          serviceLabel: link.serviceLabel,
           state: status === "SUCCEEDED" ? "paid" : status === "FAILED" ? "returned" : "pending",
         };
         if (status === "SUCCEEDED" && p.paymentPreimage) {

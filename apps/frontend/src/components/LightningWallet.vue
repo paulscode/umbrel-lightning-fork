@@ -193,6 +193,17 @@
                       v-if="tx.type === 'outgoing' || tx.type === 'incoming'"
                       >{{ getTimeFromNow(tx.timestamp) }}</small
                     >
+                    <!-- Paid a SHA256 invoice through the service -->
+                    <small
+                      class="text-muted mt-0 d-block"
+                      style="margin-left: 25px;"
+                      v-if="tx.bitcoinInvoice"
+                      >SHA256 invoice,
+                      {{ Number(tx.bitcoinInvoice.amountSat).toLocaleString() }}
+                      sats (SHA256)<template v-if="tx.bitcoinInvoice.serviceLabel">
+                        via {{ tx.bitcoinInvoice.serviceLabel }}</template
+                      ></small
+                    >
 
                     <!-- if invoice isn't settled -->
                     <small

@@ -77,16 +77,17 @@ Every other call takes the key as `Authorization: Bearer lf_…`.
 
 | Call | Body or query | Answer |
 |---|---|---|
-| `GET /bootstrap` | | `{serverId, apiVersion, deviceId, label, node}` |
+| `GET /bootstrap` | | `{serverId, apiVersion, deviceId, label, node, features, bitcoinInvoices}`; `features` lists what this dashboard can do beyond version 1's calls (`bitcoin-invoice`), `bitcoinInvoices` is `{configured, label, onion, premium}` (nothing is asked of the service) |
+| `GET /bitcoin-invoices` | | `{configured, label, onion, premium, terms, error, reference, referenceError}`: the service's terms now (`{open, refusal, rate, spread, minSat, maxSat}`) and the market rate; asks the service, over Tor for an onion, so it can take a while. Set up only in the dashboard |
 | `POST /unpair` | | `{unpaired: true}`; the phone removes itself, its key stops at once |
 | `GET /endpoints` | | `{onionUrl, lanUrl, lanIp, caPem, caSha256}`, the current addresses |
 | `GET /wallet` | | `{onchain: {confirmedSat, unconfirmedSat, lockedSat, reservedSat}, lightning: {outboundSat, inboundSat, pendingOutboundSat}, syncedToChain, blockHeight, updatedAt}` |
 | `GET /fees` | | `{source: {kind, name}, warning, minimumSatPerVbyte, low, medium, high}`, each rate `{satPerVbyte, label, eta}` |
 | `POST /decode` | `{input}` | a payment target, below; send `X-LF-Capabilities` to be shown more kinds |
 | `POST /onchain/estimate` | `{address, amountSat \| sendAll, satPerVbyte}` | `{amountSat, feeSat, satPerVbyte, totalSat, sendAll, reservedSat?}`; sized by choosing coins largest first, as the node does; a sweep keeps back the anchor-channel reserve |
-| `POST /onchain/send` | `{address, amountSat \| sendAll, satPerVbyte, requestId?}` | `{txid, satPerVbyte}` |
-| `POST /lightning/pay` | `{request, amountSat?, payerNote?, requestId?}` | `{status, paymentHash, preimage, amountSat, feeSat}` |
-| `POST /pay/bitcoin-invoice` | `{request, maxIncomingSat, requestId?}` | `{status, paymentHash, preimage, amountSat, feeSat, bitcoinInvoice: {amountSat, description, paymentHash}}`, see Paying SHA256 invoices |
+| `POST /onchain/send` | `{address, amountSat \| sendAll, satPerVbyte, requestId?, resume?}` | `{txid, satPerVbyte}` |
+| `POST /lightning/pay` | `{request, amountSat?, payerNote?, requestId?, resume?}` | `{status, paymentHash, preimage, amountSat, feeSat}` |
+| `POST /pay/bitcoin-invoice` | `{request, maxIncomingSat, requestId?, resume?}` | `{status, paymentHash, preimage, amountSat, feeSat, bitcoinInvoice: {amountSat, description, paymentHash}}`, see Paying SHA256 invoices |
 | `POST /receive/address` | `{fresh?}` | `{address, type, uri}`; the last unused address unless `fresh` |
 | `POST /receive/invoice` | `{amountSat?, memo?, expirySeconds?}` | `{paymentRequest, paymentHash, amountSat, memo, createdAt, expiresAt, uri}` |
 | `GET /receive/invoice/<paymentHash>` | | `{state, amountSat, amountPaidSat, settledAt, expiresAt}`; `state` is `open`, `settled`, `canceled`, `accepted` or `expired` |
@@ -122,15 +123,28 @@ offer or invoice. It answers
 
 `request` is what to pass to `/lightning/pay` or, for `onchain`, the
 address. A unified BIP 21 request comes back as its Lightning part with the
-address as `fallback`. `ours` marks a request this node made. Lightning
-addresses, LNURL and invoice requests come back as `unsupported` with a
-`message`; anything else that cannot be paid is a 400 saying why (an
-address of another network is named as such).
+address as `fallback`, when that part is this chain's and payable (an
+expired or own one leaves the address). When the Lightning part is the
+SHA256 chain's, or cannot be read, the address is **not** offered instead:
+the request may be the SHA256 chain's, and coins of this chain sent to its
+address would not reach the recipient. That is a 400 with a `code`
+(`sha256_invoice`, `sha256_offer` or `no_fallback`).
+
+`ours` marks a request this node made. Lightning addresses, LNURL, invoice
+requests and service codes (`lfbridge:`, `messageCode: "bridge_code"`: they
+are added in the dashboard) come back as `unsupported` with a `message`;
+anything else that cannot be paid is a 400 saying why (an address of
+another network is named as such).
+
+The two chains share a genesis block, so a BOLT 12 offer's or invoice's
+chain fields can't tell one from the SHA256 chain apart: one without
+`option_blake2b` in its features is a 400 with `code: "sha256_offer"`.
 
 An invoice from a Lightning node that has not upgraded to the BLAKE2b
 chain's rules (one without feature bit 512/513, `option_blake2b`) is, in
 practice, a SHA256 invoice: both chains' invoices start with `lnbc`. It is
-a 400 saying so, unless the client declares that it can show one (below).
+a 400 saying so (`code: "sha256_invoice"`), unless the client declares
+that it can show one (below).
 
 ### Capabilities
 
@@ -166,7 +180,8 @@ without checking it first (below).
  "estimate": {"incomingSat": 30919, "feeSat": 307, "maxIncomingSat": 31074,
               "routingFeeLimitSat": 310, "rate": 0.0049, "spread": 0.01,
               "minSat": 100, "maxSat": 500000, "serviceLabel": "…",
-              "open": true, "refusal": "…when not open"},
+              "open": true, "refusal": "…when not open",
+              "refusalCode": "…the service's code, when not open"},
  "reference": {"rate": 0.004875, "premiumAllowed": 0.0638, "premium": 0.0048,
                "withinLimit": true, "source": "Neoxa"},
  "referenceError": "…when there is no market rate"}
@@ -189,7 +204,11 @@ without checking it first (below).
   may be.
 - `payable` is false whenever `message` is set: no service, no amount,
   expired, the service closed or out of its bounds, the price past the
-  allowed premium, no market rate. Show `message`.
+  allowed premium, no market rate. Show `message`. `messageCode` names the
+  reason: `no_service`, `no_amount`, `expired`, `too_small`, `too_large`,
+  `rate`, `reference_unavailable`, `no_direction`, `unreachable` (or
+  another of the service's transport codes below), or the service's own
+  code while it is closed (`disabled`, `no_rate`, …).
 
 `POST /pay/bitcoin-invoice` takes `{request, maxIncomingSat, requestId?,
 resume?}`, `maxIncomingSat` being the `estimate.maxIncomingSat` the user
@@ -206,7 +225,10 @@ only if, decoded by the node:
    the rate is Neoxa's BTCB2_BTC market (the middle of its last trade, best
    bid and best ask), fetched over Tor when the node has a Tor proxy, and
    **without it nothing is paid**;
-6. it has at least 20 seconds left.
+6. it has at least 20 seconds left;
+7. it holds the payment for at most 1008 blocks of this chain (its final
+   CLTV, about a week), the longest it can stay held if the service never
+   pays.
 
 Success is `{status: "succeeded", paymentHash, preimage, amountSat, feeSat,
 bitcoinInvoice: {amountSat, description, paymentHash}}`: `amountSat` and
@@ -214,11 +236,13 @@ bitcoinInvoice: {amountSat, description, paymentHash}}`: `amountSat` and
 `bitcoinInvoice.amountSat` what was paid on the SHA256 chain, `preimage` the proof.
 
 The service holds the payment until it has paid, which can take a while.
-After 90 seconds the answer is 504, `uncertain`, "on its way"; the payment
-goes on, and asking again (`resume`, the same id) finds it:
+After 90 seconds the answer is 504, `uncertain`, `code: "on_its_way"`, with
+`details.maxHoldHours` (how long it can stay held if the service never
+pays, after which it comes back); the payment goes on, and asking again
+(`resume`, the same id) finds it:
 
 - the node's own payment for the hash comes first: paid gives the proof,
-  in flight stays 504;
+  in flight is `on_its_way` again;
 - there is one attempt at a time per SHA256 invoice, whatever the request
   id or the device, recorded on disk before its payment starts
   (`bitcoin-invoice-payments.json` beside the dashboard's state). An
@@ -234,22 +258,28 @@ goes on, and asking again (`resume`, the same id) finds it:
 The node itself never pays one payment hash twice, which is what makes the
 rest safe to repeat.
 
-Refusals carry a `code`. Nothing was paid after any of them.
+Refusals carry a `code`, and some `details` beside it. Nothing was paid
+after any of them except `on_its_way` (paying, held by the service) and
+`needs_operator` (paid by the service, not collected).
 
 | `code` | Status | |
 |---|---|---|
 | `no_service` | 400 | no service is set up |
 | `no_amount` | 400 | the SHA256 invoice names no amount |
 | `not_bitcoin_invoice` | 400 | the invoice is this chain's; pay it with `/lightning/pay` |
-| `already_paid` | 409 | the invoice has been paid (a repeat with `resume` gets the payment instead, when it was this node's) |
-| `in_progress` | 409 | the service is still busy with an earlier attempt, or still holding its last price; the sentence says how long when it can |
+| `on_its_way` | 504 | paid to the service and held until it has paid the SHA256 invoice; ask again with `resume`. `details.maxHoldHours` |
+| `already_paid` | 409 | the invoice has been paid; `details.preimage` when the service gave the proof (a repeat with `resume` gets the payment instead) |
+| `needs_operator` | 409 | the service paid the SHA256 invoice and did not collect the payment, which comes back; nothing for the user to do. `details.preimage` when known |
+| `in_progress` | 409 | the service is still busy with an earlier attempt, or still holding its last price; `details.retryAfterSeconds` when it can say |
 | `limit` | 429 | too many payments waiting at the service |
-| `price_changed` | 409 | the service asks more than `maxIncomingSat`; `/decode` again for the new price |
+| `price_changed` | 409 | the service asks more than `maxIncomingSat`; `/decode` again for the new price. `details: {incomingSat, maxIncomingSat}` |
+| `hold_too_long` | 400 | the service's invoice would hold the payment for longer than check 7 allows |
 | `rate` | 400 | the price is past the allowed premium over the market rate |
 | `reference_unavailable` | 503 | no market rate to check against |
 | `hold_expiring` | 400 | the service's invoice would expire before it could be paid |
 | `invalid_hold_invoice` | 400 | the service's invoice failed check 1, 2 or 3: it is not behaving as it must |
-| `returned` | 400 | the node's payment came back; a new try may be made |
+| `returned` | 400 | the service turned the payment back (it could not pay the SHA256 invoice); a new try may be made |
+| `not_paid` | 400, 503 | the node could not get the payment to the service (no route, not enough balance, not answering); a new try may be made |
 | `unreachable`, `unavailable`, `internal`, `invalid_response` | 503 | the service did not answer usefully |
 | `tor_required` | 400 | the service is an onion and the node has no Tor proxy |
 | `cert_mismatch` | 400 | the service did not present the certificate its code pins; nothing was sent to it |
@@ -258,9 +288,11 @@ Refusals carry a `code`. Nothing was paid after any of them.
 
 In `/activity`, a payment that paid a SHA256 invoice keeps `kind:
 "lightning"` (its `amountSat` and `feeSat` are what it cost here) and adds
-`bitcoinInvoice: {amountSat, description, state}` (`paid`, `pending` or
-`returned`), with the SHA256 invoice's description as `description`, and
-`preimage` once paid.
+`bitcoinInvoice: {amountSat, description, serviceLabel, state}` (`paid`,
+`pending` or `returned`), with the SHA256 invoice's description as
+`description`, and `preimage` once paid. The web's
+`/v1/lnd/lightning/payments` carries the same `bitcoinInvoice` (without
+`state`) on such payments.
 
 ### Request ids
 

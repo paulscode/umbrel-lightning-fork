@@ -23,6 +23,24 @@ const { createSendJournal } = require("utils/sendJournal.js");
 const x509 = require("utils/x509.js");
 
 const API_VERSION = 1;
+// What this dashboard can do beyond API version 1's calls, for a client to
+// show or hide: paying SHA256 invoices through a service.
+const FEATURES = ["bitcoin-invoice"];
+
+const bitcoinInvoices = () => require("logic/bitcoinInvoices.js").instance();
+
+// The service for SHA256 invoices as the phone may see it: whether one is
+// set up, its name and the premium allowed. Never its credential, and
+// nothing asked of the service (that is /bitcoin-invoices).
+function bitcoinInvoicesSummary() {
+  const s = bitcoinInvoices().get();
+  return {
+    configured: Boolean(s.service),
+    label: s.service ? s.service.label || "" : "",
+    onion: s.service ? Boolean(s.service.onion) : false,
+    premium: s.premium,
+  };
+}
 
 const router = express.Router();
 const deviceAuth = createDeviceAuth({ devices: () => devices });
@@ -123,7 +141,32 @@ router.get(
     deviceId: req.device.id,
     label: req.device.label,
     node: await mobile.node(),
+    features: FEATURES,
+    bitcoinInvoices: bitcoinInvoicesSummary(),
   }))
+);
+
+// The service for SHA256 invoices and its terms now, for the app's
+// settings: asks the service (over Tor when its address is an onion), so it
+// can take a while. Set up and changed only in the dashboard.
+router.get(
+  "/bitcoin-invoices",
+  handle(async () => {
+    const summary = bitcoinInvoicesSummary();
+    if (!summary.configured) {
+      return { ...summary, terms: null };
+    }
+    const st = await bitcoinInvoices().status();
+    return {
+      ...summary,
+      terms: st.terms || null,
+      error: st.error || null,
+      reference: st.reference
+        ? { rate: st.reference.rate, premiumAllowed: st.reference.premiumAllowed, source: st.reference.source }
+        : null,
+      referenceError: st.referenceError || null,
+    };
+  })
 );
 
 // Where the phone can reach the node and the root it pins, refreshed after

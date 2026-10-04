@@ -419,6 +419,9 @@ const actions = {
             trx.paymentPreImage === tx.paymentPreimage
         );
 
+        // A payment that paid a SHA256 invoice through the service is
+        // described by that invoice, not by the service's request.
+        const bitcoinInvoice = tx.bitcoinInvoice || null;
         return {
           type: "outgoing",
           amount: Number(tx.value),
@@ -426,7 +429,12 @@ const actions = {
           paymentRequest: tx.paymentRequest,
           paymentPreImage: tx.paymentPreimage,
           fee: Number(tx.feeSat),
-          description: preFetchedTx ? preFetchedTx.description : ""
+          bitcoinInvoice,
+          description: bitcoinInvoice
+            ? bitcoinInvoice.description || "SHA256 invoice"
+            : preFetchedTx
+            ? preFetchedTx.description
+            : ""
         };
       });
 
@@ -449,7 +457,7 @@ const actions = {
 
     // Fetch descriptions of all new outgoing transactions
     for (let tx of newOutgoingTransactions) {
-      if (!tx.paymentRequest) {
+      if (!tx.paymentRequest || tx.bitcoinInvoice) {
         //example - in case of a keysend tx there is no payment request
         continue;
       }

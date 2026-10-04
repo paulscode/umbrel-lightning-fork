@@ -711,12 +711,28 @@ const getChannels = async () => {
 };
 
 // Returns a list of all outgoing payments.
+// Newest first. A payment that paid a SHA256 invoice through the service
+// carries `bitcoinInvoice` ({amountSat, description, serviceLabel}): what it
+// paid there, beside what it cost here.
 async function getPayments() {
   const payments = await lndService.getPayments();
 
+  let bitcoinInvoices = null;
+  try {
+    bitcoinInvoices = require("./bitcoinInvoices.js").instance();
+  } catch (error) {
+    bitcoinInvoices = null;
+  }
+
   const reversedPayments = [];
   for (const payment of payments.payments) {
-    reversedPayments.unshift(payment);
+    let link = null;
+    try {
+      link = bitcoinInvoices ? bitcoinInvoices.linkOf(payment.paymentHash, payment.paymentRequest) : null;
+    } catch (error) {
+      link = null;
+    }
+    reversedPayments.unshift(link ? { ...payment, bitcoinInvoice: link } : payment);
   }
 
   return reversedPayments;

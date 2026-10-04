@@ -124,6 +124,7 @@ function startService(ledger, behave = {}) {
           timestamp: String(ledger.now()),
           expiry: "600",
           description: "swap toSHA256",
+          cltvExpiry: String(b.cltv || 333),
           features: b.noBlake2b ? { 9: {}, 14: {} } : { 9: {}, 14: {}, 512: { name: "option_blake2b" } },
         });
         const expiresAt = ledger.now() + (b.expiresIn === undefined ? 120 : b.expiresIn);
@@ -432,6 +433,7 @@ test("decode: a Bitcoin invoice with the service's estimate and the market rate"
     assert.equal(t.description, "a coffee in Bitcoin");
     assert.equal(t.payable, true);
     assert.equal(t.message, null);
+    assert.equal(t.messageCode, null);
     assert.equal(t.estimate.incomingSat, e.incomingSat);
     assert.equal(t.estimate.feeSat, e.feeSat);
     assert.equal(t.estimate.maxIncomingSat, e.maxIncomingSat);
@@ -446,8 +448,12 @@ test("decode: a Bitcoin invoice with the service's estimate and the market rate"
     const uri = await w.mobile.decode(`bitcoin:bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4?lightning=${x.request}`, CAPABLE);
     assert.equal(uri.kind, "bitcoin-invoice");
     assert.equal(uri.fallback, undefined);
-    const old = await w.mobile.decode(`bitcoin:bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4?lightning=${x.request}`);
-    assert.equal(old.kind, "onchain", "unchanged for a client without the capability");
+    // A client without the capability is not handed the address either:
+    // coins of this chain sent there would not reach the recipient.
+    await assert.rejects(
+      w.mobile.decode(`bitcoin:bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4?lightning=${x.request}`),
+      (e) => e.refusal === "sha256_invoice" && /address isn't offered/.test(e.message)
+    );
   } finally {
     await w.close();
   }
@@ -461,9 +467,11 @@ test("decode: no service, no amount, a closed service, the market rate down or e
     assert.equal(t.estimate, null);
     assert.equal(t.payable, false);
     assert.match(t.message, /Paying SHA256 invoices/);
+    assert.equal(t.messageCode, "no_service");
     const zero = await none.mobile.decode(bitcoinInvoice(none.ledger, { amountMsat: 0 }).request, CAPABLE);
     assert.equal(zero.amountSat, null);
     assert.match(zero.message, /does not say how much/);
+    assert.equal(zero.messageCode, "no_amount");
   } finally {
     await none.close();
   }
@@ -475,6 +483,8 @@ test("decode: no service, no amount, a closed service, the market rate down or e
     assert.equal(t.estimate.open, false);
     assert.match(t.estimate.refusal, /can't pay this much/);
     assert.equal(t.payable, false);
+    assert.ok(t.estimate.refusalCode, "the service's reason, as a code");
+    assert.equal(t.messageCode, t.estimate.refusalCode);
   } finally {
     await closed.close();
   }
@@ -484,6 +494,7 @@ test("decode: no service, no amount, a closed service, the market rate down or e
     assert.ok(t.estimate);
     assert.match(t.referenceError, /market rate/);
     assert.equal(t.payable, false);
+    assert.equal(t.messageCode, "reference_unavailable");
   } finally {
     await down.close();
   }
@@ -495,6 +506,7 @@ test("decode: no service, no amount, a closed service, the market rate down or e
     // Nothing has been attempted yet, so it must not say a payment was stopped.
     assert.match(t.message, /can't be paid from here/);
     assert.doesNotMatch(t.message, /nothing was paid/);
+    assert.equal(t.messageCode, "rate");
   } finally {
     await dear.close();
   }
@@ -550,7 +562,7 @@ test("activity shows a paid Bitcoin invoice as such, with its proof", async () =
     assert.equal(paid.amountSat, est.incomingSat);
     assert.equal(paid.feeSat, 2);
     assert.equal(paid.description, "a coffee in Bitcoin", "the Bitcoin invoice's, not the service's");
-    assert.deepEqual(paid.bitcoinInvoice, { amountSat: 150, description: "a coffee in Bitcoin", state: "paid" });
+    assert.deepEqual(paid.bitcoinInvoice, { amountSat: 150, description: "a coffee in Bitcoin", serviceLabel: "Test service", state: "paid" });
     assert.equal(paid.preimage, x.preimage);
     const back = items.find((i) => i.reference === failed.hash);
     assert.equal(back.status, "failed");
@@ -629,13 +641,16 @@ test("a payment the service holds is 'on its way'; asking again neither asks the
     const x = bitcoinInvoice(w.ledger);
     const est = await estimateOf(w, x.request);
     const args = { request: x.request, maxIncomingSat: est.maxIncomingSat };
-    await assert.rejects(() => w.mobile.payBitcoinInvoice(args), (e) => e.statusCode === 504 && e.uncertain && e.recheck && e.refusal === "on_its_way" && /on its way/.test(e.message));
-    await assert.rejects(() => w.mobile.payBitcoinInvoice({ ...args, resume: true }), (e) => e.statusCode === 504 && e.uncertain);
+    // On its way, and still on its way however often it is asked: never an
+    // unknown, which reads as a fault. With how long it can be held.
+    const onItsWay = (e) => e.statusCode === 504 && e.uncertain && e.recheck && e.refusal === "on_its_way" && /on its way/.test(e.message);
+    await assert.rejects(() => w.mobile.payBitcoinInvoice(args), (e) => onItsWay(e) && e.details.maxHoldHours === Math.ceil((333 * 10) / 60));
+    await assert.rejects(() => w.mobile.payBitcoinInvoice({ ...args, resume: true }), onItsWay);
     // A new request (another device, a new id) is no different.
-    await assert.rejects(() => w.mobile.payBitcoinInvoice(args), (e) => e.statusCode === 504 && e.uncertain);
+    await assert.rejects(() => w.mobile.payBitcoinInvoice(args), onItsWay);
     // The dashboard restarts while it is held: the node says in flight.
     const later = w.restart();
-    await assert.rejects(() => later.mobile.payBitcoinInvoice({ ...args, resume: true }), (e) => e.statusCode === 504 && e.uncertain);
+    await assert.rejects(() => later.mobile.payBitcoinInvoice({ ...args, resume: true }), onItsWay);
     assert.equal(w.service.calls.quote, 1);
     assert.equal(w.lnd.sends.length, 1);
     release();
@@ -879,5 +894,91 @@ test("what users read names the other chain by its proof of work, never as Bitco
     for (const s of strings) {
       assert.doesNotMatch(s, /Bitcoin invoice|on Bitcoin\b|Bitcoin's Lightning/, s);
     }
+  }
+});
+
+test("a service that asks to hold the payment too long is refused before anything is paid", async () => {
+  const w = await world({ behave: { cltv: 5000 } });
+  try {
+    const x = bitcoinInvoice(w.ledger);
+    const est = await estimateOf(w, x.request);
+    await assert.rejects(
+      () => w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: est.maxIncomingSat }),
+      (e) => e.refusal === "hold_too_long" && /nothing was paid/.test(e.message)
+    );
+    assert.equal(w.lnd.sends.length, 0);
+  } finally {
+    await w.close();
+  }
+});
+
+test("a price that rose says so without a number the user never saw, and gives both as details", async () => {
+  const w = await world({ behave: { amountFactor: 1.2 } });
+  try {
+    const x = bitcoinInvoice(w.ledger);
+    const est = await estimateOf(w, x.request);
+    await assert.rejects(
+      () => w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: est.maxIncomingSat }),
+      (e) =>
+        e.refusal === "price_changed" &&
+        /more than the price you agreed to/.test(e.message) &&
+        e.details.maxIncomingSat === est.maxIncomingSat &&
+        e.details.incomingSat > est.maxIncomingSat
+    );
+  } finally {
+    await w.close();
+  }
+});
+
+test("a payment the node could not get to the service is not called returned", async () => {
+  const w = await world({ pay: async () => { throw lndError("unable to find a path to destination"); } });
+  try {
+    const x = bitcoinInvoice(w.ledger);
+    const est = await estimateOf(w, x.request);
+    const args = { request: x.request, maxIncomingSat: est.maxIncomingSat };
+    await assert.rejects(() => w.mobile.payBitcoinInvoice(args), (e) => e.refusal === "not_paid" && /No route/.test(e.message));
+    assert.equal(w.invoices.lastAttempt(x.hash).failCode, "not_paid");
+  } finally {
+    await w.close();
+  }
+});
+
+test("paid by a payment the node no longer lists: the service's preimage is the proof", async () => {
+  const w = await world();
+  try {
+    const x = bitcoinInvoice(w.ledger);
+    const est = await estimateOf(w, x.request);
+    const args = { request: x.request, maxIncomingSat: est.maxIncomingSat };
+    const quoted = await w.invoices.quote(x.request);
+    w.invoices.addAttempt({ ...x, amountMsat: 150000, paymentHash: x.hash, request: x.request }, { state: "paying", holdInvoice: quoted.holdInvoice, expiresAt: quoted.expiresAt, hash: quoted.hash, amountMsat: quoted.incomingMsat });
+    w.service.behave.swapState = "settled";
+    const later = w.restart();
+    const res = await later.mobile.payBitcoinInvoice({ ...args, resume: true });
+    assert.equal(res.status, "succeeded");
+    assert.equal(res.preimage, x.preimage);
+    assert.equal(w.lnd.sends.length, 0, "nothing paid again");
+    // Asked as new, it is already paid, with the proof beside it.
+    await assert.rejects(() => later.mobile.payBitcoinInvoice(args), (e) => e.refusal === "already_paid" && e.details.preimage === x.preimage);
+  } finally {
+    await w.close();
+  }
+});
+
+test("a swap the service lost is the operator's to resolve, not something to try again", async () => {
+  const w = await world();
+  try {
+    const x = bitcoinInvoice(w.ledger);
+    const est = await estimateOf(w, x.request);
+    const args = { request: x.request, maxIncomingSat: est.maxIncomingSat };
+    const quoted = await w.invoices.quote(x.request);
+    w.invoices.addAttempt({ ...x, amountMsat: 150000, paymentHash: x.hash, request: x.request }, { state: "paying", holdInvoice: quoted.holdInvoice, expiresAt: quoted.expiresAt, hash: quoted.hash });
+    w.service.behave.swapState = "lost";
+    const later = w.restart();
+    await assert.rejects(() => later.mobile.payBitcoinInvoice({ ...args, resume: true }), (e) => e.refusal === "needs_operator" && e.statusCode === 409 && /nothing for you to do/.test(e.message));
+    assert.equal(later.invoices.lastAttempt(x.hash).state, "lost");
+    assert.equal(w.lnd.sends.length, 0);
+    assert.equal(w.service.calls.quote, 1, "not asked again");
+  } finally {
+    await w.close();
   }
 });

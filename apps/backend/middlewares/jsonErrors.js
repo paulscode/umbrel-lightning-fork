@@ -44,6 +44,10 @@ function createJsonErrorHandler(label) {
     if (typeof error.refusal === "string") {
       out.code = error.refusal;
     }
+    // What a client needs beside the code (a proof, a ceiling, a wait).
+    if (error.details && typeof error.details === "object") {
+      out.details = error.details;
+    }
     res.status(status).json(out);
   };
 }

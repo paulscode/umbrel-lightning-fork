@@ -35,7 +35,15 @@ const MIN_HOLD_SECONDS = 20;
 const ROUTING_FEE_FRACTION = 0.01;
 const ROUTING_FEE_FLOOR_SAT = 10;
 const INFO_TTL_MS = 30 * 1000;
-const MAX_RECORDS = 500;
+// Paid records are kept the longest: they are what marks a payment in the
+// activity as one that paid a SHA256 invoice.
+const MAX_RECORDS = 2000;
+// The longest the service's request may hold a payment, as its final CLTV
+// in this chain's blocks (about a week at ten minutes a block). The service
+// needs a margin over the SHA256 chain's side; much more than this would
+// tie up the user's money for longer than anyone should agree to unasked.
+const MAX_HOLD_BLOCKS = 1008;
+const MINUTES_PER_BLOCK = 10;
 
 // The service's states after which an attempt has ended without paying,
 // and before which it has not started on the payment.
@@ -67,10 +75,20 @@ function writeFileJson(file, data) {
   fs.renameSync(tmp, file);
 }
 
-function refuse(code, message, status = 400) {
+function refuse(code, message, status = 400, details = null) {
   const error = new ValidationError(message, status);
   error.refusal = code;
+  if (details) {
+    error.details = details;
+  }
   return error;
+}
+
+// How long, at most, a payment held for `blocks` of this chain may stay
+// held if the service never settles it, in hours (ten minutes a block).
+function holdHours(blocks) {
+  const n = Number(blocks);
+  return n > 0 ? Math.ceil((n * MINUTES_PER_BLOCK) / 60) : null;
 }
 
 const sat = (msat) => Math.ceil(msat / 1000);
@@ -307,25 +325,30 @@ function createBitcoinInvoices({
   // new one, so the estimate starts from it when it is the higher: else a
   // price that rose would be refused, re-estimated from the advertised rate
   // and refused again until it expired.
+  //
+  // `messageCode` names the reason in `message` for a client to branch on:
+  // no_amount, no_service, expired, too_small, too_large, rate,
+  // reference_unavailable, unreachable, no_direction, or the service's own
+  // refusal code (disabled, no_rate, ...) while it is closed.
   async function describe({ amountMsat, expired, paymentHash }) {
     if (!amountMsat) {
-      return { estimate: null, message: NO_AMOUNT };
+      return { estimate: null, message: NO_AMOUNT, messageCode: "no_amount" };
     }
     const s = service();
     if (!s) {
-      return { estimate: null, message: NO_SERVICE };
+      return { estimate: null, message: NO_SERVICE, messageCode: "no_service" };
     }
     let d;
     try {
       d = (await info(s)).direction;
     } catch (error) {
       if (error instanceof ValidationError) {
-        return { estimate: null, message: error.message };
+        return { estimate: null, message: error.message, messageCode: error.refusal || "unreachable" };
       }
       throw error;
     }
     if (!d) {
-      return { estimate: null, message: REFUSALS.no_direction[1] };
+      return { estimate: null, message: REFUSALS.no_direction[1], messageCode: "no_direction" };
     }
     let est = estimateFor(amountMsat, d);
     const standing = standingQuoteMsat(paymentHash);
@@ -345,13 +368,18 @@ function createBitcoinInvoices({
       open: d.open,
     };
     let message = null;
+    let messageCode = null;
     if (!d.open) {
       estimate.refusal = openRefusal(d);
+      estimate.refusalCode = d.refusalCode || "disabled";
       message = estimate.refusal;
+      messageCode = estimate.refusalCode;
     } else if (d.minMsat && amountMsat < d.minMsat) {
       message = boundsRefusal("too_small", d).message;
+      messageCode = "too_small";
     } else if (d.maxMsat && amountMsat > d.maxMsat) {
       message = boundsRefusal("too_large", d).message;
+      messageCode = "too_large";
     }
     const out = { estimate };
     try {
@@ -368,18 +396,24 @@ function createBitcoinInvoices({
       };
       if (!withinLimit && !message) {
         message = rateRefusal(ref, effective, true).message;
+        messageCode = "rate";
       }
     } catch (error) {
       if (!(error instanceof ValidationError)) {
         throw error;
       }
       out.referenceError = error.message;
-      message = message || error.message;
+      if (!message) {
+        message = error.message;
+        messageCode = "reference_unavailable";
+      }
     }
     if (expired) {
       message = "This request has expired.";
+      messageCode = "expired";
     }
     out.message = message;
+    out.messageCode = message ? messageCode : null;
     return out;
   }
 
@@ -482,11 +516,19 @@ function createBitcoinInvoices({
     if (y.amountMsat > maxIncomingSat * 1000) {
       const error = refuse(
         "price_changed",
-        `The service now asks ${sat(y.amountMsat).toLocaleString("en-US")} sats, more than the ${maxIncomingSat.toLocaleString("en-US")} you agreed to, so nothing was paid. Check the new price and try again.`,
-        409
+        `The service now asks ${sat(y.amountMsat).toLocaleString("en-US")} sats, more than the price you agreed to, so nothing was paid. Check the new price and try again.`,
+        409,
+        { incomingSat: sat(y.amountMsat), maxIncomingSat }
       );
       error.incomingSat = sat(y.amountMsat);
       throw error;
+    }
+    if (y.cltvExpiry > MAX_HOLD_BLOCKS) {
+      log(`[bitcoin invoices] the service's request for ${x.paymentHash} would hold the payment for ${y.cltvExpiry} blocks`);
+      throw refuse(
+        "hold_too_long",
+        `The service asks to be able to hold your payment for up to ${holdHours(y.cltvExpiry)} hours if it never pays, longer than the ${holdHours(MAX_HOLD_BLOCKS)} allowed, so nothing was paid.`
+      );
     }
     const ref = await reference.get();
     const effective = x.amountMsat / y.amountMsat;
@@ -520,8 +562,10 @@ function createBitcoinInvoices({
     const all = loadRecords();
     const hashes = Object.keys(all);
     if (hashes.length > MAX_RECORDS) {
+      // Those that never paid first, then the oldest.
+      const paid = (h) => (all[h].attempts || []).some((a) => a.state === "succeeded");
       hashes
-        .sort((a, b) => (all[a].at || 0) - (all[b].at || 0))
+        .sort((a, b) => Number(paid(a)) - Number(paid(b)) || (all[a].at || 0) - (all[b].at || 0))
         .slice(0, hashes.length - MAX_RECORDS)
         .forEach((h) => delete all[h]);
     }
@@ -550,6 +594,28 @@ function createBitcoinInvoices({
     return Number(last.quotedIncomingMsat) || 0;
   }
 
+  // The SHA256 invoice a payment of this node paid through the service, by
+  // the attempts on record: {amountSat, description, serviceLabel}, or
+  // null. Matched by the service's request when the payment names it.
+  function linkOf(paymentHash, paymentRequest) {
+    const r = record(paymentHash);
+    if (!r) {
+      return null;
+    }
+    const request = String(paymentRequest || "").toLowerCase();
+    const paid = r.attempts.some(
+      (a) => a.holdInvoice && (request ? String(a.holdInvoice).toLowerCase() === request : ["paying", "failed", "succeeded", "lost"].includes(a.state))
+    );
+    if (!paid) {
+      return null;
+    }
+    return {
+      amountSat: Math.ceil(Number(r.amountMsat || 0) / 1000),
+      description: r.description || "",
+      serviceLabel: r.serviceLabel || "",
+    };
+  }
+
   function lastAttempt(paymentHash) {
     const r = record(paymentHash);
     return r && r.attempts.length ? r.attempts[r.attempts.length - 1] : null;
@@ -565,6 +631,11 @@ function createBitcoinInvoices({
       attempts: [],
     };
     r.at = now();
+    // The service it went through, by name, for the activity.
+    const s = service();
+    if (s && s.label) {
+      r.serviceLabel = s.label;
+    }
     r.attempts.push({ at: now(), ...attempt });
     // A handful is plenty: only the last is ever acted on.
     r.attempts = r.attempts.slice(-10);
@@ -596,6 +667,7 @@ function createBitcoinInvoices({
     checkHold,
     referenceRate,
     record,
+    linkOf,
     lastAttempt,
     addAttempt,
     updateAttempt,
@@ -628,4 +700,6 @@ module.exports = {
   NO_SERVICE,
   NO_AMOUNT,
   INVALID_HOLD,
+  MAX_HOLD_BLOCKS,
+  holdHours,
 };

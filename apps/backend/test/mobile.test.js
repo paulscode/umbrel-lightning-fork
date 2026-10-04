@@ -545,3 +545,44 @@ test("fee rates never exceed what a send accepts", async () => {
   const f = await mobile.fees();
   assert.deepEqual([f.low.satPerVbyte, f.medium.satPerVbyte, f.high.satPerVbyte], [1000, 1000, 1000]);
 });
+
+// BOLT 12's own test vector: an offer as a node on the SHA256 chain makes it
+// (no option_blake2b). Its chain fields read as this chain's.
+const SHA256_OFFER = "lno1pgx9getnwss8vetrw3hhyucvp5yqqqqqqqqqqqqqqqqqqqqkyypwa3eyt44h6txtxquqh7lz5djge4afgfjn7k4rgrkuag0jsd5xvxg";
+const ADDRESS = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4";
+
+test("decode: an offer from the SHA256 chain is said to be one, not offered as payable", async () => {
+  const { mobile } = harness();
+  await assert.rejects(() => mobile.decode(SHA256_OFFER), (e) => e.refusal === "sha256_offer" && /SHA256 chain/.test(e.message));
+});
+
+test("decode: a unified request whose Lightning part can't be paid does not fall back to its address", async () => {
+  const { mobile } = harness();
+  // From the SHA256 chain: an offer, or an invoice a client can't pay.
+  await assert.rejects(
+    () => mobile.decode(`bitcoin:${ADDRESS}?lno=${SHA256_OFFER}`),
+    (e) => e.refusal === "sha256_offer" && /address isn't offered/.test(e.message)
+  );
+  await assert.rejects(
+    () => mobile.decode(`bitcoin:${ADDRESS}?lightning=lnbc1stock`),
+    (e) => e.refusal === "sha256_invoice" && /address isn't offered/.test(e.message)
+  );
+  // Unreadable: nothing is known about the address either.
+  await assert.rejects(
+    () => mobile.decode(`bitcoin:${ADDRESS}?lightning=lnxyz`),
+    (e) => e.refusal === "no_fallback" && /not a valid Lightning invoice/.test(e.message)
+  );
+  // The node not answering is not a reason to send on-chain instead.
+  const down = harness({ lnd: { decodePaymentRequest: async () => { throw new LndError("unavailable", { code: 14, details: "connection refused" }); } } });
+  await assert.rejects(() => down.mobile.decode(`bitcoin:${ADDRESS}?lightning=lnbc25u1pinv`), (e) => !e.refusal);
+  // This chain's, expired: its address still stands.
+  assert.equal((await mobile.decode(`bitcoin:${ADDRESS}?lightning=lnbcold`)).kind, "onchain");
+});
+
+test("decode: a service code is recognised and sent to the dashboard", async () => {
+  const { mobile } = harness();
+  const t = await mobile.decode("lfbridge:eyJ2IjoxfQ");
+  assert.equal(t.kind, "unsupported");
+  assert.equal(t.messageCode, "bridge_code");
+  assert.match(t.message, /Paying SHA256 invoices/);
+});
