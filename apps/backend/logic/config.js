@@ -31,9 +31,9 @@ const deriveConfigObject = (userLndConfigObject, configObject) => {
 // (BRIDGE_SHA256_RPCHOST; Lightning Fork's default otherwise). Off, once it
 // has had a node: that node still, so that a payment left unfinished is
 // finished through it (Lightning Fork quotes nothing, and stops once done).
-// The bridge's pricing lines, from the dashboard's Pricing setting: where the
-// rate comes from and the fees, each only when chosen (Lightning Fork's
-// defaults otherwise: the market, 1.5% each way).
+// The bridge's fee lines, from the dashboard's Pricing setting, each only when
+// chosen (Lightning Fork's default otherwise: 1.5% each way). The rate is
+// always the market's.
 const PRICING_KEYS = {
   fee: 'bridgerpc.spread',
   feeToSHA256: 'bridgerpc.fee.tosha256',
@@ -44,9 +44,6 @@ function pricingConfig(pricing) {
     return {};
   }
   const out = {};
-  if (pricing.rateSource === 'neoxa' || pricing.rateSource === 'fixed') {
-    out['bridgerpc.ratesource'] = pricing.rateSource;
-  }
   for (const [field, key] of Object.entries(PRICING_KEYS)) {
     if (typeof pricing[field] === 'number' && pricing[field] > 0) {
       out[key] = pricing[field];
@@ -104,9 +101,10 @@ const deriveConfigFile = async (configObject, bridge = {}) => {
       if (key === 'bridgerpc.enabled' || key === 'bridgerpc.tosha256' || key === 'bridgerpc.toblake2b' || key.startsWith('bridgerpc.sha256.')) {
         delete userLndConfig[key];
       }
-      // Once the Pricing setting has been saved, the rate source and fees
-      // are its too: a fee cleared there must not survive in lnd.conf.
-      if (bridge.pricing && (key === 'bridgerpc.ratesource' || Object.values(PRICING_KEYS).includes(key))) {
+      // Once the Pricing setting has been saved, the fees are its too, and
+      // the rate the market's: a fee cleared there, or a fixed rate set by
+      // hand, must not survive in lnd.conf.
+      if (bridge.pricing && (key === 'bridgerpc.ratesource' || key === 'bridgerpc.fixedrate' || Object.values(PRICING_KEYS).includes(key))) {
         delete userLndConfig[key];
       }
     }

@@ -589,20 +589,16 @@
               <small v-if="Number(rateInput) > 0" class="d-block text-muted">{{ costPerBitcoinSat(rateInput) }}</small>
             </template>
 
-            <!-- Where the rate comes from and the fees: Umbrel's switch -->
+            <!-- The fees: Umbrel's switch -->
             <div v-if="toggleNow && toggleNow.pricing" class="mt-3 pt-2 border-top-subtle">
               <div class="kv">
-                <span>Pricing</span>
+                <span>Your fees</span>
                 <span class="text-right">
                   {{ pricingSummary(toggleNow.pricing) }}
                   <b-button v-if="!pricing.open" size="sm" variant="link" class="px-0 d-block ml-auto" @click="openPricing">Change</b-button>
                 </span>
               </div>
               <div v-if="pricing.open">
-                <b-form-radio-group v-model="pricing.rateSource" stacked class="small mb-2" :disabled="pricing.busy">
-                  <b-form-radio value="neoxa">The market (Neoxa), read live: nothing is quoted while it cannot be read</b-form-radio>
-                  <b-form-radio value="fixed">My own rate, which I keep current (it expires after an hour)</b-form-radio>
-                </b-form-radio-group>
                 <label class="small font-weight-bold mb-1" for="bridge-fee">Fee, both directions (%)</label>
                 <b-form-input id="bridge-fee" v-model="pricing.fee" type="number" step="0.1" min="0.4" max="19.9" class="neu-input rate-input mb-1" :disabled="pricing.busy"></b-form-input>
                 <small class="d-block text-muted mb-2">1.5% stays inside what payers allow by default (5% over the market) even when the bridge runs low and charges up to three times its fee.</small>
@@ -616,7 +612,7 @@
               </div>
             </div>
             <small v-else-if="overview.platform === 'startos'" class="d-block text-muted mt-2">
-              Choose where the rate comes from and your fees with the Bridge action in StartOS.
+              Set your fees with the Bridge action in StartOS.
             </small>
           </div>
         </div>
@@ -835,7 +831,6 @@ const emptySend = () => ({
 const emptyPricing = () => ({
   open: false,
   busy: false,
-  rateSource: "neoxa",
   fee: "",
   feeToSHA256: "",
   feeToBLAKE2b: ""
@@ -1227,12 +1222,11 @@ export default {
     },
     pricingSummary(p) {
       const pct = f => `${Math.round(f * 1000) / 10}%`;
-      const source = p.rateSource === "fixed" ? "your own rate" : "the market rate";
       const fees =
         p.feeToSHA256 || p.feeToBLAKE2b
           ? `${pct(p.feeToSHA256 || p.fee)} paying SHA256 invoices, ${pct(p.feeToBLAKE2b || p.fee)} paying BLAKE2b invoices`
           : `${pct(p.fee)} fee`;
-      return `${source[0].toUpperCase()}${source.slice(1)}, ${fees}`;
+      return `${fees[0].toUpperCase()}${fees.slice(1)}`;
     },
     openPricing() {
       const p = this.toggleNow.pricing;
@@ -1240,7 +1234,6 @@ export default {
       this.pricing = {
         ...emptyPricing(),
         open: true,
-        rateSource: p.rateSource,
         fee: pct(p.fee),
         feeToSHA256: pct(p.feeToSHA256),
         feeToBLAKE2b: pct(p.feeToBLAKE2b)
@@ -1253,7 +1246,6 @@ export default {
       this.notice = "";
       try {
         const res = await API.post(bridgeUrl("/pricing"), {
-          rateSource: this.pricing.rateSource,
           fee: frac(this.pricing.fee),
           feeToSHA256: frac(this.pricing.feeToSHA256),
           feeToBLAKE2b: frac(this.pricing.feeToBLAKE2b)

@@ -281,17 +281,17 @@ function createBridgeSwitch({
     return { toBLAKE2b, restarting: true };
   }
 
-  // Where the rate comes from and the fees: {rateSource: "neoxa"|"fixed",
-  // fee, feeToSHA256, feeToBLAKE2b}, fees as fractions, the per-direction
-  // ones null for the fee. Saved while off; applied at once, with a
-  // restart, while on.
+  // The fees: {fee, feeToSHA256, feeToBLAKE2b}, as fractions, the
+  // per-direction ones null for the fee. The rate is always the market's (a
+  // fixed one is for test networks; Lightning Fork refuses it on mainnet).
+  // Saved while off; applied at once, with a restart, while on.
   async function setPricing(pricing) {
     return serial(() => setPricingNow(pricing));
   }
 
   async function setPricingNow(pricing) {
     if (!umbrel) {
-      throw new ValidationError("On StartOS, set the rate source and fees with the Bridge action.", 409);
+      throw new ValidationError("On StartOS, set the fees with the Bridge action.", 409);
     }
     const next = validPricing(pricing);
     const settings = (await readSettings()) || {};
@@ -314,7 +314,7 @@ function createBridgeSwitch({
 }
 
 // Lightning Fork's own defaults, which the Pricing setting starts from.
-const DEFAULT_PRICING = { rateSource: "neoxa", fee: 0.015, feeToSHA256: null, feeToBLAKE2b: null };
+const DEFAULT_PRICING = { fee: 0.015, feeToSHA256: null, feeToBLAKE2b: null };
 
 // The routing budget a fee must clear, and the most it may be (Lightning
 // Fork's limits, lnrpc/bridgerpc/config_active.go).
@@ -325,7 +325,6 @@ const MAX_FEE = 0.2;
 function pricingOf(saved) {
   const p = saved && typeof saved === "object" ? saved : {};
   return {
-    rateSource: p.rateSource === "fixed" ? "fixed" : "neoxa",
     fee: typeof p.fee === "number" && p.fee > 0 ? p.fee : DEFAULT_PRICING.fee,
     feeToSHA256: typeof p.feeToSHA256 === "number" && p.feeToSHA256 > 0 ? p.feeToSHA256 : null,
     feeToBLAKE2b: typeof p.feeToBLAKE2b === "number" && p.feeToBLAKE2b > 0 ? p.feeToBLAKE2b : null,
@@ -336,10 +335,7 @@ function pricingOf(saved) {
 // starting.
 function validPricing(pricing) {
   if (!pricing || typeof pricing !== "object") {
-    throw new ValidationError("Send the rate source and fees.", 400);
-  }
-  if (pricing.rateSource !== "neoxa" && pricing.rateSource !== "fixed") {
-    throw new ValidationError("The rate comes from the market (neoxa) or your own rate (fixed).", 400);
+    throw new ValidationError("Send the fees.", 400);
   }
   const fee = (value, name, required) => {
     if (value === null || value === undefined || value === "") {
@@ -355,7 +351,6 @@ function validPricing(pricing) {
     return Number(n.toFixed(6));
   };
   return {
-    rateSource: pricing.rateSource,
     fee: fee(pricing.fee, "fee", true),
     feeToSHA256: fee(pricing.feeToSHA256, "fee for paying SHA256 invoices", false),
     feeToBLAKE2b: fee(pricing.feeToBLAKE2b, "fee for paying BLAKE2b invoices", false),

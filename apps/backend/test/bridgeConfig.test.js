@@ -121,27 +121,27 @@ test("once the switch is used, the directions are its own, not lnd.conf's", asyn
   assert.match(conf(), /^bridgerpc\.spread=0\.02$/m, "tuning stays lnd.conf's");
 });
 
-test("the Pricing setting writes the rate source and fees, and owns them once saved", async () => {
+test("the Pricing setting writes the fees, and owns them (and the rate) once saved", async () => {
   assert.deepEqual(config.bridgeConfig({
     enabled: true,
-    pricing: { rateSource: "fixed", fee: 0.012, feeToSHA256: null, feeToBLAKE2b: 0.008 },
+    pricing: { fee: 0.012, feeToSHA256: null, feeToBLAKE2b: 0.008 },
   }, "10.21.21.68:10019"), {
     "bridgerpc.enabled": true,
     "bridgerpc.tosha256": true,
     "bridgerpc.sha256.supervised": true,
     "bridgerpc.sha256.rpchost": "10.21.21.68:10019",
-    "bridgerpc.ratesource": "fixed",
     "bridgerpc.spread": 0.012,
     "bridgerpc.fee.toblake2b": 0.008,
   });
   // Off with a node: still priced, for a payment left to finish.
-  assert.equal(config.bridgeConfig({ enabled: false, sha256Node: "x", pricing: { rateSource: "neoxa", fee: 0.015 } }, "h:1")["bridgerpc.ratesource"], "neoxa");
+  assert.equal(config.bridgeConfig({ enabled: false, sha256Node: "x", pricing: { fee: 0.015 } }, "h:1")["bridgerpc.spread"], 0.015);
 
   // A fee set by hand in lnd.conf gives way to the setting once it is saved.
-  reset("bridgerpc.fee.tosha256=0.03\nbridgerpc.ratesource=fixed\nbridgerpc.maxswapmsat=5000000\n");
-  await config.writeLndConfig(DEFAULT_CONFIG, { enabled: true, pricing: { rateSource: "neoxa", fee: 0.015, feeToSHA256: null, feeToBLAKE2b: null } });
+  reset("bridgerpc.fee.tosha256=0.03\nbridgerpc.ratesource=fixed\nbridgerpc.fixedrate=0.006\nbridgerpc.maxswapmsat=5000000\n");
+  await config.writeLndConfig(DEFAULT_CONFIG, { enabled: true, pricing: { fee: 0.015, feeToSHA256: null, feeToBLAKE2b: null } });
   const written = conf();
-  assert.match(written, /bridgerpc\.ratesource=neoxa/);
+  assert.doesNotMatch(written, /bridgerpc\.ratesource/);
+  assert.doesNotMatch(written, /bridgerpc\.fixedrate/);
   assert.match(written, /bridgerpc\.spread=0\.015/);
   assert.doesNotMatch(written, /bridgerpc\.fee\.tosha256/);
   // Tuning the setting does not cover stays lnd.conf's.
