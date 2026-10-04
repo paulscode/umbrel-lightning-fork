@@ -100,6 +100,7 @@
         </div>
       </b-col>
     </b-row>
+    <small v-if="feeNotice && !error" class="d-block text-muted mt-2">{{ feeNotice }}</small>
     <b-alert v-if="error" show variant="danger" class="mt-2 mb-0 d-flex align-items-center">
       <b-icon class="d-block mr-2" icon="exclamation-triangle-fill"></b-icon>
       <small class="align-self-center">
@@ -120,6 +121,10 @@ import SatsBtcSwitch from "@/components/Utility/SatsBtcSwitch";
 import FeeSelector from "@/components/Utility/FeeSelector";
 import ToggleSwitch from "@/components/Utility/ToggleSwitch";
 
+// Estimate errors no fee rate can fix: they stop the channel. Others only mean
+// there was no estimate, and a custom rate still opens it.
+const HARD_ESTIMATE_ERRORS = ["INSUFFICIENT_FUNDS", "OUTPUT_IS_DUST", "INVALID_ADDRESS"];
+
 export default {
   props: {},
   data() {
@@ -139,29 +144,36 @@ export default {
           total: 0,
           perByte: "--",
           error: "",
+          errorCode: "",
           sweepAmount: 0,
         },
         normal: {
           total: 0,
           perByte: "--",
           error: "",
+          errorCode: "",
           sweepAmount: 0,
         },
         slow: {
           total: 0,
           perByte: "--",
           error: "",
+          errorCode: "",
           sweepAmount: 0,
         },
         cheapest: {
           total: 0,
           perByte: "--",
           error: "",
+          errorCode: "",
           sweepAmount: 0,
         },
       },
       isPrivate: false,
       error: "",
+      // Why there is no estimate, when no rate could fix it either way: not
+      // blocking, since a custom rate still opens the channel.
+      feeNotice: "",
       feeTimeout: null,
       sweep: false,
     };
@@ -189,9 +201,11 @@ export default {
       }
 
       // The node's estimate for the level's target sizes the transaction
-      // and carries the errors that matter (funds, address, dust).
+      // and carries the errors that matter (funds, address, dust). Others
+      // (no estimate could be made) do not stop a channel at a custom rate,
+      // nor at a level that has its own estimate.
       const sized = this.fee[this.selectedFee.speed || "fast"];
-      if (sized && sized.error) {
+      if (sized && sized.error && HARD_ESTIMATE_ERRORS.includes(sized.errorCode)) {
         this.isOpening = false;
         this.error = sized.error;
         return;
@@ -271,46 +285,61 @@ export default {
       }
       this.feeTimeout = setTimeout(async () => {
         this.error = "";
+        this.feeNotice = "";
         if (this.fundingAmount) {
-          let estimates;
-
           this.$store.dispatch("bitcoin/getMempoolFees");
-          try {
-            estimates = await API.get(
-              `${process.env.VUE_APP_API_BASE_URL}/v1/lnd/channel/estimateFee?confTarget=0&amt=${this.fundingAmount}&sweep=${this.sweep}`
-            );
-          } catch (error) {
-            this.error = getErrorMessage(
-              error,
-              "Unable to estimate fees. Please try again."
-            );
+          // The dashboard's GET helper answers false when the request
+          // fails, and undefined while the same one is still on its way.
+          const estimates = await API.get(
+            `${process.env.VUE_APP_API_BASE_URL}/v1/lnd/channel/estimateFee?confTarget=0&amt=${this.fundingAmount}&sweep=${this.sweep}`
+          );
+
+          if (estimates === false) {
+            // No figures from before are left standing for a new amount.
+            for (const speed of Object.keys(this.fee)) {
+              this.fee[speed].total = 0;
+              this.fee[speed].perByte = "N/A";
+              this.fee[speed].error = "No estimate";
+              this.fee[speed].errorCode = "ESTIMATE_FAILED";
+              this.fee[speed].sweepAmount = 0;
+            }
+            this.feeNotice =
+              "Your node could not estimate the fee just now. Set a custom fee rate, or change the amount to try again.";
+            return;
           }
 
           if (estimates) {
             for (const [speed, estimate] of Object.entries(estimates)) {
+              if (!this.fee[speed]) {
+                continue;
+              }
               // If the API returned an error message
               if (estimate.text) {
                 this.fee[speed].total = 0;
                 this.fee[speed].perByte = "N/A";
                 this.fee[speed].error = estimate.text;
+                this.fee[speed].errorCode = estimate.code || "";
                 this.fee[speed].sweepAmount = 0;
               } else {
                 this.fee[speed].total = estimate.feeSat;
                 this.fee[speed].perByte = estimate.feerateSatPerByte;
                 this.fee[speed].sweepAmount = estimate.sweepAmount;
                 this.fee[speed].error = false;
+                this.fee[speed].errorCode = "";
               }
             }
 
-            // All 4 fee result in error on incorrect peer address, funding amount etc.
-            // but we can't reliably pick the error on any of the those and show it
-            // since there's an edge case where if the error is due to low fee, it only
-            // is a part of the lower fee(s) keys. so we can reliably pick the highest fee's
-            // error text and show it
+            // The fast level's error is the one every level shares when it
+            // is about the amount or address (funds, dust): that one stops
+            // the channel. Any other only means that level has no estimate,
             // https://github.com/getumbrel/umbrel-dashboard/issues/198
-
-            if (estimates.fast && estimates.fast.text) {
-              this.error = estimates.fast.text;
+            const fast = estimates.fast;
+            if (fast && fast.text) {
+              if (HARD_ESTIMATE_ERRORS.includes(fast.code)) {
+                this.error = fast.text;
+              } else {
+                this.feeNotice = `${fast.text} A custom fee rate can still be set.`;
+              }
             }
           }
         }

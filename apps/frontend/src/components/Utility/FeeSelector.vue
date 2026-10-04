@@ -2,12 +2,14 @@
   <div>
     <div class="d-flex w-100 justify-content-between">
       <small class="text-muted block mb-0">Transaction Fee</small>
+      <!-- A custom rate needs no estimate: it is the way forward when the
+           node cannot give one. -->
       <b-form-checkbox
         v-model="useCustomFee"
         class=""
         size="sm"
         switch
-        :disabled="isDisabled"
+        :disabled="disabled"
       >
         <small class="text-muted">Custom</small>
       </b-form-checkbox>
@@ -22,8 +24,8 @@
         :interval="1"
         :dotSize="[22, 22]"
         contained
-        :tooltip="isDisabled ? 'none' : 'always'"
-        :disabled="isDisabled"
+        :tooltip="disabled ? 'none' : 'always'"
+        :disabled="disabled"
         @change="emitValue"
         key="custom-fee"
       >
@@ -37,7 +39,7 @@
             <span class="vue-slider-dot-tooltip-text block"
               >{{ value }} sat/vB
             </span>
-            <small class="text-muted d-sm-inline d-block"
+            <small v-if="vbytes > 0" class="text-muted d-sm-inline d-block"
               >≈ {{ totalFor(value) | satsToFiat }}</small
             >
           </div>
@@ -67,7 +69,7 @@
         </b-button>
       </div>
       <div class="d-flex w-100 justify-content-between align-items-baseline mt-2">
-        <small class="text-muted">{{ sourceLabel }}</small>
+        <small class="text-muted">{{ isDisabled && !disabled ? "No estimate from your node yet; a custom rate can still be set" : sourceLabel }}</small>
         <small v-if="!isDisabled && chosenLevel && !chosenLevel.error" class="text-muted text-right">
           ≈ {{ chosenLevel.total | satsToFiat }}
         </small>

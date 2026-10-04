@@ -45,7 +45,7 @@ const FEE_RATE_TOO_LOW_ERROR = {
 
 const INSUFFICIENT_FUNDS_ERROR = {
   code: "INSUFFICIENT_FUNDS",
-  text: "Lower amount or increase confirmation target."
+  text: "Not enough confirmed funds for this amount and its fee. Lower the amount, or wait for incoming funds to confirm."
 };
 
 const INVALID_ADDRESS = {
@@ -109,8 +109,16 @@ function decodePaymentRequest(paymentRequest) {
 // Estimate the cost of opening a channel. We do this by repurposing the existing estimateFee grpc route from lnd. We
 // generate our own unused address and then feed that into the existing call. Then we add an extra 10 sats per
 // feerateSatPerByte. This is because the actual cost is slightly more than the default one output estimate.
+//
+// One address serves every estimate this process makes: the fee does not
+// depend on which of the wallet's addresses it is, and a new one for each
+// keystroke in the amount field would only fill the wallet with unused ones.
+let channelEstimateAddress = null;
 async function estimateChannelOpenFee(amt, confTarget, sweep) {
-  const address = (await generateAddress()).address;
+  if (!channelEstimateAddress) {
+    channelEstimateAddress = (await generateAddress()).address;
+  }
+  const address = channelEstimateAddress;
   const baseFeeEstimate = await estimateFee(address, amt, confTarget, sweep);
 
   if (confTarget === 0) {
@@ -134,9 +142,32 @@ async function estimateChannelOpenFee(amt, confTarget, sweep) {
   return baseFeeEstimate;
 }
 
+// The node's floor (mempoolminfee, BTC/kvB), or null when the node cannot be
+// asked right now. A floor that cannot be read is no reason to have no
+// estimate at all: lnd's own estimate is still good, and lnd refuses a rate
+// under its own floor when the transaction is made.
+const MEMPOOL_INFO_TIMEOUT_MS = 5000;
+async function mempoolMinFeeOrNull() {
+  let timer;
+  try {
+    const info = await Promise.race([
+      bitcoindLogic.getMempoolInfo(),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("timeout")), MEMPOOL_INFO_TIMEOUT_MS);
+      }),
+    ]);
+    const fee = Number(info && info.result && info.result.mempoolminfee);
+    return Number.isFinite(fee) && fee > 0 ? fee : null;
+  } catch (_) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // Estimate an on chain transaction fee.
 async function estimateFee(address, amt, confTarget, sweep) {
-  const mempoolInfo = (await bitcoindLogic.getMempoolInfo()).result;
+  const mempoolInfo = { mempoolminfee: await mempoolMinFeeOrNull() };
 
   if (sweep) {
     const balance = parseInt(
@@ -205,6 +236,7 @@ async function estimateFeeSweep(
         successfulEstimate.feerateSatPerByte * 1000;
 
       if (
+        mempoolMinFee !== null &&
         estimatedFeeSatPerKiloByte <
         convert(mempoolMinFee, "btc", "sat", "Number")
       ) {
@@ -289,16 +321,30 @@ async function estimateFeeGroupSweep(address, amt, mempoolMinFee) {
 
 async function estimateFeeWrapper(address, amt, mempoolMinFee, confTarget) {
   const estimate = await lndService.estimateFee(address, amt, confTarget);
+  return raiseToFloor(estimate, mempoolMinFee);
+}
 
-  const estimatedFeeSatPerKiloByte = estimate.feerateSatPerByte * 1000;
-
-  if (
-    estimatedFeeSatPerKiloByte < convert(mempoolMinFee, "btc", "sat", "Number")
-  ) {
-    throw new NodeError("FEE_RATE_TOO_LOW");
+// An estimate under the node's floor, raised to it. lnd reports its rate in
+// whole sat/vB, rounded down, so on a quiet chain every target can read 1
+// while the floor is a hair above it; refusing them all left nothing to
+// choose. The floor, rounded up, is the cheapest rate the node relays, and
+// the total grows with it.
+function raiseToFloor(estimate, mempoolMinFee) {
+  if (mempoolMinFee === null || mempoolMinFee === undefined) {
+    return estimate;
   }
-
-  return estimate;
+  const floor = Math.ceil(convert(mempoolMinFee, "btc", "sat", "Number") / 1000);
+  const rate = Number(estimate.feerateSatPerByte);
+  if (!(floor > 0) || rate >= floor) {
+    return estimate;
+  }
+  const fee = Number(estimate.feeSat);
+  return {
+    ...estimate,
+    feeSat: String(rate > 0 ? Math.ceil((fee * floor) / rate) : fee),
+    feerateSatPerByte: String(floor),
+    satPerVbyte: String(floor),
+  };
 }
 
 async function estimateFeeGroup(address, amt, mempoolMinFee) {
@@ -321,19 +367,29 @@ async function estimateFeeGroup(address, amt, mempoolMinFee) {
   };
 }
 
+// What an estimate's failure means, for the page. lnd's own reason is kept
+// when it is none of the known ones: calling every other failure a bad
+// address sent people looking for a problem they did not have.
 function handleEstimateFeeError(error) {
-  if (error.message === "FEE_RATE_TOO_LOW") {
+  const details = String(
+    (error && error.error && error.error.details) || (error && error.message) || ""
+  );
+  if (details === "FEE_RATE_TOO_LOW") {
     return FEE_RATE_TOO_LOW_ERROR;
-  } else if (error.error.details === "transaction output is dust") {
+  } else if (details === "transaction output is dust") {
     return OUTPUT_IS_DUST_ERROR;
-  } else if (
-    error.error.details ===
-    "insufficient funds available to construct transaction"
-  ) {
+  } else if (details === "insufficient funds available to construct transaction") {
     return INSUFFICIENT_FUNDS_ERROR;
+  } else if (/address/i.test(details)) {
+    return INVALID_ADDRESS;
   }
 
-  return INVALID_ADDRESS;
+  return {
+    code: "ESTIMATE_FAILED",
+    text: details
+      ? `The node could not estimate this fee: ${details}`
+      : "The node could not estimate this fee right now.",
+  };
 }
 
 // Generates a new on chain segwit bitcoin address.
@@ -1050,6 +1106,8 @@ async function restartLndWithRetries(MAX_TRIES = 60) {
 }
 
 module.exports = {
+  raiseToFloor,
+  handleEstimateFeeError,
   addInvoice,
   changePassword,
   closeChannel,

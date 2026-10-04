@@ -308,6 +308,7 @@
               :disabled="!withdraw.amount || !withdraw.address"
               @change="selectWithdrawalFee"
             ></fee-selector>
+            <small v-if="withdraw.feeNotice" class="d-block text-muted mb-2">{{ withdraw.feeNotice }}</small>
           </div>
         </div>
 
@@ -375,9 +376,12 @@
                 </b>
                 <small>&nbsp;sat/vB</small>
                 <br />
-                <small>
+                <small v-if="Number(withdraw.selectedFee.total) > 0">
                   ~ {{ withdraw.selectedFee.total | satsToFiat }}
                   Transaction fee
+                </small>
+                <small v-else>
+                  Fee set by the transaction's size at this rate
                 </small>
               </span>
               <span class="text-right text-muted">
@@ -628,6 +632,9 @@ import CircularCheckmark from "@/components/Utility/CircularCheckmark.vue";
 import SatsBtcSwitch from "@/components/Utility/SatsBtcSwitch";
 import FeeSelector from "@/components/Utility/FeeSelector";
 
+// Estimate errors no fee rate can fix: they stop a send.
+const HARD_ESTIMATE_ERRORS = ["INSUFFICIENT_FUNDS", "OUTPUT_IS_DUST", "INVALID_ADDRESS"];
+
 export default {
   data() {
     return {
@@ -641,6 +648,7 @@ export default {
         feesTimeout: null, //window.setTimeout for fee fetching
         isTyping: false, //to disable button when the user changes amount/address
         isWithdrawing: false, //awaiting api response for withdrawal request?
+        feeNotice: "",
         txHash: "", //tx hash of withdrawal tx,
         selectedFee: { type: "medium", speed: "normal", satPerByte: 0, total: 0 }, //selected withdrawal fee
       },
@@ -732,6 +740,7 @@ export default {
         feesTimeout: null,
         isTyping: false, //to disable button when the user changes amount/address
         isWithdrawing: false,
+        feeNotice: "",
         txHash: "",
         selectedFee: { type: "medium", speed: "normal", satPerByte: 0, total: 0 },
       };
@@ -765,12 +774,19 @@ export default {
           await this.$store.dispatch("bitcoin/getFees", params);
 
           if (this.fees) {
-            //show error if any
+            // An error no fee rate can fix (funds, dust, address) stops the
+            // send; any other only means no estimate, and a custom rate
+            // still sends.
             const speed = this.withdraw.selectedFee.speed || "fast";
-            if (this.fees[speed] && this.fees[speed].error.code) {
-              this.error = this.fees[speed].error.text;
+            const failed = this.fees[speed] && this.fees[speed].error;
+            this.withdraw.feeNotice = "";
+            if (failed && HARD_ESTIMATE_ERRORS.includes(failed.code)) {
+              this.error = failed.text;
             } else {
               this.error = "";
+              if (failed && failed.code) {
+                this.withdraw.feeNotice = `${failed.text} A custom fee rate can still be set.`;
+              }
             }
             // if (this.withdraw.sweep) {
             // this.estimateSweep();

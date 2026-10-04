@@ -143,6 +143,19 @@ const mutations = {
     state.mempoolFees = mempoolFees;
   },
 
+  // No estimate could be made: no figures from an earlier one stay standing.
+  feesUnavailable(state) {
+    for (const speed of Object.keys(state.fees)) {
+      state.fees[speed].total = "--";
+      state.fees[speed].perByte = "N/A";
+      state.fees[speed].sweepAmount = 0;
+      state.fees[speed].error = {
+        code: "ESTIMATE_FAILED",
+        text: "Your node could not estimate the fee just now.",
+      };
+    }
+  },
+
   fees(state, fees) {
     for (const [speed, estimate] of Object.entries(fees)) {
       // If the API returned an error message
@@ -274,7 +287,11 @@ const actions = {
 
     if (fees) {
       commit("fees", fees);
+    } else if (fees === false) {
+      // false is a failed request; undefined, the same one still on its way.
+      commit("feesUnavailable");
     }
+    return fees;
   },
 };
 
