@@ -39,7 +39,10 @@ const REFUSALS = {
   self_payment: [400, "This invoice was made by the service's own node."],
   no_liquidity: [400, "The service can't pay this much right now. Try a smaller amount, or try again later."],
   price_unavailable: [400, "The service has no current price. Try again later."],
-  chain_unmeasured: [400, "The service is starting up. Try again in a few minutes."],
+  // The service can't size a payment's timing safely right now: it is still
+  // measuring its chains (after a start), or they are moving fast enough that
+  // nothing fits.
+  chain_unmeasured: [400, "The service can't take payments right now: it is still measuring its chains, or they are moving unusually fast. Try again later."],
   in_progress: [409, "This invoice is already being paid. Check your activity before trying again."],
   already_paid: [409, "This invoice has already been paid."],
   needs_operator: [409, "The service's last attempt at this invoice needs its operator to look at it. Ask them before trying again."],
