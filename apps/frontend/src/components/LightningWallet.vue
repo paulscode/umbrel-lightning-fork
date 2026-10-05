@@ -553,8 +553,10 @@
           <span class="bitcoin-chip mb-3">SHA256 invoice</span>
           <h4 class="mb-3" :class="{ blink: !send.waitingLong }">On its way</h4>
           <p v-if="!send.waitingLong" class="text-muted mb-2">
-            The service is paying the SHA256 invoice. Your payment completes
-            only once it has, which can take a minute or two.
+            <template v-if="ownBridgePays">Your bridge's SHA256 node is paying
+            the invoice. This can take a minute.</template>
+            <template v-else>The service is paying the SHA256 invoice. Your payment completes
+            only once it has, which can take a minute or two.</template>
           </p>
           <p v-else class="text-muted mb-2">
             This is taking longer than usual. The payment may still complete;
@@ -611,7 +613,12 @@
               :lines="1"
             ></clamped-text>
           </div>
-          <small class="d-block text-center text-muted mb-2">
+          <small v-if="bitcoinPaid.ownBridge" class="d-block text-center text-muted mb-2">
+            Paid from your bridge's SHA256 node, with
+            {{ bitcoinPaid.sha256FeeSat | localize }} sats (SHA256) of routing.
+            Nothing was spent from this wallet.
+          </small>
+          <small v-else class="d-block text-center text-muted mb-2">
             Cost here: {{ bitcoinPaid.amountSat | localize }} sats +
             {{ bitcoinPaid.feeSat | localize }} sats routing
           </small>
@@ -1254,6 +1261,8 @@ export default {
         amountSat: null,
         feeSat: null,
         preimage: "",
+        ownBridge: false,
+        sha256FeeSat: 0,
       },
       offer: {
         //a reusable offer just created from the receive screen
@@ -1375,6 +1384,8 @@ export default {
         amountSat: null,
         feeSat: null,
         preimage: "",
+        ownBridge: false,
+        sha256FeeSat: 0,
       };
       this.offer = { bolt12: "", qr: "1", existed: false };
       this.paymentInfo = {
@@ -1884,6 +1895,10 @@ export default {
           amountSat: paid.amountSat,
           feeSat: paid.feeSat,
           preimage: paid.preimage,
+          // Paid from this node's own bridge: nothing spent here, and the
+          // SHA256 node's routing fee instead.
+          ownBridge: invoice.source === "own_bridge",
+          sha256FeeSat: invoice.sha256FeeSat || 0,
         };
         this.mode = "bitcoin-sent";
         this.$store.dispatch("lightning/getTransactions");

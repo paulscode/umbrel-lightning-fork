@@ -274,6 +274,7 @@ after any of them except `on_its_way` (paying, held by the service) and
 |---|---|---|
 | `no_service` | 400 | no service is set up |
 | `own_bridge_not_ready`, `own_bridge_no_liquidity` | 400 | the node's own bridge cannot pay this invoice, and no service is set up |
+| `own_bridge_unavailable` | 503 | the node's own bridge could not be asked (its SHA256 node or Lightning Fork not answering); nothing was paid |
 | `no_amount` | 400 | the SHA256 invoice names no amount |
 | `not_bitcoin_invoice` | 400 | the invoice is this chain's; pay it with `/lightning/pay` |
 | `on_its_way` | 504 | paid to the service and held until it has paid the SHA256 invoice; ask again with `resume`. `details.maxHoldHours` |
@@ -329,7 +330,9 @@ refusals from `/pay/bitcoin-invoice`).
 These payments are the SHA256 node's, so the node's own list of payments
 does not show them; `/activity` adds them from the dashboard's record:
 `amountSat` and `feeSat` 0, `bitcoinInvoice.serviceLabel` "Your bridge",
-`bitcoinInvoice.source: "own_bridge"`. The web's payments list shows the
+`bitcoinInvoice.source: "own_bridge"`, `bitcoinInvoice.sha256FeeSat`, and
+`bitcoinInvoice.state` `paid`, `pending` or `failed` (nothing left this
+wallet; not `returned`, which is a service's). The web's payments list shows the
 paid ones.
 
 `GET /api/v1/bitcoin-invoices` adds `ownBridge: {ready, availableSat}` when

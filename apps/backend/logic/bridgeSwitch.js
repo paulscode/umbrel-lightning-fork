@@ -295,6 +295,11 @@ function createBridgeSwitch({
     }
     const next = validPricing(pricing);
     const settings = (await readSettings()) || {};
+    if (!settings.bridge || typeof settings.bridge.enabled !== "boolean") {
+      // Until the bridge is turned on here, lnd.conf's own bridgerpc lines
+      // run it, and a setting saved here would change nothing.
+      throw new ValidationError("Turn the bridge on in this window first. Until then it runs from lnd.conf, where bridgerpc.spread sets its fee.", 409);
+    }
     const lnd = settings.lnd && Object.keys(settings.lnd).length > 0 ? settings.lnd : defaultLnd;
     const before = settings.bridge || {};
     const same = JSON.stringify(pricingOf(before.pricing)) === JSON.stringify(next);

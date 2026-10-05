@@ -863,7 +863,10 @@ test("what is not a payable Bitcoin invoice is refused before the service is ask
     await assert.rejects(() => w.mobile.payBitcoinInvoice({ request: "lnbcours", maxIncomingSat: 1000 }), (e) => e.refusal === "not_bitcoin_invoice");
     const old = bitcoinInvoice(w.ledger, { expiry: 30 });
     await assert.rejects(() => w.mobile.payBitcoinInvoice({ request: old.request, maxIncomingSat: 100000 }), /expired/);
-    await assert.rejects(() => w.mobile.payBitcoinInvoice({ request: old.request }), /most you agree to pay/);
+    // An expired one says so first; a payable one without a ceiling asks
+    // for it.
+    await assert.rejects(() => w.mobile.payBitcoinInvoice({ request: old.request }), /expired/);
+    await assert.rejects(() => w.mobile.payBitcoinInvoice({ request: bitcoinInvoice(w.ledger).request }), /most you agree to pay/);
     await assert.rejects(() => w.mobile.payBitcoinInvoice({ request: "hello", maxIncomingSat: 5 }), /not a SHA256 invoice/);
     assert.equal(w.service.calls.quote, 0);
   } finally {
@@ -1238,6 +1241,66 @@ test("own bridge: a payment through a service needs a ceiling", async () => {
   try {
     const x = bitcoinInvoice(w.ledger);
     await assert.rejects(w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: 0 }), /Say the most/);
+  } finally {
+    w.close();
+  }
+});
+
+test("own bridge: an invoice already paid through a service is not paid again from the bridge", async () => {
+  const ledger = createLedger();
+  const files = memoryFiles();
+  const first = await world({ ledger, files });
+  let x;
+  try {
+    x = bitcoinInvoice(ledger);
+    const est = await estimateOf(first, x.request);
+    const paid = await first.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: est.maxIncomingSat });
+    assert.equal(paid.status, "succeeded");
+  } finally {
+    first.close();
+  }
+  // The operator turns on their own bridge and pastes the same invoice.
+  const own = ownBridgeFake(ledger);
+  const second = await world({ ledger, files, ownBridge: () => own });
+  try {
+    await assert.rejects(second.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: 0 }), (e) => e.refusal === "already_paid" || /already been paid/.test(e.message));
+    assert.equal(own.calls.pay, 0, "the bridge's node paid a paid invoice again");
+  } finally {
+    second.close();
+  }
+});
+
+test("own bridge: a recorded payment the node no longer shows is never paid again", async () => {
+  const ledger = createLedger();
+  const own = ownBridgeFake(ledger);
+  const w = await world({ configure: false, ledger, ownBridge: () => own });
+  try {
+    const x = bitcoinInvoice(ledger);
+    await w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: 0 });
+    own.payments.clear();
+    await assert.rejects(w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: 0 }), (e) => e.refusal === "already_paid");
+    const again = await w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: 0, recheck: true });
+    assert.equal(again.preimage, x.preimage);
+    assert.equal(own.calls.pay, 1);
+  } finally {
+    w.close();
+  }
+});
+
+test("own bridge: a payment refused before it reached the node is not left 'paying'", async () => {
+  const ledger = createLedger();
+  const own = ownBridgeFake(ledger);
+  const { ValidationError } = require("../models/errors.js");
+  own.sha256Pay = async () => {
+    own.calls.pay++;
+    throw new ValidationError("This node's bridge has no SHA256 node of its own to pay from.", 409);
+  };
+  const w = await world({ configure: false, ledger, ownBridge: () => own });
+  try {
+    const x = bitcoinInvoice(ledger);
+    await assert.rejects(w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: 0 }), (e) => e.refusal === "own_bridge_unavailable");
+    assert.equal(w.invoices.lastAttempt(x.hash).state, "failed");
+    await assert.rejects(w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: 0, recheck: true }), (e) => e.refusal === "not_paid");
   } finally {
     w.close();
   }

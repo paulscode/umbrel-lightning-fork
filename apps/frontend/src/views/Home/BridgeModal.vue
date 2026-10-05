@@ -700,12 +700,12 @@
               </div>
               <div v-if="pricing.open">
                 <label class="small font-weight-bold mb-1" for="bridge-fee">Fee, both directions (%)</label>
-                <b-form-input id="bridge-fee" v-model="pricing.fee" type="number" step="0.1" min="0.4" max="19.9" class="neu-input rate-input mb-1" :disabled="pricing.busy"></b-form-input>
+                <b-form-input id="bridge-fee" v-model="pricing.fee" type="number" step="0.01" min="0.31" max="19.99" class="neu-input rate-input mb-1" :disabled="pricing.busy"></b-form-input>
                 <small class="d-block text-muted mb-2">1.5% stays inside what payers allow by default (5% over the market) even when the bridge runs low and charges up to three times its fee.</small>
                 <label class="small font-weight-bold mb-1" for="bridge-fee-sha">{{ directionName("toSHA256") }}: fee if different (%)</label>
-                <b-form-input id="bridge-fee-sha" v-model="pricing.feeToSHA256" type="number" step="0.1" min="0.4" max="19.9" class="neu-input rate-input mb-2" placeholder="Same" :disabled="pricing.busy"></b-form-input>
+                <b-form-input id="bridge-fee-sha" v-model="pricing.feeToSHA256" type="number" step="0.01" min="0.31" max="19.99" class="neu-input rate-input mb-2" placeholder="Same" :disabled="pricing.busy"></b-form-input>
                 <label class="small font-weight-bold mb-1" for="bridge-fee-b2b">{{ directionName("toBLAKE2b") }}: fee if different (%)</label>
-                <b-form-input id="bridge-fee-b2b" v-model="pricing.feeToBLAKE2b" type="number" step="0.1" min="0.4" max="19.9" class="neu-input rate-input mb-2" placeholder="Same" :disabled="pricing.busy"></b-form-input>
+                <b-form-input id="bridge-fee-b2b" v-model="pricing.feeToBLAKE2b" type="number" step="0.01" min="0.31" max="19.99" class="neu-input rate-input mb-2" placeholder="Same" :disabled="pricing.busy"></b-form-input>
                 <small class="d-block text-muted mb-2">Saving restarts Lightning Fork while the bridge is on.</small>
                 <b-button size="sm" variant="primary" class="mr-2" :disabled="pricing.busy" @click="savePricing">{{ pricing.busy ? "Saving…" : "Save" }}</b-button>
                 <b-button size="sm" variant="link" :disabled="pricing.busy" @click="pricing.open = false">Cancel</b-button>
@@ -1367,7 +1367,7 @@ export default {
       this.send.busy = false;
     },
     pricingSummary(p) {
-      const pct = f => `${Math.round(f * 1000) / 10}%`;
+      const pct = f => `${Math.round(f * 10000) / 100}%`;
       const fees =
         p.feeToSHA256 || p.feeToBLAKE2b
           ? `${pct(p.feeToSHA256 || p.fee)} paying SHA256 invoices, ${pct(p.feeToBLAKE2b || p.fee)} paying BLAKE2b invoices`
@@ -1376,7 +1376,7 @@ export default {
     },
     openPricing() {
       const p = this.toggleNow.pricing;
-      const pct = f => (f ? String(Math.round(f * 1000) / 10) : "");
+      const pct = f => (f ? String(Math.round(f * 10000) / 100) : "");
       this.pricing = {
         ...emptyPricing(),
         open: true,
@@ -1387,6 +1387,11 @@ export default {
     },
     async savePricing() {
       const frac = v => (String(v).trim() === "" ? null : Number(v) / 100);
+      const fees = [this.pricing.fee, this.pricing.feeToSHA256, this.pricing.feeToBLAKE2b];
+      if (fees.some(v => String(v).trim() !== "" && !Number.isFinite(Number(v)))) {
+        this.error = "Enter each fee as a number of percent, such as 1.5.";
+        return;
+      }
       this.pricing.busy = true;
       this.error = "";
       this.notice = "";

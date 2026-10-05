@@ -1176,9 +1176,13 @@ function createMobile({
     if (last && last.source === OWN_BRIDGE) {
       return { resumed: true };
     }
-    // A service's attempt under way is the service's; asking again about
-    // one that has ended finds out about it, through the service.
-    if (inFlight.has(x.paymentHash) || (last && (["quoted", "paying"].includes(last.state) || again))) {
+    // A service's attempt under way, or one that paid (or was lost), is
+    // the service's to answer for; asking again about one that has ended
+    // finds out about it, through the service.
+    if (
+      inFlight.has(x.paymentHash) ||
+      (last && (["quoted", "paying", "succeeded", "lost"].includes(last.state) || again))
+    ) {
       return null;
     }
     const route = await service.ownRoute(x.amountMsat);
@@ -1238,7 +1242,7 @@ function createMobile({
       if (again) {
         throw stillUncertain();
       }
-      throw new ValidationError("Your bridge's SHA256 node is not answering. Try again in a minute.", 503);
+      throw refuse("own_bridge_unavailable", "Your bridge's SHA256 node is not answering. Try again in a minute.", 503);
     }
     const last = service.lastAttempt(hash);
     if (st && st.status === "SUCCEEDED") {
@@ -1252,6 +1256,15 @@ function createMobile({
     }
     if (st && (st.status === "IN_FLIGHT" || st.status === "INITIATED")) {
       throw ownOnItsWay();
+    }
+    // Recorded as paid, though the node no longer shows it (its payments
+    // were deleted, or the bridge moved to another node): paid all the
+    // same, and never paid again.
+    if (last && last.state === "succeeded") {
+      if (again) {
+        return ownPaid({ preimage: (last.outcome && last.outcome.preimage) || "", feeSat: (last.outcome && last.outcome.sha256FeeSat) || 0 }, x);
+      }
+      throw alreadyPaid((last.outcome && last.outcome.preimage) || "");
     }
     if (st && st.status === "FAILED" && last && last.state === "paying") {
       service.updateAttempt(hash, { state: "failed", endedAt: now(), reason: st.failureReason, failCode: "not_paid" });
@@ -1287,11 +1300,18 @@ function createMobile({
       try {
         p = await service.ownPay(x.request, route.routingFeeLimitSat);
       } catch (error) {
+        if (error instanceof ValidationError) {
+          // Refused before anything reached the node (it is not this
+          // node's bridge's, or Lightning Fork is not answering).
+          service.updateAttempt(hash, { state: "failed", endedAt: now(), reason: error.message, failCode: "not_paid" });
+          throw refuse("own_bridge_unavailable", error.message, 503);
+        }
         if (error.grpcCode !== undefined || error.status) {
           // The node answered and did not send it.
           const detail = String(error.message || "");
           if (/already paid|already succeeded/i.test(detail)) {
-            service.updateAttempt(hash, { state: "failed", endedAt: now(), reason: detail, failCode: "not_paid" });
+            // Paid before by this node: left as it is, for asking again
+            // to find the payment and its proof.
             throw alreadyPaid();
           }
           if (/in transition|already in flight/i.test(detail)) {
@@ -1302,7 +1322,7 @@ function createMobile({
         }
         if (/ECONNREFUSED|ENOTFOUND|EHOSTUNREACH|credentials/i.test(`${error.code || ""} ${error.message || ""}`)) {
           service.updateAttempt(hash, { state: "failed", endedAt: now(), reason: "not answering", failCode: "not_paid" });
-          throw new ValidationError("Your bridge's SHA256 node is not answering, so nothing was paid. Try again in a minute.", 503);
+          throw refuse("own_bridge_unavailable", "Your bridge's SHA256 node is not answering, so nothing was paid. Try again in a minute.", 503);
         }
         // Cut off: it may have started. Asking again follows it.
         throw stillUncertain();
@@ -1334,9 +1354,6 @@ function createMobile({
     const route = await ownBridgeRoute(x, again);
     if (route) {
       return payOwnLocked(x, again, route);
-    }
-    if (!max) {
-      throw bad("Say the most you agree to pay for this invoice.");
     }
     const hash = x.paymentHash;
     const service = bitcoinInvoices();
@@ -1462,6 +1479,11 @@ function createMobile({
     }
     if (!service.service()) {
       throw refuse("no_service", NO_SERVICE);
+    }
+    // Only a new payment needs the ceiling: what came before (paid, on its
+    // way, ended) is answered without one.
+    if (!max) {
+      throw bad("Say the most you agree to pay for this invoice.");
     }
 
     // The service's last request, while it is still waiting to be paid and
@@ -1812,7 +1834,9 @@ function createMobile({
           amountSat: o.amountSat,
           description: o.description,
           serviceLabel: "Your bridge",
-          state: o.state === "failed" ? "returned" : o.state,
+          // Nothing left this wallet either way: "failed", not the
+          // "returned" of a payment a service turned back.
+          state: o.state,
           source: OWN_BRIDGE,
           sha256FeeSat: o.sha256FeeSat,
         },

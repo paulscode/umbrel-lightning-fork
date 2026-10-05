@@ -322,7 +322,11 @@ test("pricing: saved while off, applied with a restart while on, and checked", a
   const { pricingOf, validPricing } = require("../logic/bridgeSwitch.js");
   assert.deepEqual(pricingOf(undefined), { fee: 0.015, feeToSHA256: null, feeToBLAKE2b: null });
 
-  const off = harness();
+  // Never switched here: lnd.conf runs the bridge, and a setting saved here
+  // would change nothing.
+  await assert.rejects(harness().sw.setPricing({ fee: 0.012 }), /Turn the bridge on in this window first/);
+
+  const off = harness({ settings: { lnd: LND, bridge: { enabled: false } } });
   let res = await off.sw.setPricing({ fee: 0.012, feeToBLAKE2b: 0.008 });
   assert.equal(res.restarting, false);
   assert.deepEqual(off.state.settings.bridge.pricing, { fee: 0.012, feeToSHA256: null, feeToBLAKE2b: 0.008 });
