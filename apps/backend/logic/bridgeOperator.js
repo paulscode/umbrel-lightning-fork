@@ -564,11 +564,12 @@ function createBridgeOperator({
   }
 
   async function sha256Payment(paymentHash) {
-    const hash = Buffer.from(String(paymentHash), "hex").toString("base64url");
+    // lnd's REST gateway reads bytes in a path as standard base64, escaped.
+    const hash = encodeURIComponent(Buffer.from(String(paymentHash), "hex").toString("base64"));
     try {
       return paymentOf(await sha256Node("GET", `/v2/router/track/${hash}?no_inflight_updates=false`, undefined, { firstMessage: true }));
     } catch (error) {
-      if (error.grpcCode === 5 || /not found|unknown payment/i.test(lndMessage(error))) {
+      if (error.grpcCode === 5 || /not found|unknown payment|isn't initiated/i.test(lndMessage(error))) {
         return null;
       }
       throw error;
