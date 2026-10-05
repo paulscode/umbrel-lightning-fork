@@ -916,8 +916,10 @@ function createBridgeOperator({
     } catch (error) {
       throw new ValidationError(`Lightning Fork did not make the code: ${lndMessage(error)}`, 502);
     }
+    // The code names this bridge, which the participant sees as who pays
+    // for them; their own name stays here, beside the code's root key.
     const code = encodeBridgeCode({
-      label: name,
+      label: String(info.alias || "").trim() || "Lightning Fork bridge",
       url: participantUrl,
       node: info.identity_pubkey,
       macaroon: baked.macaroon,

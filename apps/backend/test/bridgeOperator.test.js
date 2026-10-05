@@ -287,7 +287,9 @@ test("a bridge code carries a macaroon for exactly the participant's calls", asy
   assert.ok(BigInt(rootKeyId) >= 1000n);
 
   const parsed = parseBridgeCode(code);
-  assert.equal(parsed.label, "Alice");
+  // The code names the bridge (the alias, else a generic name), which the
+  // participant sees as who pays for them; Alice's name stays here.
+  assert.equal(parsed.label, "Lightning Fork bridge");
   assert.equal(parsed.node, NODE);
   assert.equal(parsed.url, "https://abcdefghijklmnop.onion:8080");
   assert.equal(saved[rootKeyId].label, "Alice");
@@ -753,4 +755,22 @@ test("following the market, the rate step is the market being readable", () => {
   assert.equal(old.rateSource, "fixed");
   assert.equal(old.feeToSHA256, null);
   assert.equal(checklist(old, { participants: 1, now: () => 1791000100 }).some((x) => x.id === "rate"), true);
+});
+
+test("a bridge code is labelled with the bridge's alias", async () => {
+  const { parseBridgeCode } = require("../utils/bridgeCode.js");
+  const calls = {
+    "GET /v1/getinfo": { identity_pubkey: "02" + "ab".repeat(32), alias: "PaulsCode Start9 Pruned" },
+    "GET /v1/macaroon/ids": { root_key_ids: [] },
+    "POST /v1/macaroon": { macaroon: "0201abcd" },
+  };
+  const op = createBridgeOperator({
+    lightningFork: async (method, route) => calls[`${method} ${route}`],
+    participantUrl: "https://abc.onion:8080",
+    readLabels: async () => ({}),
+    writeLabels: async () => {},
+  });
+  const { code, label } = await op.issueCode("Worthy Mavericks");
+  assert.equal(label, "Worthy Mavericks");
+  assert.equal(parseBridgeCode(code).label, "PaulsCode Start9 Pruned");
 });

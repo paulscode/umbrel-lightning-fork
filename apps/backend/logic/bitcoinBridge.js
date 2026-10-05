@@ -35,6 +35,7 @@ const REFUSALS = {
   too_large: [400, "This amount is more than the service pays at once."],
   expires_soon: [400, "This invoice expires too soon to be paid safely."],
   route_budget: [400, "The recipient's node asks for more time than the service can give a payment, so it can't be paid this way."],
+  no_route: [400, "The service can't reach this invoice's recipient within its limits, so it can't be paid this way. Nothing was paid."],
   self_payment: [400, "This invoice was made by the service's own node."],
   no_liquidity: [400, "The service can't pay this much right now. Try a smaller amount, or try again later."],
   price_unavailable: [400, "The service has no current price. Try again later."],

@@ -242,11 +242,25 @@
                       >Set the rate</b-button
                     >
                     <b-button
-                      v-if="step.id === 'participants'"
+                      v-if="step.id === 'participants' && overview.canIssueCodes"
                       size="sm"
                       variant="outline-primary"
                       @click="scrollTo('bridge-participants')"
                       >Invite someone</b-button
+                    >
+                    <!-- Where this window can't make a code, say where instead -->
+                    <small
+                      v-else-if="step.id === 'participants' && !overview.manageParticipants"
+                      class="text-muted"
+                      >In StartOS, run the <b>Add Bridge Participant</b>
+                      action. It needs an onion address on the REST LND
+                      Connect interface first.</small
+                    >
+                    <small
+                      v-else-if="step.id === 'participants'"
+                      class="text-muted"
+                      >Participants reach your node over Tor, and it has no
+                      Tor address for that yet.</small
                     >
                   </div>
                 </template>

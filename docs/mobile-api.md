@@ -293,7 +293,7 @@ after any of them except `on_its_way` (paying, held by the service) and
 | `tor_required` | 400 | the service is an onion and the node has no Tor proxy |
 | `cert_mismatch` | 400 | the service did not present the certificate its code pins; nothing was sent to it |
 | `not_authorized` | 400 | the service did not accept its code |
-| `disabled`, `too_small`, `too_large`, `expires_soon`, `route_budget`, `no_liquidity`, `price_unavailable`, `chain_unmeasured`, `self_payment`, `invalid_invoice`, `no_direction`, `refused` | 400 | the service refused, for the reason the sentence gives |
+| `disabled`, `too_small`, `too_large`, `expires_soon`, `route_budget`, `no_route`, `no_liquidity`, `price_unavailable`, `chain_unmeasured`, `self_payment`, `invalid_invoice`, `no_direction`, `refused` | 400 | the service refused, for the reason the sentence gives |
 
 In `/activity`, a payment that paid a SHA256 invoice keeps `kind:
 "lightning"` (its `amountSat` and `feeSat` are what it cost here) and adds
