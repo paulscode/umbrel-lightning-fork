@@ -774,3 +774,32 @@ test("a bridge code is labelled with the bridge's alias", async () => {
   assert.equal(label, "Worthy Mavericks");
   assert.equal(parseBridgeCode(code).label, "PaulsCode Start9 Pruned");
 });
+
+test("the channel form's maximum leaves lnd's reserve and a fee on chain", () => {
+  const { channelMaxEstimate } = require("../logic/bridgeOperator.js");
+  // No channels yet: the first one makes lnd keep 10,000.
+  assert.deepEqual(channelMaxEstimate({ onchainConfirmedSat: 250000, activeChannels: 0, pendingChannels: 0 }),
+    { maxSat: 239000, reserveSat: 10000, feeSat: 1000 });
+  // A second channel: 20,000 kept.
+  assert.equal(channelMaxEstimate({ onchainConfirmedSat: 250000, activeChannels: 1, pendingChannels: 0 }).maxSat, 229000);
+  // Too little for a channel, or no node.
+  assert.equal(channelMaxEstimate({ onchainConfirmedSat: 25000, activeChannels: 0, pendingChannels: 0 }), null);
+  assert.equal(channelMaxEstimate(null), null);
+});
+
+test("a channel opened with fundMax asks lnd for everything, without an amount", async () => {
+  const calls = [];
+  const op = createBridgeOperator({
+    lightningFork: async () => ({ enabled: true, sha256_node: { mode: "supervised", state: "ready" } }),
+    sha256Node: async (method, route, body) => {
+      calls.push({ method, route, body });
+      return route === "/v1/channels" ? { funding_txid_str: "ab".repeat(32) } : {};
+    },
+  });
+  const res = await op.openChannel({ peer: "02" + "cd".repeat(32) + "@1.2.3.4:9735", fundMax: true });
+  assert.equal(res.txid, "ab".repeat(32));
+  const open = calls.find((c) => c.route === "/v1/channels");
+  assert.equal(open.body.fund_max, true);
+  assert.equal(open.body.local_funding_amount, undefined);
+  await assert.rejects(op.openChannel({ peer: "02" + "cd".repeat(32) + "@1.2.3.4:9735", amountSat: 100 }), /at least 20,000/);
+});

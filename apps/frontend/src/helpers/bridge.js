@@ -28,12 +28,12 @@ export const STEPS = {
   fund: {
     title: "Fund it on the SHA256 chain",
     hint:
-      "Send coins on the SHA256 chain to the node's deposit address. They pay for its channel."
+      "Send at least 215,000 sats on the SHA256 chain to the node's deposit address: enough for a 200,000-sat channel and what opening it needs."
   },
   channel: {
     title: "Open a channel from it",
     hint:
-      "The bridge pays SHA256 invoices out of this channel. Open it to a well-connected node on the SHA256 chain."
+      "The bridge pays SHA256 invoices out of this channel. A channel to a well-connected node, such as the recommended one, lets it reach most recipients."
   },
   rate: {
     title: "Set your rate",
@@ -55,6 +55,23 @@ export const STEPS = {
     hint: ""
   }
 };
+
+// The node recommended for the bridge node's channel: connected to most of the
+// SHA256 Lightning network with short per-hop time-locks (40-80 blocks), so
+// the bridge reaches about 97% of recipients within its limits through it,
+// and it takes channels as small as 20,000 sats. Other nodes use the same
+// name: the key is what identifies it.
+export const RECOMMENDED_PEER = {
+  name: "CoinGate",
+  uri:
+    "0242a4ae0c5bef18048fbecf995094b74bfb0f7391418d71ed394784373f41e4f3@3.124.63.44:9735"
+};
+
+// The channel size recommended for a bridge node, and what opening one needs
+// on top: the 10,000 sats lnd keeps on chain to bump a force-close's fees,
+// and the funding transaction's fee.
+export const RECOMMENDED_CHANNEL_SAT = 200000;
+export const CHANNEL_OVERHEAD_SAT = 15000;
 
 // A node's state as a short phrase, and how it should look.
 export const NODE_STATES = {

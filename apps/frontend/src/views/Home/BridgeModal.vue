@@ -358,9 +358,9 @@
         <div v-if="panel === 'deposit'" class="neu-card p-3 mb-3" ref="panel">
           <div class="font-weight-bold mb-2">Fund the bridge node</div>
           <div v-if="deposit.loading" class="text-muted small">Asking the node for an address…</div>
-          <div v-else-if="deposit.address" class="d-flex flex-column flex-md-row align-items-center">
-            <qr-code :value="deposit.address" :size="160" class="mx-auto mb-3 mb-md-0" :showLogo="false"></qr-code>
-            <div class="w-100 ml-0 ml-md-3">
+          <div v-else-if="deposit.address" class="d-flex flex-column flex-lg-row align-items-center align-items-lg-start">
+            <qr-code :value="deposit.address" :size="160" class="mx-auto mb-3 mb-lg-0" :showLogo="false"></qr-code>
+            <div class="w-100 ml-0 ml-lg-3">
               <input-copy size="sm" :value="deposit.address" class="mb-2"></input-copy>
               <a :href="`${explorerBase}/address/${deposit.address}`" target="_blank" rel="noopener" class="small d-inline-block mb-2" @click="confirmExplorer">See it on {{ explorerName }}</a>
               <small class="d-block text-muted">
@@ -368,14 +368,49 @@
                 sent on the BLAKE2b chain do not arrive here. A new address is
                 given each time it is used.
               </small>
+              <small class="d-block mt-2">
+                <b>How much:</b> at least {{ sats(recommendedChannelSat + channelOverheadSat) }}:
+                a {{ Number(recommendedChannelSat).toLocaleString() }}-sat channel, the
+                recommended least, plus about {{ Number(channelOverheadSat).toLocaleString() }}
+                to open it (the node keeps 10,000 back to bump fees if the channel is
+                ever force-closed; the rest pays the opening fee).
+              </small>
+              <small class="d-block text-muted mt-1">
+                On chain now: {{ sats(node ? node.onchainConfirmedSat : 0) }}<template v-if="node && node.onchainUnconfirmedSat">,
+                and {{ sats(node.onchainUnconfirmedSat) }} confirming</template>.
+              </small>
+              <b-button
+                v-if="overview.channelMax"
+                size="sm"
+                variant="outline-primary"
+                class="mt-2"
+                @click="showPanel('channel')"
+                >Next: open a channel</b-button
+              >
             </div>
           </div>
         </div>
 
         <div v-if="panel === 'channel'" class="neu-card p-3 mb-3" ref="panel">
           <div class="font-weight-bold mb-2">Open a channel from the bridge node</div>
-          <template v-if="!channel.txid">
+          <template v-if="!channel.txid && !channel.reviewing">
             <label class="small font-weight-bold mb-1" for="bridge-channel-peer">Node on the SHA256 chain</label>
+            <div class="recommended-peer d-flex flex-column flex-sm-row align-items-sm-start mb-2">
+              <div class="flex-grow-1 mr-sm-2 mb-2 mb-sm-0" style="min-width: 0;">
+                <small class="d-block">
+                  <b>Recommended: {{ recommendedPeer.name }}.</b> It is connected
+                  to most of the SHA256 network with short time-locks, so the
+                  bridge can reach about 97% of recipients through it.
+                </small>
+              </div>
+              <b-button
+                size="sm"
+                :variant="usingRecommendedPeer ? 'success' : 'outline-primary'"
+                :disabled="channel.busy || usingRecommendedPeer"
+                @click="channel.peer = recommendedPeer.uri"
+                >{{ usingRecommendedPeer ? "Selected" : `Use ${recommendedPeer.name}` }}</b-button
+              >
+            </div>
             <b-form-input
               id="bridge-channel-peer"
               v-model="channel.peer"
@@ -384,36 +419,87 @@
               spellcheck="false"
               :disabled="channel.busy"
             ></b-form-input>
-            <small class="d-block text-muted mb-2">
-              A well-connected node, so payments find a route. Its address is
-              on its operator's page or in a Lightning explorer for the SHA256
-              chain.
+            <small class="d-block text-muted mb-3">
+              <template v-if="usingRecommendedPeer">{{ recommendedPeer.name }}'s node. Other nodes use the same name; this key is the one to trust.</template>
+              <template v-else>Or another well-connected node: its address is on its operator's page or in a Lightning explorer for the SHA256 chain.</template>
             </small>
+
             <label class="small font-weight-bold mb-1" for="bridge-channel-amount">Amount</label>
             <b-input-group append="sats" class="mb-1">
               <b-form-input
                 id="bridge-channel-amount"
-                v-model="channel.amount"
+                :value="channel.fundMax ? '' : channel.amount"
+                :placeholder="channel.fundMax ? 'Maximum' : ''"
                 type="number"
                 min="20000"
                 step="1000"
                 class="neu-input"
                 :disabled="channel.busy"
+                @input="v => { channel.amount = v; channel.fundMax = false; }"
               ></b-form-input>
             </b-input-group>
-            <small class="d-block text-muted mb-2">
-              From the node's {{ sats(node ? node.onchainConfirmedSat : 0) }}
-              on chain. <template v-if="maxSwapSat">Larger than your largest
-              swap ({{ sats(maxSwapSat) }}) is best.</template>
-            </small>
-            <div class="d-flex justify-content-end">
+            <div class="d-flex flex-wrap align-items-center mb-1">
               <b-button
-                variant="success"
-                :disabled="channel.busy || !channel.peer.trim() || !(Number(channel.amount) >= 20000)"
-                @click="openChannel"
-                >{{ channel.busy ? "Opening…" : "Open channel" }}</b-button
+                v-if="overview.channelMax"
+                size="sm"
+                :variant="channel.fundMax ? 'success' : 'link'"
+                class="mr-3 px-0"
+                :class="{ 'px-2': channel.fundMax }"
+                :disabled="channel.busy"
+                @click="channel.fundMax = true; channel.amount = ''"
+                >{{ channel.fundMax ? "Using the maximum" : "Use the maximum" }}</b-button
               >
             </div>
+            <small class="d-block text-muted mb-1">
+              {{ sats(node ? node.onchainConfirmedSat : 0) }} on chain.<template v-if="overview.channelMax">
+              Up to about <b>{{ sats(overview.channelMax.maxSat) }}</b> can go into a
+              channel: the node keeps {{ sats(overview.channelMax.reserveSat) }} back to bump
+              fees if a channel is ever force-closed, and the opening transaction
+              has a fee.</template>
+            </small>
+            <small v-if="channelAmountTooLarge" class="d-block text-warning mb-1">
+              That is more than the node can put into a channel now. Use the
+              maximum, or deposit more.
+            </small>
+            <small v-else-if="channel.fundMax && overview.channelMax && overview.channelMax.maxSat < recommendedChannelSat" class="d-block text-warning mb-1">
+              That is less than the {{ sats(recommendedChannelSat) }} recommended: a
+              smaller channel limits what the bridge can pay, and some nodes
+              refuse channels that small.
+            </small>
+            <small v-else-if="channel.fundMax" class="d-block text-muted mb-1"></small>
+            <small v-else-if="channelAmountSmall" class="d-block text-warning mb-1">
+              At least {{ sats(recommendedChannelSat) }} is recommended: a smaller
+              channel limits what the bridge can pay, and some nodes refuse
+              channels that small.
+            </small>
+            <small v-else class="d-block text-muted mb-1">
+              At least {{ sats(recommendedChannelSat) }} is recommended<template v-if="maxSwapSat">,
+              and more than your largest swap ({{ sats(maxSwapSat) }})</template>.
+            </small>
+            <small v-if="!overview.channelMax" class="d-block text-warning mb-1">
+              The node has too little confirmed on chain to open a channel.
+              Deposit at least {{ sats(recommendedChannelSat + channelOverheadSat) }} first.
+            </small>
+            <div class="d-flex justify-content-end mt-2">
+              <b-button
+                variant="primary"
+                :disabled="!channelReady"
+                @click="channel.reviewing = true"
+                >Review</b-button
+              >
+            </div>
+          </template>
+          <template v-else-if="!channel.txid">
+            <small class="d-block mb-2">
+              Open a channel of
+              <b>{{ channel.fundMax ? `everything the node can put in one (about ${sats(overview.channelMax.maxSat)})` : sats(Number(channel.amount)) }}</b>
+              to <b>{{ usingRecommendedPeer ? recommendedPeer.name : channelPeerShort }}</b>?
+              The coins move into the channel, where the bridge pays SHA256
+              invoices from them. They come back on chain when the channel
+              is closed.
+            </small>
+            <b-button variant="success" size="sm" class="mr-2" :disabled="channel.busy" @click="openChannel">{{ channel.busy ? "Opening…" : "Open channel" }}</b-button>
+            <b-button variant="link" size="sm" :disabled="channel.busy" @click="channel.reviewing = false">Back</b-button>
           </template>
           <template v-else>
             <small class="d-block mb-2">
@@ -809,7 +895,10 @@ import {
   closeOptions,
   feeRateInput,
   sha256BackupText,
-  marketLine
+  marketLine,
+  RECOMMENDED_PEER,
+  RECOMMENDED_CHANNEL_SAT,
+  CHANNEL_OVERHEAD_SAT
 } from "@/helpers/bridge";
 import QrCode from "@/components/Utility/QrCode";
 import InputCopy from "@/components/Utility/InputCopy";
@@ -837,6 +926,16 @@ const emptySend = () => ({
   all: false,
   fee: "",
   confirming: false,
+  busy: false,
+  txid: ""
+});
+
+// The channel form, empty.
+const emptyChannel = () => ({
+  peer: "",
+  amount: "",
+  fundMax: false,
+  reviewing: false,
   busy: false,
   txid: ""
 });
@@ -870,7 +969,7 @@ export default {
       timer: null,
       panel: "",
       deposit: { loading: false, address: "" },
-      channel: { peer: "", amount: "", busy: false, txid: "" },
+      channel: emptyChannel(),
       chans: emptyChans(),
       send: emptySend(),
       rateInput: "",
@@ -925,6 +1024,39 @@ export default {
     },
     nodeStateOf() {
       return nodeState(this.node ? this.node.state : "");
+    },
+    recommendedPeer() {
+      return RECOMMENDED_PEER;
+    },
+    recommendedChannelSat() {
+      return RECOMMENDED_CHANNEL_SAT;
+    },
+    channelOverheadSat() {
+      return CHANNEL_OVERHEAD_SAT;
+    },
+    usingRecommendedPeer() {
+      return this.channel.peer.trim().toLowerCase() === RECOMMENDED_PEER.uri.toLowerCase();
+    },
+    channelPeerShort() {
+      const p = this.channel.peer.trim();
+      return p.length > 24 ? `${p.slice(0, 12)}…${p.slice(p.indexOf("@"))}` : p;
+    },
+    channelAmountTooLarge() {
+      const max = this.overview && this.overview.channelMax;
+      return !this.channel.fundMax && !!max && Number(this.channel.amount) > max.maxSat;
+    },
+    channelAmountSmall() {
+      const n = Number(this.channel.amount);
+      return !this.channel.fundMax && n >= 20000 && n < RECOMMENDED_CHANNEL_SAT;
+    },
+    channelReady() {
+      if (this.channel.busy || !this.channel.peer.trim()) {
+        return false;
+      }
+      if (this.channel.fundMax) {
+        return !!(this.overview && this.overview.channelMax);
+      }
+      return Number(this.channel.amount) >= 20000 && !this.channelAmountTooLarge;
     },
     marketLineOf() {
       return marketLine(this.overview);
@@ -1143,7 +1275,7 @@ export default {
         this.getDepositAddress();
       }
       if (this.panel === "channel") {
-        this.channel = { peer: "", amount: "", busy: false, txid: "" };
+        this.channel = emptyChannel();
       }
       if (this.panel === "channels") {
         this.chans = emptyChans();
@@ -1297,7 +1429,9 @@ export default {
       try {
         const res = await API.post(bridgeUrl("/sha256/channel"), {
           peer: this.channel.peer.trim(),
-          amountSat: Number(this.channel.amount)
+          ...(this.channel.fundMax
+            ? { fundMax: true }
+            : { amountSat: Number(this.channel.amount) })
         });
         this.channel.txid = res.data.txid;
         this.load();
@@ -1459,6 +1593,12 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+// The recommended peer, set apart from the free-text field below it.
+.recommended-peer {
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  background: rgba(40, 167, 69, 0.08);
+}
 .bridge {
   .channel-row + .channel-row {
     border-top: 1px solid rgba(128, 128, 128, 0.2);

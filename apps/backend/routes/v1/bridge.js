@@ -66,10 +66,11 @@ router.post("/sha256/address", handle(() => logic().depositAddress()));
 // JSON numbers only, as /rate: a form post from a page elsewhere carries
 // strings, and this one spends the SHA256 node's coins.
 router.post("/sha256/channel", handle((req) => {
-  if (typeof body(req).amountSat !== "number" || typeof body(req).peer !== "string") {
-    throw new ValidationError("Give the peer as text and the amount as a number of sats.", 400);
+  const { peer, amountSat, fundMax } = body(req);
+  if (typeof peer !== "string" || (fundMax !== true && typeof amountSat !== "number")) {
+    throw new ValidationError("Give the peer as text and the amount as a number of sats, or fundMax.", 400);
   }
-  return logic().openChannel({ peer: body(req).peer, amountSat: body(req).amountSat });
+  return logic().openChannel({ peer, amountSat, fundMax: fundMax === true });
 }));
 
 router.get("/sha256/channels", handle(() => logic().channels()));

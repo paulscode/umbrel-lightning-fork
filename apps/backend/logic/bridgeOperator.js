@@ -324,6 +324,25 @@ function rateState(status, now) {
   return setAt && expiresAt > setAt && now >= setAt + 0.75 * (expiresAt - setAt) ? "ageing" : "fresh";
 }
 
+// What lnd keeps on chain once a node has `channels` anchor channels, to bump
+// their fees if one is force-closed: 10,000 sats each, at most 100,000.
+function anchorReserveSat(channels) {
+  return Math.min(100000, 10000 * Math.max(1, channels));
+}
+
+// Roughly what a channel opened with everything the node has would hold: its
+// confirmed coins, less the reserve lnd keeps once the channel exists and a
+// funding transaction's fee. lnd works out the exact amount when it opens.
+// Null when nothing is left for a channel.
+function channelMaxEstimate(node, feeSat = 1000) {
+  if (!node) {
+    return null;
+  }
+  const reserve = anchorReserveSat(int(node.activeChannels) + int(node.pendingChannels) + 1);
+  const max = int(node.onchainConfirmedSat) - reserve - feeSat;
+  return max >= 20000 ? { maxSat: max, reserveSat: reserve, feeSat } : null;
+}
+
 // "pubkey@host:port", as a node URI is written.
 function parsePeer(peer) {
   const m = String(peer || "").trim().match(/^([0-9a-fA-F]{66})@([^\s@]+:\d{1,5})$/);
@@ -677,6 +696,9 @@ function createBridgeOperator({
       // Not while the node it reads is in doubt (left the SHA256 chain,
       // uninstalled): an address or channel there could be on the wrong
       // chain.
+      // About the most a channel from the SHA256 node could hold now, for
+      // the channel form's "Use the maximum".
+      channelMax: channelMaxEstimate(s.sha256Node),
       canManageSha256Node: !!sha256Node && !!s.sha256Node &&
         (s.sha256Node.mode === "supervised" || s.sha256Node.mode === "idle") &&
         !(toggle && toggle.problem && toggle.problemBlocks),
@@ -719,11 +741,15 @@ function createBridgeOperator({
     }
   }
 
-  async function openChannel({ peer, amountSat }) {
+  // Opens a channel from the SHA256 node: of `amountSat`, or with `fundMax`
+  // everything the node can put in one, which lnd works out itself (its
+  // confirmed coins, less the opening fee and the reserve it keeps on chain
+  // for fee bumping).
+  async function openChannel({ peer, amountSat, fundMax = false }) {
     await requireSha256Node();
     const { pubkey, host } = parsePeer(peer);
     const amount = Number(amountSat);
-    if (!Number.isInteger(amount) || amount < 20000) {
+    if (!fundMax && (!Number.isInteger(amount) || amount < 20000)) {
       throw new ValidationError("The channel needs at least 20,000 sats.", 400);
     }
     try {
@@ -738,7 +764,7 @@ function createBridgeOperator({
     try {
       const point = await sha256Node("POST", "/v1/channels", {
         node_pubkey: Buffer.from(pubkey, "hex").toString("base64"),
-        local_funding_amount: String(amount),
+        ...(fundMax ? { fund_max: true } : { local_funding_amount: String(amount) }),
       });
       return { txid: fundingTxid(point) };
     } catch (error) {
@@ -1020,6 +1046,7 @@ module.exports = {
   servingFrom,
   rateState,
   marketRefusal,
+  channelMaxEstimate,
   parsePeer,
   fundingTxid,
   channelList,
