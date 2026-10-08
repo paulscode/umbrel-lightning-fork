@@ -16,21 +16,11 @@ function stringToType(key, value) {
   return value;
 }
 
-// these are only those Boolean config options that are managed by Umbrel
-const BOOLEAN_KEYS = [
-  "tlsautorefresh",
-  "sync-freelist",
-  "stagger-initial-reconnect",
-  "accept-amp",
-  "gc-canceled-invoices-on-startup",
-  "gc-canceled-invoices-on-the-fly",
-  "allow-circular-route",
-  "watchtower.active",
-  "wtclient.active",
-  "protocol.wumbo-channels",
-  "db.bolt.auto-compact",
-  "rpcmiddleware.enable",
-  "routing.strictgraphpruning"
-];
+// The boolean options the dashboard manages: those whose default is a
+// boolean. A hand-kept list here missed tor.skip-proxy-for-clearnet-targets,
+// tor.streamisolation and accept-keysend, so an lnd.conf setting any of them
+// came back as the string "true" and Advanced Settings refused to save.
+const DEFAULT_CONFIG = require("./defaultConfig.js");
+const BOOLEAN_KEYS = Object.keys(DEFAULT_CONFIG).filter(key => typeof DEFAULT_CONFIG[key] === "boolean");
 
 module.exports = stringToType;

@@ -6,6 +6,27 @@ const diskService = require('services/disk');
 const constants = require("utils/const");
 
 const DEFAULT_CONFIG = require('utils/defaultConfig');
+const stringToType = require('utils/stringToType');
+
+// Saved settings as they should be typed. Earlier versions could save a
+// boolean read from lnd.conf as the string "true" (see stringToType), which
+// Advanced Settings then refused; such values are read as booleans, and one
+// that is not a boolean at all falls back to the default.
+function normalizeSettings(lndSettings) {
+  const out = {};
+  for (const [key, value] of Object.entries(lndSettings || {})) {
+    if (typeof value === 'string' && typeof DEFAULT_CONFIG[key] === 'boolean') {
+      try {
+        out[key] = stringToType(key, value);
+      } catch (error) {
+        // dropped: the default applies
+      }
+      continue;
+    }
+    out[key] = value;
+  }
+  return out;
+}
 
 // lodash mergeWith customizer function to merge arrays and remove duplicates for multi-line config options like externalip
 const mergeArraysAndRemoveDuplicates = (objValue, srcValue) => {
@@ -145,8 +166,8 @@ async function isUmbrelLndConfUpToDate(config) {
 
 async function getConfig() {
   const config = await diskService.fileExists(constants.JSON_SETTINGS_FILE)
-                  ? (await diskService.readJsonFile(constants.JSON_SETTINGS_FILE)).lnd
-                  : {};                
+                  ? normalizeSettings((await diskService.readJsonFile(constants.JSON_SETTINGS_FILE)).lnd)
+                  : {};
   return deriveConfigObject(await getManagedSettingsFromLndConf(), config);
 }
 
@@ -162,6 +183,7 @@ async function getManagedSettingsFromLndConf() {
 }
 
 module.exports = {
+  normalizeSettings,
   writeLndConfig,
   isUmbrelLndConfUpToDate,
   readBridgeSettings,

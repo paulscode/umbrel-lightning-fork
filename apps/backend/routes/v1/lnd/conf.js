@@ -12,7 +12,7 @@ const { isHostPort } = require("utils/peerAddress");
 
 router.get('/lnd-config', safeHandler(async(req, res) => {
     const settings = await diskService.readJsonFile(constants.JSON_SETTINGS_FILE);
-    return res.json(settings.lnd);
+    return res.json(configLogic.normalizeSettings(settings.lnd));
   }));
 
 // POSTing an empty object {} for lndConfig triggers a reset to DEFAULT_CONFIG
