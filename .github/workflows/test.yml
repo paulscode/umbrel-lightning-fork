@@ -1,6 +1,6 @@
 name: Test
 
-# The backend's tests, which need no node_modules, on every push; and the
+# The backend's tests on every push; and the
 # image itself built (amd64, not pushed), which is what catches a frontend
 # that no longer compiles. Images are published by hand with buildx when a
 # release is cut; nothing here pushes one.
@@ -21,6 +21,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      # Some tests load express, big.js and lodash. Install scripts are
+      # skipped: grpc's native build needs the image's Node 16, and no test
+      # loads grpc.
+      - name: Dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Backend tests
         working-directory: apps/backend
         run: node --test test/
