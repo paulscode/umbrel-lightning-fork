@@ -189,7 +189,7 @@ export default {
         return "Loading…";
       }
       if (!status.targets.length) {
-        return "No target is on. channel.backup stays on this Umbrel only, where a disk failure takes it with your channels.";
+        return `No target is on. channel.backup stays on ${this.$store.getters["system/deviceNoun"]} only, where a disk failure takes it with your channels.`;
       }
       const names = status.targets.map(t => this.label(t.provider)).join(", ");
       const notReady = status.targets.filter(t => !t.ready).map(t => this.label(t.provider));

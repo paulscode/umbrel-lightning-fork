@@ -231,7 +231,7 @@ function rejectLocalOrOnion(addr, label) {
     throw new InputError(`${label}: Tor .onion targets are not supported. Use a clearnet address.`);
   }
   if (host === "localhost" || host === "::1" || host === "::" || host === "0.0.0.0" || host.startsWith("127.") || host.startsWith("::ffff:127.") || /^::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}$/.test(host)) {
-    throw new InputError(`${label}: that address points at this Umbrel. Point it at a different machine.`);
+    throw new InputError(`${label}: that address points at ${constants.DEVICE_NOUN}. Point it at a different machine.`);
   }
 }
 
@@ -439,7 +439,7 @@ async function scanHostKeys(host, prt) {
   const scan = await run("ssh-keyscan", ["-T", "10", "-p", prt, "--", host], {timeout: KEYSCAN_TIMEOUT_MS});
   const lines = scan.stdout.split("\n").filter(l => l && !l.startsWith("#"));
   if (!lines.length) {
-    throw new InputError(`SFTP: ${host}:${prt} did not answer with a host key. Check the address and port, and that the server is reachable from your Umbrel.`);
+    throw new InputError(`SFTP: ${host}:${prt} did not answer with a host key. Check the address and port, and that the server is reachable from ${constants.DEVICE_NOUN}.`);
   }
   // Only whole key lines from a scan that finished: a cut-off run leaves a
   // pin narrower than the server, which rclone then fails against.

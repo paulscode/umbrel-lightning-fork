@@ -140,6 +140,9 @@ const actions = {
         authed: state.authed,
         csrf: state.csrf || null
       });
+      if (state.platform) {
+        commit("setPlatform", state.platform);
+      }
       return true;
     }
     return false;
@@ -348,7 +351,11 @@ const actions = {
 };
 
 const getters = {
-  isStartOS: state => state.platform === "startos",};
+  isStartOS: state => state.platform === "startos",
+  // What the machine is called in messages: a plain Linux install is not an
+  // Umbrel.
+  deviceNoun: state => (state.platform === "native" ? "this computer" : "this Umbrel"),
+};
 
 export default {
   namespaced: true,

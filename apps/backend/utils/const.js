@@ -9,9 +9,15 @@ module.exports = {
   // Which platform hosts the dashboard. Umbrel is the original. StartOS runs
   // the same image with DASHBOARD_PLATFORM=startos, which switches off the
   // pieces Umbrel provides or that StartOS provides itself (see app.js), and
-  // puts a password on the door because nothing else does.
-  PLATFORM: process.env.DASHBOARD_PLATFORM === "startos" ? "startos" : "umbrel",
+  // puts a password on the door because nothing else does. "native" is a
+  // plain Linux machine (scripts/native-ubuntu.sh in Lightning Fork): it works
+  // as on Umbrel, settings and all, with a password on the door as on StartOS,
+  // since no Umbrel sign-in stands in front of it.
+  PLATFORM: ["startos", "native"].includes(process.env.DASHBOARD_PLATFORM) ? process.env.DASHBOARD_PLATFORM : "umbrel",
   IS_STARTOS: process.env.DASHBOARD_PLATFORM === "startos",
+  IS_NATIVE: process.env.DASHBOARD_PLATFORM === "native",
+  // What the machine is called in messages.
+  DEVICE_NOUN: process.env.DASHBOARD_PLATFORM === "native" ? "this computer" : "this Umbrel",
   DASHBOARD_PASSWORD: process.env.DASHBOARD_PASSWORD,
   // A JSON file holding {"password": "..."}; read on every request, so the
   // platform can change the password without restarting the dashboard.
@@ -25,7 +31,7 @@ module.exports = {
   UMBREL_LND_CONF_FILEPATH: process.env.UMBREL_LND_CONF_FILEPATH || "/lnd/.lnd/umbrel-lnd.conf",
   LND_CONF_FILEPATH: process.env.LND_CONF_FILEPATH || "/lnd/.lnd/lnd.conf",
   LND_INITIALIZE_WITH_TOR_ONLY: process.env.LND_INITIALIZE_WITH_TOR_ONLY === 'true',
-  MANAGED_CHANNELS_FILE: "/channel-data/managedChannels.json",
+  MANAGED_CHANNELS_FILE: process.env.MANAGED_CHANNELS_FILE || "/channel-data/managedChannels.json",
   LND_WALLET_PASSWORD: process.env.LND_WALLET_PASSWORD || "moneyprintergobrrr",
   REQUEST_CORRELATION_NAMESPACE_KEY: "umbrel-middleware-request",
   REQUEST_CORRELATION_ID_KEY: "reqId",

@@ -444,7 +444,7 @@ export default {
         return "";
       }
       if (!status.targets.length) {
-        return "No backup target set: channel.backup stays on this Umbrel only.";
+        return `No backup target set: channel.backup stays on ${this.$store.getters["system/deviceNoun"]} only.`;
       }
       const names = status.targets.map(t => this.providerLabel(t.provider)).join(", ");
       const failures = status.state.failures || [];

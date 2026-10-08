@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 
 const auth = require("logic/auth.js");
+const constants = require("utils/const.js");
 const safeHandler = require("utils/safeHandler");
 
 // What the frontend needs to decide between the sign-in screen and the app.
@@ -17,6 +18,8 @@ router.get(
       password_enabled: enabled,
       authed: !enabled || Boolean(session),
       csrf: session ? session.csrf : null,
+      // So the sign-in screen can say where the password is.
+      platform: constants.PLATFORM,
     });
   })
 );

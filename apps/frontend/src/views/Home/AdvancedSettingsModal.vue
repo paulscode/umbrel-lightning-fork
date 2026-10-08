@@ -1025,7 +1025,7 @@
                       @input="value => (settings['watchtower.externalip'] = value.trim())"
                     ></b-form-input>
                     <small class="d-block text-muted mb-2">
-                      Your Umbrel's LAN address, or a public host name forwarded
+                      {{ $store.state.system.platform === "native" ? "This computer's" : "Your Umbrel's" }} LAN address, or a public host name forwarded
                       to it, with port 9913. Leave empty to be reached over Tor
                       only.
                     </small>

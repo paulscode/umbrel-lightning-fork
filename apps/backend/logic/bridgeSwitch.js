@@ -16,7 +16,9 @@ const { ValidationError } = require("../models/errors.js");
 const { confFor } = require("./sha256Nodes.js");
 
 const RESTART_REFUSED = "Lightning Fork is almost ready, please wait a few seconds and try again.";
-const RESTART_APP = "restart the Lightning Fork app (on the Umbrel home screen, right-click its icon, then Restart) so it finds it";
+const RESTART_APP = require("../utils/const.js").IS_NATIVE
+  ? "restart the dashboard (systemctl --user restart lightning-fork-dashboard) so it finds it"
+  : "restart the Lightning Fork app (on the Umbrel home screen, right-click its icon, then Restart) so it finds it";
 const NONE_INSTALLED = `The bridge's SHA256 node reads a full node on the SHA256 chain, and none is installed. Install Knots (SHA256) Companion from the PaulsCode.Com app store and let it sync, then ${RESTART_APP}, and turn the bridge on here.`;
 
 // Why no installed node can be used, in a sentence.

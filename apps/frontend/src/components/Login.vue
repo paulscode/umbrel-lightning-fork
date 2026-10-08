@@ -40,7 +40,13 @@
       <small v-if="error" class="d-block text-danger text-center mt-3">{{
         error
       }}</small>
-      <small class="d-block text-muted text-center mt-3"
+      <small
+        v-if="$store.state.system.platform === 'native'"
+        class="d-block text-muted text-center mt-3"
+        >The password is in ~/.config/lightning-fork/dashboard-password.json
+        on the computer that runs Lightning Fork.</small
+      >
+      <small v-else class="d-block text-muted text-center mt-3"
         >The password is in the Dashboard Password action on your StartOS
         server.</small
       >

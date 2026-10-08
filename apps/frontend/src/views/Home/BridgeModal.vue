@@ -87,7 +87,7 @@
             <template v-if="!confirmSwitch">
               <div class="mb-2">
                 The bridge's node reads a full node on the SHA256 chain.
-                Found on this Umbrel:
+                Found on {{ $store.getters["system/deviceNoun"] }}:
               </div>
               <sha256-node-list
                 :nodes="overview.toggle.nodes"
