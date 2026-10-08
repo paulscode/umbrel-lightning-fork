@@ -173,7 +173,9 @@ function endpoints(req, env = process.env) {
     const hostIp = (env.MOBILE_LAN_IP || "").trim();
     let lanUrl = domain ? `https://${domain}:${port}` : null;
     let lanIp = isIpv4(hostIp) ? `https://${hostIp}:${port}` : null;
-    if (requestHost && isIpv4(requestHost)) {
+    // Not a loopback address: a page opened on the machine itself
+    // (127.0.0.1, a plain Linux install) says nothing a phone could use.
+    if (requestHost && isIpv4(requestHost) && !requestHost.startsWith("127.")) {
       lanIp = `https://${requestHost}:${port}`;
     } else if (requestHost && !requestHost.endsWith(".onion") && requestHost !== "localhost" && requestHost.endsWith(".local")) {
       lanUrl = `https://${requestHost}:${port}`;

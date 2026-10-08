@@ -27,6 +27,12 @@ test("Umbrel: the API's own port on the address the page was opened at", () => {
   });
   // A page opened at some other name does not become the LAN address.
   assert.equal(access.endpoints({ headers: { host: "my-node.example:7156" } }, env).lanUrl, "https://umbrel.local:7157");
+  // A page opened on the machine itself (a plain Linux install) leaves the
+  // host's LAN address in place: a phone cannot reach 127.0.0.1.
+  assert.equal(
+    access.endpoints({ headers: { host: "127.0.0.1:3006" } }, { ...env, MOBILE_LAN_IP: "192.168.1.30" }).lanIp,
+    "https://192.168.1.30:7157",
+  );
   // A page opened over the app's onion: no LAN host from the request.
   const viaTor = access.endpoints({ headers: { host: "b".repeat(56) + ".onion" } }, { ...env, MOBILE_ONION: "not-an-onion" });
   assert.equal(viaTor.onionUrl, null);
