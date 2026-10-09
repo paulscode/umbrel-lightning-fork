@@ -788,6 +788,45 @@ service Lightning {
     */
     rpc SubscribeChannelBackups(ChannelBackupSubscription) returns (stream ChanBackupSnapshot) {
     };
+
+    /* Macaroons, for the dashboard's Macaroons view (from LND's
+    lightning.proto). */
+    rpc BakeMacaroon (BakeMacaroonRequest) returns (BakeMacaroonResponse);
+    rpc ListMacaroonIDs (ListMacaroonIDsRequest) returns (ListMacaroonIDsResponse);
+    rpc DeleteMacaroonID (DeleteMacaroonIDRequest) returns (DeleteMacaroonIDResponse);
+    rpc ListPermissions (ListPermissionsRequest) returns (ListPermissionsResponse);
+}
+
+message BakeMacaroonRequest {
+    repeated MacaroonPermission permissions = 1;
+    uint64 root_key_id = 2;
+    bool allow_external_permissions = 3;
+}
+message BakeMacaroonResponse {
+    string macaroon = 1;
+}
+message MacaroonPermission {
+    string entity = 1;
+    string action = 2;
+}
+message ListMacaroonIDsRequest {
+}
+message ListMacaroonIDsResponse {
+    repeated uint64 root_key_ids = 1;
+}
+message DeleteMacaroonIDRequest {
+    uint64 root_key_id = 1;
+}
+message DeleteMacaroonIDResponse {
+    bool deleted = 1;
+}
+message MacaroonPermissionList {
+    repeated MacaroonPermission permissions = 1;
+}
+message ListPermissionsRequest {
+}
+message ListPermissionsResponse {
+    map<string, MacaroonPermissionList> method_permissions = 1;
 }
 
 message Utxo {

@@ -96,6 +96,9 @@
             <b-dropdown-item href="#" v-b-modal.bridge-modal
               >Run a bridge</b-dropdown-item
             >
+            <b-dropdown-item href="#" v-b-modal.macaroons-modal
+              >Macaroons</b-dropdown-item
+            >
             <!-- On StartOS the service's interfaces, actions and backups
                  cover these, so the dashboard keeps to the node itself. -->
             <b-dropdown-item v-if="!isStartOS" href="#" v-b-modal.connect-wallet-modal @click="getLndConnectUrls"
@@ -362,6 +365,7 @@
     <mempool-modal />
     <bitcoin-invoices-modal />
     <bridge-modal />
+    <macaroons-modal />
     <secret-words-modal v-if="!isStartOS" />
     <connect-wallet-modal v-if="!isStartOS" />
     <channel-backup-modal
@@ -387,6 +391,7 @@ import ChannelList from "@/components/Channels/List";
 import ChannelOpen from "@/components/Channels/Open";
 import OffersModal from "@/views/Home/OffersModal";
 import PeersModal from "@/views/Home/PeersModal";
+import MacaroonsModal from "@/views/Home/MacaroonsModal";
 import MobileAppModal from "@/views/Home/MobileAppModal";
 import MempoolModal from "@/views/Home/MempoolModal";
 import BitcoinInvoicesModal from "@/views/Home/BitcoinInvoicesModal";
@@ -700,6 +705,7 @@ export default {
     ChannelManage,
     OffersModal,
     PeersModal,
+    MacaroonsModal,
     MobileAppModal,
     MempoolModal,
     BitcoinInvoicesModal,

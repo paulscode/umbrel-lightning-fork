@@ -942,7 +942,58 @@ function listOfferInvoices(offerIdHex) {
   );
 }
 
+// Macaroons, for the dashboard's Macaroons view. Root key ids are uint64 and
+// travel as decimal strings.
+function bakeMacaroon(permissions, rootKeyId) {
+  return initializeRPCClient().then(({ lightning }) =>
+    promiseify(
+      lightning,
+      lightning.BakeMacaroon,
+      { permissions, root_key_id: rootKeyId, allow_external_permissions: false },
+      "bake a macaroon"
+    )
+  );
+}
+
+function listMacaroonIds() {
+  return initializeRPCClient().then(({ lightning }) =>
+    promiseify(lightning, lightning.ListMacaroonIDs, {}, "list macaroon ids")
+  );
+}
+
+function deleteMacaroonId(rootKeyId) {
+  return initializeRPCClient().then(({ lightning }) =>
+    promiseify(
+      lightning,
+      lightning.DeleteMacaroonID,
+      { root_key_id: rootKeyId },
+      "revoke a macaroon"
+    )
+  );
+}
+
+// Not camelized: the map's keys are RPC method paths, which must stay as
+// LND wrote them.
+function listPermissions() {
+  return initializeRPCClient().then(
+    ({ lightning }) =>
+      new Promise((resolve, reject) => {
+        lightning.ListPermissions({}, (error, response) => {
+          if (error) {
+            reject(new LndError("Unable to list permissions", error));
+          } else {
+            resolve(response);
+          }
+        });
+      })
+  );
+}
+
 module.exports = {
+  bakeMacaroon,
+  listMacaroonIds,
+  deleteMacaroonId,
+  listPermissions,
   newAddress,
   sendCoinsAtRate,
   lookupInvoice,

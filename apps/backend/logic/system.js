@@ -34,7 +34,9 @@ async function writeTermsAcknowledge() {
   }
 }
 
-async function getLndConnectUrls() {
+// lndconnect URLs for the admin macaroon, or for another one given as bytes
+// (a macaroon just made in the Macaroons view).
+async function getLndConnectUrls(macaroonOverride = null) {
   let cert;
   try {
     cert = await diskLogic.readLndCert();
@@ -42,11 +44,13 @@ async function getLndConnectUrls() {
     throw new NodeError("Unable to read lnd cert file");
   }
 
-  let macaroon;
-  try {
-    macaroon = await diskLogic.readLndAdminMacaroon();
-  } catch (error) {
-    throw new NodeError("Unable to read lnd macaroon file");
+  let macaroon = macaroonOverride;
+  if (!macaroon) {
+    try {
+      macaroon = await diskLogic.readLndAdminMacaroon();
+    } catch (error) {
+      throw new NodeError("Unable to read lnd macaroon file");
+    }
   }
 
   let restTorHost;
