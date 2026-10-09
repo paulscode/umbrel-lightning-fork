@@ -6,8 +6,10 @@ const auth = require("logic/auth.js");
 // and /V1/... walked straight through). The static frontend stays public so
 // the sign-in screen can render; /ping is outside /v1 and stays open for the
 // platform's health check. Every non-GET request needs the session's CSRF
-// token, and so does the one GET that changes wallet state.
-const PUBLIC = new Set(["/auth/state", "/auth/login"]);
+// token, and so does the one GET that changes wallet state. The platform's
+// name is public (/auth/state carries it too): the page asks for it first,
+// before it knows whether a session exists.
+const PUBLIC = new Set(["/auth/state", "/auth/login", "/system/platform"]);
 
 module.exports = (req, res, next) => {
   // Mount-relative, lowercased, without a trailing slash: the router
