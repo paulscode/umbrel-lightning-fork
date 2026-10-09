@@ -52,6 +52,21 @@ What differs from upstream:
   no lncli, so the backend passes the pubkey from `GetInfo` as
   `NODE_PUBKEY` and starts the watcher once LND has reported it. A restore
   also finds a copy an earlier agent left at `<folder>/channel.backup`.
+- Macaroons for other apps, under **Macaroons** in the menu
+  (`/v1/lnd/macaroons`): a preset (read only, receive payments, Lightning
+  wallet, full access) or a custom choice of LND's own permissions or
+  specific calls, an optional expiry (a `time-before` caveat, as `lncli
+  bakemacaroon --timeout` adds), shown once as hex, base64, a file or an
+  lndconnect QR. Each gets a root key id of its own, so it is revoked alone;
+  the node's own macaroons (root key 0) are never touched. Only a record
+  (name, permissions, dates) is kept, in `macaroons.json` beside the state
+  file, readable by the dashboard only. With a dashboard password, making
+  one asks for it again.
+- On Umbrel, `TRUSTED_PROXY_IPS` (the store's status container) is the only
+  address the API answers, and the home screen widgets are answered only
+  from the network's gateway, where umbreld reads them; every app shares
+  one Docker network, and the dashboard has no sign-in of its own there.
+  POSTs to the API must be JSON, and the page refuses to be framed.
 - Fiat amounts priced for this chain. Upstream asked mempool.space for the
   BTC price, which is the SHA256d coin's. This asks neoxa.exchange, where
   BTCB2 trades (its BTCB2/USDC market), and converts dollars to other
@@ -83,8 +98,8 @@ itself or what Umbrel provided:
   wrong attempt (429 with `retry_after`), verifies attempts one at a time so
   a parallel burst cannot outrun the counter, and refuses attempts it cannot
   record. Sessions and the lockout remember a fingerprint of the password
-  they belong to: changing the password ends every session and starts the
-  counter afresh, which is the owner's way out of a lockout somebody else
+  they belong to: changing the password ends every session, unpairs every
+  phone (including a pairing under way) and starts the counter afresh, which is the owner's way out of a lockout somebody else
   caused. Express runs with case-sensitive routing and the gate is mounted
   at `/v1` so the two can never disagree about what is under it. The
   password comes from

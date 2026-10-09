@@ -53,31 +53,23 @@ async function getLndConnectUrls(macaroonOverride = null) {
     }
   }
 
-  let restTorHost;
-  try {
-    restTorHost = await diskLogic.readLndRestHiddenService();
-    restTorHost += `:${constants.LND_REST_PORT}`;
-  } catch (error) {
-    throw new NodeError("Unable to read lnd REST hostname file");
-  }
-  const restTor = encode({
-    host: restTorHost,
-    cert,
-    macaroon
-  });
-
-  let grpcTorHost;
-  try {
-    grpcTorHost = await diskLogic.readLndGrpcHiddenService();
-    grpcTorHost += `:${constants.LND_GRPC_PORT}`;
-  } catch (error) {
-    throw new NodeError("Unable to read lnd gRPC hostname file");
-  }
-  const grpcTor = encode({
-    host: grpcTorHost,
-    cert,
-    macaroon
-  });
+  // For a macaroon made in the Macaroons view, an address that can't be
+  // read is left out rather than failing the rest; the Connect wallet view
+  // shows all four or none.
+  const torUrl = (readHost, port) => {
+    let host;
+    try {
+      host = readHost();
+    } catch (error) {
+      if (macaroonOverride) {
+        return undefined;
+      }
+      throw new NodeError("Unable to read lnd hidden service hostname");
+    }
+    return encode({ host: `${host}:${port}`, cert, macaroon });
+  };
+  const restTor = torUrl(() => diskLogic.readLndRestHiddenService(), constants.LND_REST_PORT);
+  const grpcTor = torUrl(() => diskLogic.readLndGrpcHiddenService(), constants.LND_GRPC_PORT);
 
   let restLocalHost = `${constants.DEVICE_DOMAIN_NAME}:${constants.LND_REST_PORT}`;
   const restLocal = encode({

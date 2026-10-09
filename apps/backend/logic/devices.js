@@ -17,11 +17,14 @@
 //
 // Changing the dashboard's password unpairs every phone, as it signs out
 // every browser: whoever paired a phone with the old one keeps nothing.
-// Each device remembers a short tag of the password it was paired under
-// (a few characters of a hash, enough to notice a change and too few to
-// test guesses against), and a key whose tag no longer matches is revoked
-// when next used. Without a dashboard password (Umbrel) there is nothing
-// to compare.
+// Each device remembers a short tag of the password it was paired under (32
+// bits of a hash, enough to notice a change), and a key whose tag no longer
+// matches is revoked when next used; so is a pairing code issued under
+// another password. The tag would let someone holding this file check
+// password guesses offline, as the sign-in's own lockout record would; both
+// are readable by the dashboard's user only. Without a dashboard password
+// (Umbrel) there is nothing to compare. Phones paired before this was
+// added take whichever password is current when they are next used.
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
@@ -198,6 +201,7 @@ function createDevices({
         status: "pending",
         keyHash: null,
         enrollHash: sha256(enrollCode),
+        passwordTag: passwordTag(),
         enrollExpires: now() + ENROLL_TTL_MS,
         created: now(),
         lastUsed: null,
@@ -232,6 +236,14 @@ function createDevices({
               sameHash(d.claimNonceHash, sha256(nonce))))
       );
       if (!device) {
+        return null;
+      }
+      // A code issued under another password is no good either: changing
+      // it ends every pairing, including one under way.
+      const tag = passwordTag();
+      if (tag && device.passwordTag && device.passwordTag !== tag) {
+        markRevoked(device);
+        save();
         return null;
       }
       const apiKey = `${KEY_PREFIX}${device.id}_${random(32).toString("base64url")}`;

@@ -382,6 +382,11 @@ again, not 503: only a first attempt can be told "nothing was sent".
 Devices are kept in `devices.json` beside the dashboard's state, so they are
 in its backups.
 
+Changing the dashboard password (StartOS, native) unpairs every phone: a
+key paired under the old password is revoked the next time it is used, and
+a pairing code issued under it can no longer be claimed. The phone has to
+pair again. Without a dashboard password (Umbrel) this does not apply.
+
 ## Paying SHA256 invoices (web session)
 
 The same logic, for the dashboard's page. Answers and errors in this API's

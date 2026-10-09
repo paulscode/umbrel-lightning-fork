@@ -42,7 +42,13 @@ if (!constants.IS_STARTOS) {
       await configLogic.writeLndConfig(config);
       await lndLogic.restartLndWithRetries();
     }
-  })();
+  })().catch((error) => {
+    // A line the config writer refuses (one lnd.conf holds that would end
+    // early, for one) leaves umbrel-lnd.conf as it was and LND running on
+    // it. The dashboard stays up to say so, rather than exiting and being
+    // restarted into the same refusal.
+    console.error(`Unable to bring umbrel-lnd.conf up to date: ${error && error.message ? error.message : error}`);
+  });
 }
 
 /**

@@ -25,6 +25,8 @@ const PERMISSIONS = {
 };
 
 function harness({ password = "", verify = () => ({ ok: true }), startOS = false } = {}) {
+  let admin = Buffer.from("admin-1");
+  let bakedHex = BAKED;
   let clock = 1_800_000_000_000;
   const files = new Map();
   const live = new Set(["0", "777"]);
@@ -37,7 +39,7 @@ function harness({ password = "", verify = () => ({ ok: true }), startOS = false
     bakeMacaroon: async (permissions, id) => {
       calls.push(["bake", permissions, id]);
       live.add(id);
-      return { macaroon: BAKED };
+      return { macaroon: bakedHex };
     },
     deleteMacaroonId: async (id) => {
       calls.push(["delete", id]);
@@ -57,6 +59,7 @@ function harness({ password = "", verify = () => ({ ok: true }), startOS = false
       restTor: "lndconnect://unset.onion:8180?macaroon=x",
     }),
     isStartOS: () => startOS,
+    adminMacaroon: async () => admin,
     file: "/macaroons.json",
     read: (f) => (files.has(f) ? JSON.parse(files.get(f)) : null),
     write: (f, data) => {
@@ -72,6 +75,8 @@ function harness({ password = "", verify = () => ({ ok: true }), startOS = false
     m, calls, live, files,
     tick: (ms) => { clock += ms; },
     failWrites: (v) => { failWrite = v; },
+    rotate: () => { admin = Buffer.from("admin-2"); },
+    bakeReturns: (hex) => { bakedHex = hex; },
     stored: () => JSON.parse(files.get("/macaroons.json") || '{"keys":[]}'),
   };
 }
@@ -183,4 +188,24 @@ test("on StartOS no lndconnect URL is offered", async () => {
   const out = await h.m.create({ label: "a", permissions: READ });
   assert.equal(out.lndconnect, null);
   assert.ok(out.macaroonHex);
+});
+
+test("after the root keys are rotated, macaroons made before show as possibly dead", async () => {
+  const h = harness();
+  await h.m.create({ label: "a", permissions: READ });
+  assert.equal((await h.m.list())[0].stale, false);
+  h.rotate(); // the admin macaroon is rewritten with the root keys
+  const [key] = await h.m.list();
+  assert.equal(key.stale, true);
+  assert.ok(await h.m.revoke(key.id), "still revocable");
+});
+
+test("a baked macaroon that can't be finished here is revoked again", async () => {
+  const h = harness();
+  h.bakeReturns("not hex");
+  await assert.rejects(h.m.create({ label: "a", permissions: READ }), /no macaroon/);
+  h.bakeReturns("02ff");
+  await assert.rejects(h.m.create({ label: "a", permissions: READ, expiresInDays: 1 }), /macaroon/);
+  assert.deepEqual(h.calls.filter((c) => c[0] === "delete").length, 2);
+  assert.deepEqual(h.stored().keys, []);
 });

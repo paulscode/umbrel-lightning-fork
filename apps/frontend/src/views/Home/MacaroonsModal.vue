@@ -59,6 +59,13 @@
                 <b-badge v-if="key.expired" variant="secondary" class="ml-1"
                   >Expired</b-badge
                 >
+                <b-badge
+                  v-else-if="key.stale"
+                  variant="warning"
+                  class="ml-1"
+                  title="The node's macaroons were renewed after this one was made (on StartOS, by the Revoke Macaroons action), which revokes it. Revoke it here and make a new one if an app still needs access."
+                  >May no longer work</b-badge
+                >
               </div>
               <small class="text-muted d-block">{{
                 describe(key.permissions)
@@ -81,7 +88,10 @@
               >Revoke</b-button
             >
           </div>
-          <div v-if="confirmRevoke === key.id" class="mt-2 pt-2 macaroon-divider">
+          <div
+            v-if="confirmRevoke === key.id"
+            class="mt-2 pt-2 macaroon-divider"
+          >
             <small class="d-block mb-2"
               >Revoke “{{ key.label }}”? Any app using it loses access at once.
               This can't be undone.</small
@@ -469,6 +479,7 @@ export default {
       busyId: "",
       confirmRevoke: "",
       creating: false,
+      session: 0,
       showMethods: false,
       methodFilter: "",
       shownCalls: "",
@@ -609,19 +620,37 @@ export default {
             risk: this.risk(entity, action)
           };
         });
-      if (this.form.methods.length) {
+      // Specific calls, the risky ones (those that need a permission
+      // which can move funds or take control) on lines of their own.
+      const risky = this.form.methods.filter(this.riskyMethod);
+      const other = this.form.methods.filter(m => !this.riskyMethod(m));
+      if (risky.length) {
+        lines.push({
+          key: "risky-methods",
+          text: `Make ${
+            risky.length === 1 ? "this call" : "these calls"
+          }, which can move funds or take control: ${risky
+            .map(this.shortMethod)
+            .join(", ")}`,
+          risk: "high"
+        });
+      }
+      if (other.length) {
         lines.push({
           key: "methods",
-          text: `Make ${this.form.methods.length} specific call${
-            this.form.methods.length === 1 ? "" : "s"
-          }: ${this.form.methods.map(this.shortMethod).join(", ")}`,
+          text: `Make ${other.length} specific call${
+            other.length === 1 ? "" : "s"
+          }: ${other.map(this.shortMethod).join(", ")}`,
           risk: "low"
         });
       }
       return lines;
     },
     fullControl() {
-      return this.form.pairs.some(key => HIGH_RISK.has(key));
+      return (
+        this.form.pairs.some(key => HIGH_RISK.has(key)) ||
+        this.form.methods.some(this.riskyMethod)
+      );
     },
     canCreate() {
       return (
@@ -687,8 +716,10 @@ export default {
       }
       return Boolean(res && Array.isArray(res.pairs));
     },
-    // The macaroon and the password leave memory with the modal.
+    // The macaroon and the password leave memory with the modal, and a
+    // macaroon still being made when it closes is not shown later.
     forget() {
+      this.session += 1;
       this.made = null;
       this.form = this.emptyForm();
       this.view = "list";
@@ -740,6 +771,7 @@ export default {
       if (!this.canCreate || this.creating) return;
       this.creating = true;
       this.error = "";
+      const session = this.session;
       try {
         const res = await API.post(BASE(), {
           label: this.form.label.trim(),
@@ -747,6 +779,12 @@ export default {
           expiresInDays: this.form.expiresInDays || null,
           password: this.passwordEnabled ? this.form.password : undefined
         });
+        if (session !== this.session) {
+          // Closed while it was being made: it is in the list, revocable,
+          // but not shown here.
+          this.creating = false;
+          return;
+        }
         this.made = res.data;
         this.form.password = "";
         this.format = "hex";
@@ -802,6 +840,15 @@ export default {
       const e = ENTITIES[entity];
       return (e && e[action]) || `${entity}: ${action}`;
     },
+    // Whether a call needs a permission that can move funds or take
+    // control, by what LND says it needs.
+    riskyMethod(uri) {
+      const method = this.catalog.methods.find(m => m.uri === uri);
+      return Boolean(
+        method &&
+          method.permissions.some(p => HIGH_RISK.has(`${p.entity}:${p.action}`))
+      );
+    },
     shortMethod(uri) {
       return uri.split("/").pop();
     },
@@ -825,7 +872,12 @@ export default {
         parts.push(`${keys.length} permission${keys.length === 1 ? "" : "s"}`);
       }
       if (calls) parts.push(`${calls} specific call${calls === 1 ? "" : "s"}`);
-      if (keys.some(k => HIGH_RISK.has(k))) parts.push("can move funds");
+      const riskyCall = (permissions || []).some(
+        p => p.entity === "uri" && this.riskyMethod(p.action)
+      );
+      if (keys.some(k => HIGH_RISK.has(k)) || riskyCall) {
+        parts.push("can move funds");
+      }
       return parts.join(" · ") || "No access";
     },
     formatDate(ms) {

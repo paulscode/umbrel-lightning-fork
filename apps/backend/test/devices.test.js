@@ -181,3 +181,12 @@ test("a phone paired without a password takes the first one set", async () => {
   setPassword("b".repeat(64));
   assert.equal(devices.verify(paired.apiKey), null);
 });
+
+test("a pairing code issued under another password can't be claimed", async () => {
+  const { devices, setPassword } = harness();
+  setPassword("a".repeat(64));
+  const { enrollCode } = await devices.createPending("");
+  setPassword("b".repeat(64));
+  assert.equal(await devices.claim(enrollCode, "Phone"), null);
+  assert.deepEqual(await devices.list(), []);
+});

@@ -11,8 +11,14 @@
 //   --timeout does (utils/macaroon.js); LND checks it on every call.
 // - The macaroon is returned once and never kept: only its label, what it
 //   allows, when it was made and when it expires are, in a file of their own
-//   readable by the dashboard only. A record whose root key LND no longer has
-//   (rotated, or deleted with lncli) is dropped.
+//   readable by the dashboard only. A record whose root key id LND no longer
+//   lists (deleted with lncli) is dropped.
+// - Rotating the root keys (StartOS's Revoke Macaroons action) keeps the ids
+//   but gives them new keys, so every macaroon made here stops working while
+//   its id is still listed. The node's admin macaroon is rewritten at the same
+//   moment, so each record notes which one was current when it was made, and
+//   one made under another is shown as possibly no longer working. It is not
+//   dropped: that cannot be known for certain, and it stays revocable.
 // - With a dashboard password (StartOS, native), making one asks for it
 //   again, under the sign-in's own lockout: a session left open, or a stolen
 //   cookie, must not be able to mint a credential that outlives it.
@@ -116,6 +122,7 @@ function createMacaroons({
   lnd: lndDep = null,
   auth: authDep = null,
   lndConnectUrls = (mac) => require("logic/system.js").getLndConnectUrls(mac),
+  adminMacaroon = () => require("logic/disk.js").readLndAdminMacaroon(),
   // StartOS lists the node's addresses itself, and the dashboard has none.
   isStartOS = () => require("utils/const.js").IS_STARTOS,
   file = defaultFile,
@@ -145,11 +152,21 @@ function createMacaroons({
     write(fileName(), { keys });
   }
 
+  // A short tag of the node's admin macaroon, or null if it can't be read.
+  async function adminTag() {
+    try {
+      const bytes = await adminMacaroon();
+      return crypto.createHash("sha256").update(bytes).digest("hex").slice(0, 16);
+    } catch (error) {
+      return null;
+    }
+  }
+
   async function catalog() {
     return catalogFrom(await lnd.listPermissions());
   }
 
-  function present(record) {
+  function present(record, currentAdminTag = null) {
     return {
       id: record.id,
       label: record.label,
@@ -157,6 +174,9 @@ function createMacaroons({
       createdAt: record.createdAt,
       expiresAt: record.expiresAt || null,
       expired: Boolean(record.expiresAt && record.expiresAt <= now()),
+      // Made under another admin macaroon: the root keys were probably
+      // rotated since, which revokes it.
+      stale: Boolean(record.adminTag && currentAdminTag && record.adminTag !== currentAdminTag),
     };
   }
 
@@ -169,7 +189,8 @@ function createMacaroons({
       if (kept.length !== keys.length) {
         save(kept);
       }
-      return kept.map(present).sort((a, b) => b.createdAt - a.createdAt);
+      const tag = await adminTag();
+      return kept.map((k) => present(k, tag)).sort((a, b) => b.createdAt - a.createdAt);
     });
   }
 
@@ -253,14 +274,27 @@ function createMacaroons({
       const id = newRootKeyId(live);
       const baked = await lnd.bakeMacaroon(chosen, id);
       let hex = baked && baked.macaroon;
-      if (typeof hex !== "string" || !/^[0-9a-f]+$/i.test(hex)) {
-        throw new NodeError("LND returned no macaroon");
-      }
-      if (expiresAt) {
-        hex = macaroon.addFirstPartyCaveat(hex, macaroon.timeBeforeCaveat(new Date(expiresAt)));
+      try {
+        if (typeof hex !== "string" || !/^[0-9a-f]+$/i.test(hex)) {
+          throw new NodeError("LND returned no macaroon");
+        }
+        if (expiresAt) {
+          hex = macaroon.addFirstPartyCaveat(hex, macaroon.timeBeforeCaveat(new Date(expiresAt)));
+        }
+      } catch (error) {
+        // Baked but unusable here: its root key must not stay behind.
+        await lnd.deleteMacaroonId(id).catch(() => {});
+        throw error;
       }
 
-      const record = { id, label: name, permissions: chosen, createdAt: now(), expiresAt };
+      const record = {
+        id,
+        label: name,
+        permissions: chosen,
+        createdAt: now(),
+        expiresAt,
+        adminTag: await adminTag(),
+      };
       try {
         save([...keys, record]);
       } catch (error) {
@@ -279,7 +313,7 @@ function createMacaroons({
         }
       }
       return {
-        ...present(record),
+        ...present(record, record.adminTag),
         macaroonHex: hex,
         macaroonBase64: bytes.toString("base64"),
         lndconnect,
