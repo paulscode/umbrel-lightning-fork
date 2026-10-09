@@ -22,8 +22,10 @@ function jsonWrites(req, res, next) {
 // TRUSTED_PROXY_IPS, when set, names the only addresses requests may come
 // from: the proxy in front of the dashboard. Without it every container on
 // the platform's app network could reach the API directly, around the
-// proxy's sign-in. The home screen widgets are read by the platform itself,
-// from its own address, and only show balances, so they stay open.
+// proxy's sign-in. The home screen widgets are read by the platform itself
+// (umbreld, on the host), so they are answered from the network's gateway
+// too, and only they: the host reaches this container from that address,
+// and no other container can.
 function parseList(text) {
   return String(text || "").split(",").map((s) => s.trim()).filter(Boolean);
 }
@@ -33,20 +35,51 @@ function normalize(address) {
   return a.startsWith("::ffff:") ? a.slice(7) : a;
 }
 
-function trustedProxies(list = parseList(process.env.TRUSTED_PROXY_IPS)) {
+// The default gateway from a /proc/net/route table: the host, on a Docker
+// network. Addresses there are little-endian hex.
+function defaultGateway(table) {
+  for (const line of String(table || "").split("\n").slice(1)) {
+    const fields = line.trim().split(/\s+/);
+    if (fields.length > 2 && fields[1] === "00000000" && /^[0-9A-Fa-f]{8}$/.test(fields[2]) && fields[2] !== "00000000") {
+      const n = parseInt(fields[2], 16);
+      return [n & 255, (n >>> 8) & 255, (n >>> 16) & 255, n >>> 24].join(".");
+    }
+  }
+  return null;
+}
+
+function readGateway() {
+  try {
+    return defaultGateway(require("fs").readFileSync("/proc/net/route", "utf8"));
+  } catch (error) {
+    return null;
+  }
+}
+
+function trustedProxies(list = parseList(process.env.TRUSTED_PROXY_IPS), gateway = readGateway) {
   const allowed = new Set(list.map(normalize));
+  let widgetSource;
   return (req, res, next) => {
     if (allowed.size === 0) {
       return next();
     }
-    if (req.method === "GET" && (req.path === "/ping" || req.path.startsWith("/v1/lnd/widgets/"))) {
+    const source = normalize(req.socket && req.socket.remoteAddress);
+    if (allowed.has(source)) {
       return next();
     }
-    const source = normalize(req.socket && req.socket.remoteAddress);
-    if (!allowed.has(source)) {
-      return res.status(403).json({ error: "forbidden" }); // eslint-disable-line no-magic-numbers
+    // The platform's health check, which says nothing.
+    if (req.method === "GET" && req.path === "/ping") {
+      return next();
     }
-    return next();
+    if (req.method === "GET" && req.path.startsWith("/v1/lnd/widgets/")) {
+      if (widgetSource === undefined || widgetSource === null) {
+        widgetSource = gateway();
+      }
+      if (widgetSource && source === widgetSource) {
+        return next();
+      }
+    }
+    return res.status(403).json({ error: "forbidden" }); // eslint-disable-line no-magic-numbers
   };
 }
 
@@ -57,4 +90,4 @@ function noFraming(req, res, next) {
   return next();
 }
 
-module.exports = { jsonWrites, trustedProxies, noFraming, parseList };
+module.exports = { jsonWrites, trustedProxies, noFraming, parseList, defaultGateway };
