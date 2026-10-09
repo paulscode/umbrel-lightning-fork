@@ -4,10 +4,13 @@ FROM node:16-bookworm-slim AS backend-builder
 # Create app directory
 WORKDIR /app
 
-# Copy package.json and install dependencies
-COPY package.json ./
+# Install the backend's dependencies exactly as the lockfile pins them. Both
+# workspaces' package.json are needed for the lockfile to match; only the
+# backend's dependencies are installed.
+COPY package.json package-lock.json ./
 COPY apps/backend/package.json ./apps/backend/package.json
-RUN npm install
+COPY apps/frontend/package.json ./apps/frontend/package.json
+RUN npm ci --workspace umbrel-lnd-backend --no-audit --no-fund
 # Copy project files and folders
 COPY apps/backend ./apps/backend
 
@@ -19,10 +22,11 @@ FROM node:16-bookworm-slim AS frontend-builder
 # Create app directory
 WORKDIR /app
 
-# Copy package.json and install dependencies
-COPY package.json ./
+# Install the frontend's dependencies exactly as the lockfile pins them.
+COPY package.json package-lock.json ./
+COPY apps/backend/package.json ./apps/backend/package.json
 COPY apps/frontend/package.json ./apps/frontend/package.json
-RUN npm install
+RUN npm ci --workspace umbrel-lnd-frontend --no-audit --no-fund
 
 # Copy project files and folders
 COPY apps/frontend ./apps/frontend

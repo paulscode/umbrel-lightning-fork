@@ -48,16 +48,33 @@ router.post('/lnd-config', safeHandler(async (req, res) => {
     }
 }));
 
+// Only the settings this form manages are kept: anything else would be
+// written into umbrel-lnd.conf as it came.
 function mapKeys(postObject) {
     const configObject = {};
     for (const [key, value] of Object.entries(postObject)) {
-        configObject[lndConfMap[key]] = value;
+        if (Object.prototype.hasOwnProperty.call(lndConfMap, key)) {
+            configObject[lndConfMap[key]] = value;
+        }
     }
     return configObject;
 }
 
 function validateSettings(settings) {
     const errors = [];
+
+    // Every value is a plain one, on one line. The checks below look at
+    // the settings they know; this covers the rest (tlsautorefresh, the
+    // db.bolt options) and anything a check below lets through.
+    for (const [key, value] of Object.entries(settings)) {
+        const plain = typeof value === "boolean" || typeof value === "string" ||
+            (typeof value === "number" && Number.isFinite(value));
+        if (!plain) {
+            errors.push(`Invalid value for ${key}.`);
+        } else if (typeof value === "string" && /[\u0000-\u001f\u007f]/.test(value)) {
+            errors.push(`${key} cannot contain line breaks or other control characters.`);
+        }
+    }
 
     // APPLICATION OPTIONS
 

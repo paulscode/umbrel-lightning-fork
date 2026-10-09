@@ -14,6 +14,14 @@
 // Devices live in their own file next to the dashboard's state, written
 // whole and atomically, so a backup holds them and a restore keeps phones
 // paired.
+//
+// Changing the dashboard's password unpairs every phone, as it signs out
+// every browser: whoever paired a phone with the old one keeps nothing.
+// Each device remembers a short tag of the password it was paired under
+// (a few characters of a hash, enough to notice a change and too few to
+// test guesses against), and a key whose tag no longer matches is revoked
+// when next used. Without a dashboard password (Umbrel) there is nothing
+// to compare.
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
@@ -69,12 +77,20 @@ function writeFileJson(file, data) {
   fs.renameSync(tmp, file);
 }
 
+// The dashboard password's fingerprint, or "" when there is none.
+function currentPasswordFingerprint() {
+  const auth = require("./auth");
+  const password = auth.readPassword();
+  return password ? auth.fingerprint(password) : "";
+}
+
 function createDevices({
   file = defaultFile,
   now = Date.now,
   random = crypto.randomBytes,
   read = readFileJson,
   write = writeFileJson,
+  passwordFingerprint = currentPasswordFingerprint,
 } = {}) {
   let state = null;
   let queue = Promise.resolve();
@@ -98,6 +114,21 @@ function createDevices({
 
   function save() {
     write(fileName(), state);
+  }
+
+  // The tag of the current password, or null without one.
+  function passwordTag() {
+    const fp = passwordFingerprint();
+    return fp ? sha256(`${state.serverId}:${fp}`).slice(0, 8) : null;
+  }
+
+  function markRevoked(device) {
+    device.status = "revoked";
+    device.keyHash = null;
+    device.enrollHash = null;
+    device.claimNonceHash = null;
+    device.enrollExpires = null;
+    device.revokedAt = now();
   }
 
   // One change at a time: two pairings or a pairing and a revocation must
@@ -216,6 +247,7 @@ function createDevices({
         device.label = name;
       }
       device.lastUsed = now();
+      device.passwordTag = passwordTag();
       save();
       return { apiKey, id: device.id, label: device.label };
     });
@@ -240,6 +272,18 @@ function createDevices({
     if (!found) {
       return null;
     }
+    // Paired under another password: revoked. One paired before tags
+    // were kept, or before a password was set, takes the current one.
+    const tag = passwordTag();
+    if (tag && found.passwordTag && found.passwordTag !== tag) {
+      markRevoked(found);
+      serial(() => save()).catch(() => {});
+      return null;
+    }
+    const tagged = tag && !found.passwordTag;
+    if (tagged) {
+      found.passwordTag = tag;
+    }
     const at = now();
     const stale = !found.lastUsed || at - found.lastUsed > LAST_USED_WRITE_MS;
     const moved = transport && found.lastTransport !== transport;
@@ -247,7 +291,7 @@ function createDevices({
     if (transport) {
       found.lastTransport = transport;
     }
-    if (stale || moved) {
+    if (stale || moved || tagged) {
       serial(() => save()).catch(() => {});
     }
     return { id: found.id, label: found.label };
@@ -264,12 +308,7 @@ function createDevices({
       if (!device) {
         return false;
       }
-      device.status = "revoked";
-      device.keyHash = null;
-      device.enrollHash = null;
-      device.claimNonceHash = null;
-      device.enrollExpires = null;
-      device.revokedAt = now();
+      markRevoked(device);
       save();
       return true;
     });

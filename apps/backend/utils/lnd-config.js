@@ -28,6 +28,22 @@ const parse = (lndConfigString) => {
   return configObject;
 }
 
+// A key or value that would end its line early, and so write a line of its
+// own into the file lnd reads. Nothing the dashboard writes legitimately
+// contains one; refused outright rather than cleaned, so a bad value is
+// noticed instead of quietly changed.
+const LINE_BREAK = /[\r\n\0]/;
+const KEY = /^[A-Za-z0-9._-]+$/;
+
+function checkLine(key, value) {
+  if (!KEY.test(key)) {
+    throw new Error(`refusing to write the lnd.conf key ${JSON.stringify(key)}`);
+  }
+  if (LINE_BREAK.test(String(value))) {
+    throw new Error(`refusing to write ${key}: its value contains a line break`);
+  }
+}
+
 // returns an lnd.conf formatted string from a JavaScript object
 const generate = (configObject) => {
   // Two header lines, which isUmbrelLndConfUpToDate skips when comparing.
@@ -49,9 +65,11 @@ const generate = (configObject) => {
     if (formattedKey === "watchtower.externalip" && !value) continue;
     if (Array.isArray(value)) {
       for (const item of value) {
+        checkLine(formattedKey, item);
         lndConfigString += `\n${formattedKey}=${item}`;
       }
     } else {
+      checkLine(formattedKey, value);
       lndConfigString += `\n${formattedKey}=${value}`;
     }
   }

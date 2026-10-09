@@ -4,16 +4,21 @@ const { createDevices, ENROLL_TTL_MS } = require("../logic/devices.js");
 
 function harness() {
   let clock = 1_700_000_000_000;
+  let fingerprint = "";
   const files = new Map();
   const devices = createDevices({
     file: "/devices.json",
     now: () => clock,
     read: (f) => (files.has(f) ? JSON.parse(files.get(f)) : null),
     write: (f, data) => files.set(f, JSON.stringify(data)),
+    passwordFingerprint: () => fingerprint,
   });
   return {
     devices,
     files,
+    setPassword: (fp) => {
+      fingerprint = fp;
+    },
     tick: (ms) => {
       clock += ms;
     },
@@ -148,4 +153,31 @@ test("closing the pairing screen removes only a device that has not paired", asy
   assert.equal(await devices.revoke(paired.device.id, { pendingOnly: true }), false);
   assert.ok(devices.verify(apiKey), "the phone that just paired keeps working");
   assert.equal(await devices.revoke(pending.device.id, { pendingOnly: true }), true);
+});
+
+test("a new dashboard password unpairs every phone", async () => {
+  const { devices, setPassword, stored } = harness();
+  setPassword("a".repeat(64));
+  const { enrollCode } = await devices.createPending("");
+  const paired = await devices.claim(enrollCode, "Phone");
+  assert.ok(devices.verify(paired.apiKey));
+  assert.equal(stored().devices[0].passwordTag.length, 8, "a short tag, not the fingerprint");
+  assert.ok(!JSON.stringify(stored()).includes("a".repeat(64)));
+
+  setPassword("b".repeat(64));
+  assert.equal(devices.verify(paired.apiKey), null);
+  setPassword("a".repeat(64));
+  assert.equal(devices.verify(paired.apiKey), null, "and stays revoked");
+  assert.deepEqual(await devices.list(), []);
+});
+
+test("a phone paired without a password takes the first one set", async () => {
+  const { devices, setPassword } = harness();
+  const { enrollCode } = await devices.createPending("");
+  const paired = await devices.claim(enrollCode, "Phone");
+  assert.ok(devices.verify(paired.apiKey), "no password: nothing to compare");
+  setPassword("a".repeat(64));
+  assert.ok(devices.verify(paired.apiKey), "adopts the password now set");
+  setPassword("b".repeat(64));
+  assert.equal(devices.verify(paired.apiKey), null);
 });

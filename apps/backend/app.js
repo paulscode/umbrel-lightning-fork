@@ -18,6 +18,7 @@ const camelCaseReqMiddleware = require("middlewares/camelCaseRequest.js")
   .camelCaseRequest;
 const errorHandleMiddleware = require("middlewares/errorHandling.js");
 const sessionAuth = require("middlewares/sessionAuth.js");
+const requestGuard = require("middlewares/requestGuard.js");
 const auth = require("logic/auth.js");
 const LndError = require("models/errors.js").LndError;
 
@@ -52,6 +53,8 @@ const app = express();
 // disagree about what a path is.
 app.set("case sensitive routing", true);
 
+app.use(requestGuard.trustedProxies());
+app.use(requestGuard.noFraming);
 app.use(bodyParser.json());
 // Unreadable JSON sent to the mobile API is answered in its own form,
 // {error}, like every other mobile answer.
@@ -61,7 +64,6 @@ app.use("/api/v1", (error, req, res, next) => {
   }
   return next(error);
 });
-app.use(bodyParser.urlencoded({ extended: true }));
 
 app.use(requestCorrelationMiddleware);
 app.use(camelCaseReqMiddleware);
@@ -81,6 +83,7 @@ app.use("/api/v1", (req, res, next) => {
 // users in before a request reaches this process and configures no password.
 // The static frontend stays public so the sign-in screen can render; the
 // gate covers the API (middlewares/sessionAuth.js).
+app.use("/v1", requestGuard.jsonWrites);
 if (constants.IS_STARTOS || auth.passwordConfigured()) {
   app.use("/v1", sessionAuth);
 }

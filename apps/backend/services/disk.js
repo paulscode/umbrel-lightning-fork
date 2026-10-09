@@ -118,9 +118,13 @@ async function readJsonFile(filePath) {
 
 // Writes a string to a file. Wraps fs.writeFile into a native promise
 // This is _not_ concurrency safe, so don't export it without making it like writeJsonFile
-function writeFile(filePath, data, encoding) {
+//
+// The dashboard's JSON and key files are its own and are written readable by
+// its user only. umbrel-lnd.conf is written as before, since LND reads it as
+// another user.
+function writeFile(filePath, data, encoding, mode = 0o644) {
   return new Promise((resolve, reject) =>
-    fs.writeFile(filePath, data, encoding, (err) => {
+    fs.writeFile(filePath, data, { encoding, mode }, (err) => {
       if (err) {
         reject(err);
       } else {
@@ -135,7 +139,7 @@ function writeJsonFile(filePath, obj) {
     .randomBytes(uint32Bytes)
     .readUInt32LE(0)}`;
 
-  return writeFile(tempFileName, JSON.stringify(obj, null, 2), "utf8")
+  return writeFile(tempFileName, JSON.stringify(obj, null, 2), "utf8", 0o600)
     .then(
       () =>
         new Promise((resolve, reject) =>
@@ -166,7 +170,7 @@ function writeKeyFile(filePath, obj) {
     .randomBytes(uint32Bytes)
     .readUInt32LE(0)}`;
 
-  return writeFile(tempFileName, obj, "utf8")
+  return writeFile(tempFileName, obj, "utf8", 0o600)
     .then(
       () =>
         new Promise((resolve, reject) =>
