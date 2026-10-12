@@ -185,8 +185,11 @@
                       v-if="tx.type === 'outgoing' || tx.type === 'incoming'"
                     >
                       {{ getTimeFromNow(tx.timestamp) }}
+                      <span v-if="tx.channelAction"
+                        >&bull; {{ tx.channelAction }}</span
+                      >
                       <span
-                        v-if="
+                        v-else-if="
                           tx.description === 'Lightning Wallet' &&
                             tx.type === 'outgoing'
                         "

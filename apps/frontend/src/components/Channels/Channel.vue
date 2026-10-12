@@ -10,6 +10,7 @@
             }}</status>
             <!-- we do not render private/public text when 'private' property does not exist on channel (e.g., from PendingChannels rpc) -->
             <small v-if="channel.private !== undefined" class="ml-1">{{ channel.private ? "Private Channel" : "Public Channel" }}</small>
+            <span v-if="resizeChip" class="resize-chip ml-1">{{ resizeChip }}</span>
           </div>
           <div>
             <span v-if="channel.remoteAlias">{{ channel.remoteAlias }}</span>
@@ -31,6 +32,7 @@
             }}</status>
             <!-- we do not render private/public text when 'private' property does not exist on channel (e.g., from PendingChannels rpc) -->
             <small v-if="channel.private !== undefined" class="">{{ channel.private ? "Private Channel" : "Public Channel" }}</small>
+            <span v-if="resizeChip" class="resize-chip ml-1">{{ resizeChip }}</span>
           </div>
           <div>
             <small>{{ channel.remoteAlias }}</small>
@@ -56,8 +58,9 @@
             >
           </div>
           <bar
-            :local="Number(channel.localBalance)"
+            :local="barLocal"
             :remote="Number(channel.remoteBalance)"
+            :change="pendingLocalDelta"
             class="my-1"
           ></bar>
           <div class="d-flex justify-content-between">
@@ -78,6 +81,26 @@ export default {
   computed: {
     unit() {
       return this.$store.state.system.unit;
+    },
+    pendingLocalDelta() {
+      const p = this.channel.pendingSplice;
+      return p && !p.dead ? Number(p.localDeltaSat) || 0 : 0;
+    },
+    barLocal() {
+      return Number(this.channel.localBalance) + Math.max(0, this.pendingLocalDelta);
+    },
+    // "Resizing 2/6" while a resize confirms; the count is in the text.
+    resizeChip() {
+      const p = this.channel.pendingSplice;
+      if (!p) {
+        return "";
+      }
+      if (p.dead) {
+        return "Resize failed";
+      }
+      const depth = Number(p.lockDepth) || 0;
+      const confs = Math.min(Number(p.confirmations) || 0, depth);
+      return depth > 0 ? `Resizing ${confs}/${depth}` : "Resizing";
     },
     statusVariant() {
       if (this.channel.status === "Online") {

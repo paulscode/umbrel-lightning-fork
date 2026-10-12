@@ -339,8 +339,14 @@ const getters = {
         // type = "pending";
 
         let description = "Unknown";
+        // What a Lightning Wallet transaction did, when the type alone
+        // doesn't say (a resize either way).
+        let channelAction = "";
 
-        if (tx.type === "CHANNEL_OPEN" || tx.type === "PENDING_OPEN") {
+        if (tx.type === "CHANNEL_RESIZE") {
+          description = "Lightning Wallet";
+          channelAction = "Channel resize";
+        } else if (tx.type === "CHANNEL_OPEN" || tx.type === "PENDING_OPEN") {
           description = "Lightning Wallet";
         } else if (tx.type === "CHANNEL_CLOSE" || tx.type === "PENDING_CLOSE") {
           description = "Lightning Wallet";
@@ -357,6 +363,7 @@ const getters = {
           description,
           hash: tx.txHash,
           confirmations: tx.numConfirmations,
+          channelAction,
         });
       });
 

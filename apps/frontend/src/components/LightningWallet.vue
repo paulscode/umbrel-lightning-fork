@@ -21,6 +21,9 @@
             decimalPlaces: unit === 'sats' ? 0 : 5,
           }"
         />
+        <small v-if="movingInSats > 0" class="d-block text-muted moving-in-line">
+          +{{ movingInSats | unit | localize }} {{ unit | formatUnit }} moving into channels
+        </small>
       </div>
       <span
         class="loading-placeholder loading-placeholder-lg"
@@ -1303,6 +1306,7 @@ export default {
         return state.lightning.balance.total;
       },
       walletBalanceInSats: (state) => state.lightning.balance.total,
+      movingInSats: (state) => state.lightning.balance.movingIn || 0,
       unit: (state) => state.system.unit,
     }),
     isLightningPage() {
@@ -2103,6 +2107,15 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+// Under the balance, in body size: the title slot's font is the balance's.
+.moving-in-line {
+  font-size: 0.85rem;
+  font-weight: 400;
+  line-height: 1.3;
+  white-space: normal;
+  margin-top: 0.25rem;
+}
+
 // What was pasted, when it is not an ordinary invoice: a small label above
 // its details, with the explanation a click away.
 .kind-chip,

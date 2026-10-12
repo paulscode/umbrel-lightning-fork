@@ -30,7 +30,11 @@ const state = () => ({
   balance: {
     total: -1,
     confirmed: -1,
-    pending: -1
+    pending: -1,
+    // Our funds on their way into channels: added by resizes that haven't
+    // locked, and our side of channels still opening. In neither wallet
+    // balance until then.
+    movingIn: 0
   },
   alias: "",
   color: "",
@@ -124,6 +128,10 @@ const mutations = {
 
     if (balance.pending !== undefined) {
       state.balance.pending = parseInt(balance.pending);
+    }
+
+    if (balance.movingIn !== undefined) {
+      state.balance.movingIn = parseInt(balance.movingIn) || 0;
     }
 
     state.balance.total = state.balance.confirmed;
@@ -295,6 +303,7 @@ const actions = {
     let pendingBalance = 0;
     let maxReceive = 0;
     let maxSend = 0;
+    let movingIn = 0;
 
     if (rawChannels) {
       // Loop through channels to determine pending balance, max payment amount, and sort channels by type
@@ -323,9 +332,24 @@ const actions = {
           maxReceive += remoteBalance;
           maxSend += localBalance;
 
+          // The local balance is the least across a resize's candidates:
+          // what we add is on top of it until the resize locks. The wallet
+          // keeps counting the coins it spends until the transaction goes
+          // out, so only from then.
+          const splice = channel.pendingSplice;
+          if (
+            splice &&
+            !splice.dead &&
+            ["broadcast", "confirmed"].includes(splice.state) &&
+            splice.relayStatus !== "rejected"
+          ) {
+            movingIn += Math.max(0, parseInt(splice.localDeltaSat) || 0);
+          }
+
           confirmedBalance += localBalance;
         } else if (channel.type === "PENDING_OPEN_CHANNEL") {
           pendingBalance += localBalance;
+          movingIn += localBalance;
           channel.status = "Opening";
         } else if (
           [
@@ -369,7 +393,8 @@ const actions = {
       commit("setChannels", channels);
       commit("setBalance", {
         confirmed: confirmedBalance,
-        pending: pendingBalance
+        pending: pendingBalance,
+        movingIn
       });
       commit("setMaxReceive", maxReceive);
       commit("setMaxSend", maxSend);

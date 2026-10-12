@@ -285,6 +285,39 @@
                 </div>
               </b-card-body>
 
+              <!-- RESIZE CHANNELS (splicing) -->
+              <b-card-body class="subsetting-body px-2 px-sm-3">
+                <div>
+                  <div class="d-flex justify-content-between align-items-center">
+                    <div class="flex-sm-grow-1">
+                      <label class="mb-0" for="splice-channels">
+                        <p class="subsetting-title font-weight-bold mb-0 mr-1">
+                          Resize Channels
+                          <span class="subsetting-setting-lnd-name text-monospace font-weight-normal d-block">
+                            protocol.splice
+                          </span>
+                        </p>
+                      </label>
+                    </div>
+                    <div>
+                      <toggle-switch
+                      id="splice-channels"
+                      class="align-self-center"
+                      :on="settings['protocol.splice']"
+                      @toggle="status => { settings['protocol.splice'] = status; spliceChosen = true; }"
+                      ></toggle-switch>
+                    </div>
+                  </div>
+                  <small class="w-lg-75 d-block text-muted mt-1">
+                    Add funds to a channel or move funds out of it without
+                    closing it (splicing). The peer's node must support it
+                    too. Turning this on upgrades your node's database, after
+                    which it can't go back to an older version of Lightning
+                    Fork.
+                  </small>
+                </div>
+              </b-card-body>
+
               <!-- MIN CHANNEL SIZE -->
               <b-card-body class="subsetting-body px-2 px-sm-3">
                 <div>
@@ -1583,6 +1616,8 @@ export default {
     return {
       // settings object keys are not in standard camelCase in order to maintain identical names between the umbrel-lnd.conf file and the json file.
       settings: {},
+      // Whether Resize Channels was toggled in this window.
+      spliceChosen: false,
       aliasOnModalLoad: "",
       aliasInput: "",
       timeOptions: [
@@ -1734,7 +1769,13 @@ export default {
       try {
         const response = await API.post(
           `${process.env.VUE_APP_API_BASE_URL}/v1/lnd/conf/lnd-config`,
-          { lndConfig: shouldRestoreDefaults ? {} : this.settings }
+          {
+            lndConfig: shouldRestoreDefaults
+              ? {}
+              : // Whether the user set Resize Channels, so a later default
+                // doesn't override the choice.
+                { ...this.settings, ...(this.spliceChosen ? { protocolSpliceChosen: true } : {}) }
+          }
         );
 
         if (response.data.status === "success") {

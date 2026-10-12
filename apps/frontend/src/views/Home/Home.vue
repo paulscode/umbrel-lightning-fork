@@ -286,7 +286,10 @@
                 </div>
               </template>
               <div class="px-2 px-sm-3 py-2">
-                <channel-open v-on:channelopen="onChannelOpen"></channel-open>
+                <channel-open
+                  v-on:channelopen="onChannelOpen"
+                  v-on:addtochannel="onAddToChannel"
+                ></channel-open>
               </div>
             </b-modal>
 
@@ -328,8 +331,12 @@
               </template>
               <div class="px-2 px-sm-3 py-2">
                 <channel-manage
+                  :key="manageOpenings"
                   :channel="selectedChannel"
+                  :resize-request="resizeRequest"
                   v-on:channelclose="onChannelClose"
+                  v-on:channelresize="onChannelResize"
+                  v-on:opensettings="openSettingsFromChannel"
                 ></channel-manage>
               </div>
             </b-modal>
@@ -398,6 +405,10 @@ import BitcoinInvoicesModal from "@/views/Home/BitcoinInvoicesModal";
 import BridgeModal from "@/views/Home/BridgeModal";
 import ChannelManage from "@/components/Channels/Manage";
 
+// A channel's identity across resizes: the outpoint it was opened with.
+const channelKey = channel =>
+  (channel && (channel.originalChannelPoint || channel.channelPoint)) || "";
+
 import AdvancedSettingsModal from "./AdvancedSettingsModal.vue";
 import NodeIdModal from "./NodeIdModal.vue";
 import SecretWordsModal from "./SecretWordsModal.vue";
@@ -409,7 +420,17 @@ import ChannelBackupModal from '@/views/Home/ChannelBackupModal.vue';
 export default {
   data() {
     return {
-      selectedChannel: {},
+      // The channel the details window shows, by the outpoint it was
+      // opened with: a resize moves its funding output.
+      selectedChannelKey: "",
+      selectedChannelSnapshot: {},
+      // An Add funds form to open in the details window, from the Open
+      // Channel window: { direction, amount }.
+      resizeRequest: null,
+      // Each opening of the details window starts afresh.
+      manageOpenings: 0,
+      // Resizes in progress at the last poll, to tell when one finishes.
+      pendingResizes: {},
       showRecoverChannelsModal: false,
       showAdvancedSettingsModal: false,
       showChannelBackupModal: false,
@@ -420,6 +441,14 @@ export default {
     };
   },
   computed: {
+    // The chosen channel as of the latest poll, so the details window
+    // follows a resize; the snapshot while the list is loading or after
+    // the channel is gone.
+    selectedChannel() {
+      const key = this.selectedChannelKey;
+      const current = key && (this.channels || []).find(c => channelKey(c) === key);
+      return current || this.selectedChannelSnapshot;
+    },
     ...mapState({
       isLndOperational: state => state.lightning.operational,
       lndVersion: state => state.lightning.version,
@@ -565,11 +594,55 @@ export default {
     getLndConnectUrls() {
       this.$store.dispatch("lightning/getLndConnectUrls");
     },
-    manageChannel(channel) {
+    onAddToChannel({ channel, amount }) {
+      this.$refs["open-channel-modal"].hide();
+      this.resizeRequest = { direction: "in", amount };
+      this.manageChannel(channel, true);
+    },
+    manageChannel(channel, keepRequest) {
+      if (!keepRequest) {
+        this.resizeRequest = null;
+      }
       if (channel) {
-        this.selectedChannel = channel;
+        this.manageOpenings += 1;
+        this.selectedChannelKey = channelKey(channel);
+        this.selectedChannelSnapshot = channel;
         this.$refs["manage-channel-modal"].show();
       }
+    },
+    onChannelResize() {
+      this.$store.dispatch("lightning/getChannels");
+      this.$store.dispatch("bitcoin/getBalance");
+      this.$store.dispatch("bitcoin/getTransactions");
+    },
+    openSettingsFromChannel() {
+      this.$refs["manage-channel-modal"].hide();
+      this.openAdvancedSettingsModal();
+    },
+    // A toast when a resize this page watched locks.
+    noticeResizes(channels) {
+      const pending = {};
+      for (const channel of channels || []) {
+        const key = channelKey(channel);
+        if (channel.pendingSplice && !channel.pendingSplice.dead) {
+          pending[key] = true;
+        } else if (
+          this.pendingResizes[key] &&
+          channel.lastSplice &&
+          channel.lastSplice.outcome === "locked"
+        ) {
+          const size = Number(channel.capacity).toLocaleString();
+          const peer = channel.remoteAlias ? ` with ${channel.remoteAlias}` : "";
+          this.$bvToast.toast(`Your channel${peer} is now ${size} sats.`, {
+            title: "Channel resized",
+            autoHideDelay: 5000,
+            variant: "success",
+            solid: true,
+            toaster: "b-toaster-bottom-right",
+          });
+        }
+      }
+      this.pendingResizes = pending;
     },
     onChannelOpen() {
       //refresh channels, balance and txs
@@ -676,6 +749,9 @@ export default {
     document.removeEventListener("visibilitychange", this.onVisible);
   },
   watch: {
+    channels: function(channels) {
+      this.noticeResizes(channels);
+    },
     currency: {
       handler: function(currency) {
         this.selectedCurrency = currency;

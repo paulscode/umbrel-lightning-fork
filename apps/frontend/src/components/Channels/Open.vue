@@ -14,6 +14,17 @@
           autofocus
         ></b-input>
       </b-col>
+      <b-col v-if="existingChannel" col cols="12">
+        <b-alert variant="info" show class="mb-3">
+          You already have a channel with this node. Add funds to it
+          instead? It keeps its history and costs one transaction.
+          <div class="mt-2">
+            <b-button size="sm" variant="primary" @click="addToExisting">
+              Add to existing channel
+            </b-button>
+          </div>
+        </b-alert>
+      </b-col>
       <b-col col cols="12" sm="6">
         <label class="sr-onlsy" for="funding-amount">Amount</label>
         <div class="mb-3">
@@ -183,9 +194,31 @@ export default {
       unit: (state) => state.system.unit,
       confirmedBtcBalance: (state) => state.bitcoin.balance.confirmed,
       mempoolFees: (state) => state.bitcoin.mempoolFees,
+      channels: (state) => state.lightning.channels,
     }),
+    // An open channel with the node entered that can be resized.
+    existingChannel() {
+      const pubkey = this.peerConnectionCode.trim().split("@")[0].toLowerCase();
+      if (!/^[0-9a-f]{66}$/.test(pubkey)) {
+        return null;
+      }
+      return (
+        (this.channels || []).find(
+          (c) =>
+            c.type === "OPEN" &&
+            String(c.remotePubkey || "").toLowerCase() === pubkey &&
+            c.spliceStatus === "ok"
+        ) || null
+      );
+    },
   },
   methods: {
+    addToExisting() {
+      this.$emit("addtochannel", {
+        channel: this.existingChannel,
+        amount: this.fundingAmount > 0 ? Math.round(this.fundingAmount) : 0,
+      });
+    },
     selectFee(fee) {
       // The estimate's error stands until the next estimate: a level with
       // an error cannot be chosen, so a choice never clears one.
@@ -268,10 +301,10 @@ export default {
         //channel
         setTimeout(() => {
           this.$bvToast.toast(
-            `Channel of ${this.fundingAmount} Sats opened successfully`,
+            `Opening a channel of ${Number(this.fundingAmount).toLocaleString()} sats. It can be used once its transaction confirms.`,
             {
               title: "Lightning Network",
-              autoHideDelay: 3000,
+              autoHideDelay: 5000,
               variant: "success",
               solid: true,
               toaster: "b-toaster-bottom-right",

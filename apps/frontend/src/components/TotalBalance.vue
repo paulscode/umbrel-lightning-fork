@@ -54,13 +54,17 @@ export default {
         if (state.bitcoin.balance.total === -1 || state.lightning.balance.total === -1) {
           return -1;
         }
-        const totalBalance = state.bitcoin.balance.total + state.lightning.balance.total;
+        // With what is on its way into channels: spent from the wallet
+        // and not yet in a channel's balance.
+        const totalBalance =
+          state.bitcoin.balance.total + state.lightning.balance.total + (state.lightning.balance.movingIn || 0);
         if (state.system.unit === "btc") {
           return satsToBtc(totalBalance);
         }
         return totalBalance;
       },
-      totalBalanceInSats: (state) => state.bitcoin.balance.total + state.lightning.balance.total,
+      totalBalanceInSats: (state) =>
+        state.bitcoin.balance.total + state.lightning.balance.total + (state.lightning.balance.movingIn || 0),
     }),
   },
   methods: {},

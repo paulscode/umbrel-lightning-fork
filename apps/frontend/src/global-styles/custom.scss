@@ -1179,3 +1179,19 @@ body:not(.theme-dark) .chain-badge {
   color: #1e4ca6;
   background: rgba(78, 147, 255, 0.12);
 }
+// A channel resize in progress, on the channel list.
+.resize-chip {
+  display: inline-block;
+  padding: 0.05rem 0.5rem;
+  border-radius: 1rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #ffd27a;
+  background: rgba(255, 176, 32, 0.16);
+  border: 1px solid rgba(255, 176, 32, 0.4);
+  vertical-align: middle;
+}
+body:not(.theme-dark) .resize-chip {
+  color: #8a5a00;
+  background: rgba(255, 176, 32, 0.14);
+}
