@@ -292,7 +292,7 @@
                     <div class="flex-sm-grow-1">
                       <label class="mb-0" for="splice-channels">
                         <p class="subsetting-title font-weight-bold mb-0 mr-1">
-                          Resize Channels
+                          Resize Channels (Splicing)
                           <span class="subsetting-setting-lnd-name text-monospace font-weight-normal d-block">
                             protocol.splice
                           </span>
@@ -309,11 +309,12 @@
                     </div>
                   </div>
                   <small class="w-lg-75 d-block text-muted mt-1">
-                    Add funds to a channel or move funds out of it without
-                    closing it (splicing). The peer's node must support it
-                    too. Turning this on upgrades your node's database, after
-                    which it can't go back to an older version of Lightning
-                    Fork.
+                    Lets you add funds to or move funds out of a channel
+                    without closing it (splicing). Your peers can also resize
+                    channels they share with you. Turning it off stops new
+                    resizes; one that is already in progress finishes first.
+                    Turning it on upgrades your node's database, after which
+                    it can't go back to an older version of Lightning Fork.
                   </small>
                 </div>
               </b-card-body>
