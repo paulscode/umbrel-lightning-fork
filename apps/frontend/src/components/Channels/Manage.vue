@@ -96,6 +96,13 @@
           <span class="text-capitalize font-bold">{{ channel.status }}</span>
         </div>
 
+        <b-alert
+          v-if="channel.spliceStatus === 'peer_not_announcing'"
+          variant="warning"
+          show
+        >
+          {{ notAnnouncingText }}
+        </b-alert>
         <div v-if="pendingSplice" class="mb-3">
           <div class="d-flex justify-content-between align-items-center mb-1">
             <span class="text-muted">Resize</span>
@@ -457,6 +464,9 @@ export default {
       const depth = Number(this.pendingSplice.lockDepth) || 0;
       return Math.max(0, depth - (Number(this.pendingSplice.confirmations) || 0));
     },
+    notAnnouncingText() {
+      return statusText("peer_not_announcing");
+    },
     // The backend's reason, kept short.
     relayReason() {
       const r = String((this.pendingSplice && this.pendingSplice.relayReason) || "");
@@ -546,7 +556,8 @@ export default {
       const why = statusText(this.channel.spliceStatus, {
         platform: this.$store.state.system.platform,
       });
-      if (why) {
+      // Said in the details; it doesn't stop a resize.
+      if (why && this.channel.spliceStatus !== "peer_not_announcing") {
         this.resizeExplanation = why;
         return;
       }

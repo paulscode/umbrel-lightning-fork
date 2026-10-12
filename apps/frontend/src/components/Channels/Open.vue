@@ -207,7 +207,7 @@ export default {
           (c) =>
             c.type === "OPEN" &&
             String(c.remotePubkey || "").toLowerCase() === pubkey &&
-            c.spliceStatus === "ok"
+            ["ok", "peer_not_announcing"].includes(c.spliceStatus)
         ) || null
       );
     },
