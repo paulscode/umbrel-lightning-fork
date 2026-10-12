@@ -375,7 +375,7 @@ again, not 503: only a first attempt can be told "nothing was sent".
 | Call | |
 |---|---|
 | `GET /v1/devices` | `{devices: [{id, label, status, created, lastUsed, lastTransport, enrollExpires}]}` |
-| `POST /v1/devices` | starts a pairing: `{device, pairing, qr, expiresInMs}`; 503 while the mobile listener is not serving |
+| `POST /v1/devices` | starts a pairing: `{device, pairing, qr, expiresInMs}`. Where the dashboard has a password (StartOS, native), the body must carry it as `{password}`: 403 when missing or wrong, 429 during the sign-in lockout, since the phone's key outlives the session. 503 while the mobile listener is not serving |
 | `POST /v1/devices/<id>/label` (or `PATCH /v1/devices/<id>`) | `{label}` |
 | `DELETE /v1/devices/<id>` | removes it; its key stops working at once. `?pending=1` removes it only if it has not paired yet |
 
