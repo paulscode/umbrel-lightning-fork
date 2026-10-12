@@ -58,7 +58,7 @@ test("a resize request is checked", () => {
   const ok = splice.spliceOptions(base);
   assert.deepEqual(ok, {
     fundingTxid: TXID, outputIndex: 1, direction: "in", amountSat: 300000, useMax: false,
-    satPerVbyte: 2, addr: "", forceLowFee: false,
+    satPerVbyte: 2, targetConf: 0, addr: "", forceLowFee: false,
   });
   assert.equal(splice.spliceOptions({ ...base, useMax: true, amountSat: 0 }).amountSat, 0);
   assert.equal(splice.spliceOptions({ ...base, direction: "out", addr: "bcrt1qxyz0123456789abcd" }).addr, "bcrt1qxyz0123456789abcd");
@@ -72,6 +72,7 @@ test("a resize request is checked", () => {
     { ...base, amountSat: -5 },
     { ...base, amountSat: 1.5 },
     { ...base, satPerVbyte: -1 },
+    { ...base, targetConf: 5000 },
     { ...base, direction: "out", addr: "<script>" },
   ]) {
     assert.throws(() => splice.spliceOptions(bad), /Invalid|must be/, JSON.stringify(bad));

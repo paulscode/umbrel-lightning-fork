@@ -36,6 +36,10 @@ function spliceOptions(body) {
   if (!Number.isSafeInteger(satPerVbyte) || satPerVbyte < 0) {
     throw new ValidationError("Fee rate must be a whole number of sat/vB.");
   }
+  const targetConf = num(b.targetConf);
+  if (!Number.isSafeInteger(targetConf) || targetConf < 0 || targetConf > 1008) { // eslint-disable-line no-magic-numbers
+    throw new ValidationError("Confirmation target must be a whole number of blocks.");
+  }
   const addr = b.direction === "out" ? String(b.addr || "").trim() : "";
   if (addr && !/^[a-z0-9]{14,90}$/i.test(addr)) {
     throw new ValidationError("Invalid address.");
@@ -48,6 +52,7 @@ function spliceOptions(body) {
     amountSat: useMax ? 0 : amountSat,
     useMax,
     satPerVbyte,
+    targetConf,
     addr,
     forceLowFee: b.forceLowFee === true,
   };
