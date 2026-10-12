@@ -1641,6 +1641,9 @@ message PendingChannelsResponse {
         */
         int64 remote_chan_reserve_sat = 7 [json_name = "remote_chan_reserve_sat"];
 
+        // A set of flags showing the current state of the channel.
+        string chan_status_flags = 11 [json_name = "chan_status_flags"];
+
         /// Whether the channel's signatures bind to this chain (option_unified_sigs).
         bool unified_sigs = 1001 [json_name = "unified_sigs"];
     }

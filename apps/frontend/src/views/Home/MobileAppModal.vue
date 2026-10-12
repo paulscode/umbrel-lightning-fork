@@ -136,6 +136,43 @@
           </small>
           <small class="text-muted d-block">{{ awayHint }}</small>
         </div>
+        <!-- The dashboard password, asked before a pairing code is made:
+             the phone's key outlasts this session. -->
+        <div v-if="askingPassword" class="neu-card p-3 mt-3">
+          <label class="mb-1 d-block" for="pairing-password"
+            ><small class="font-weight-bold">Dashboard password</small></label
+          >
+          <b-form-input
+            id="pairing-password"
+            ref="pairingPassword"
+            v-model="password"
+            type="password"
+            size="sm"
+            class="neu-input mb-1"
+            autocomplete="current-password"
+            @keyup.enter="startPairing"
+          ></b-form-input>
+          <small class="text-muted d-block mb-2"
+            >Asked again because a paired phone keeps its access after you sign
+            out.</small
+          >
+          <div class="d-flex justify-content-end">
+            <b-button
+              variant="link"
+              size="sm"
+              class="mr-2"
+              @click="cancelPassword"
+              >Cancel</b-button
+            >
+            <b-button
+              variant="success"
+              size="sm"
+              :disabled="starting || !password"
+              @click="startPairing"
+              >{{ starting ? "Starting…" : "Show pairing code" }}</b-button
+            >
+          </div>
+        </div>
         <div class="d-flex justify-content-between align-items-center mt-3">
           <small class="text-muted"
             >Get the app:
@@ -146,7 +183,11 @@
               >Android</a
             ></small
           >
-          <b-button variant="success" :disabled="starting" @click="startPairing"
+          <b-button
+            v-if="!askingPassword"
+            variant="success"
+            :disabled="starting"
+            @click="pairClicked"
             >{{ starting ? "Starting…" : "Pair a phone" }}</b-button
           >
         </div>
@@ -183,10 +224,15 @@ export default {
       editing: "",
       editLabel: "",
       busyId: "",
-      confirmId: ""
+      confirmId: "",
+      askingPassword: false,
+      password: ""
     };
   },
   computed: {
+    passwordEnabled() {
+      return Boolean(this.$store.state.system.auth.passwordEnabled);
+    },
     countdown() {
       if (!this.pairing) {
         return "";
@@ -258,6 +304,8 @@ export default {
       this.stopPairing();
       this.editing = "";
       this.confirmId = "";
+      this.askingPassword = false;
+      this.password = "";
     },
     async refresh() {
       this.loading = true;
@@ -271,12 +319,38 @@ export default {
       this.error = "Unable to load the paired phones.";
       return null;
     },
+    pairClicked() {
+      this.error = "";
+      this.notice = "";
+      if (!this.passwordEnabled) {
+        this.startPairing();
+        return;
+      }
+      this.askingPassword = true;
+      this.$nextTick(() => {
+        const input = this.$refs.pairingPassword;
+        if (input && input.focus) {
+          input.focus();
+        }
+      });
+    },
+    cancelPassword() {
+      this.askingPassword = false;
+      this.password = "";
+      this.error = "";
+    },
     async startPairing() {
+      if (this.starting) {
+        return;
+      }
       this.starting = true;
       this.error = "";
       this.notice = "";
       try {
-        const res = await API.post(`${process.env.VUE_APP_API_BASE_URL}/v1/devices`, {});
+        const body = this.passwordEnabled ? { password: this.password } : {};
+        const res = await API.post(`${process.env.VUE_APP_API_BASE_URL}/v1/devices`, body);
+        this.askingPassword = false;
+        this.password = "";
         this.pairing = res.data;
         this.now = Date.now();
         this.expiresAt = this.now + (res.data.expiresInMs || this.pairing.pairing.exp - this.now);

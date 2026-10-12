@@ -92,6 +92,9 @@ export default {
       if (this.channel.status === "Closing") {
         return "danger";
       }
+      if (this.channel.status === "Needs update") {
+        return "warning";
+      }
       if (this.channel.status === "Unkown") {
         return "danger";
       }

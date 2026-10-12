@@ -28,6 +28,7 @@ const path = require("path");
 
 const { NodeError, ValidationError } = require("models/errors.js");
 const macaroon = require("utils/macaroon.js");
+const { createStepUp } = require("logic/stepUp.js");
 
 const MAX_LABEL = 64;
 const MAX_PERMISSIONS = 400;
@@ -217,26 +218,13 @@ function createMacaroons({
     return [...out.values()];
   }
 
-  // Refused with 403, not 401: the page takes a 401 to mean the session
-  // ended and goes back to the sign-in screen.
-  async function checkPassword(password) {
-    if (!auth.passwordConfigured()) {
-      return;
-    }
-    if (typeof password !== "string" || password.length === 0) {
-      throw new ValidationError("Enter your dashboard password to make a macaroon.", 403);
-    }
-    const r = await auth.guardedVerify(password);
-    if (!r.ok) {
-      if (r.reason === "locked") {
-        throw new ValidationError(
-          `Too many wrong passwords. Try again in ${Math.ceil(r.retryAfter || 1)} seconds.`,
-          429
-        );
-      }
-      throw new ValidationError("That is not your dashboard password.", 403);
-    }
+  // A macaroon outlasts the session that makes it, so the dashboard password
+  // is asked again (see logic/stepUp.js).
+  const stepUp = createStepUp({ auth });
+  function checkPassword(password) {
+    return stepUp.requirePassword(password, "make a macaroon");
   }
+
 
   // A root key id LND has not used: random, never 0.
   function newRootKeyId(taken) {

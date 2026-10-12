@@ -3,6 +3,7 @@
 const express = require("express");
 
 const devices = require("logic/devices.js");
+const stepUp = require("logic/stepUp.js");
 const access = require("logic/mobileAccess.js");
 const safeHandler = require("utils/safeHandler");
 const x509 = require("utils/x509.js");
@@ -26,6 +27,9 @@ router.get(
 router.post(
   "/",
   safeHandler(async (req, res) => {
+    // The phone's key outlasts this session, so the dashboard password is
+    // asked again before the code that mints it is made.
+    await stepUp.requirePassword((req.body || {}).password, "pair a phone");
     // A code for a listener that is not serving would only fail on the phone.
     const problem = access.getListenerProblem();
     if (problem) {

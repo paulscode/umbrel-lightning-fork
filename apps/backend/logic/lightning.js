@@ -651,6 +651,12 @@ const getChannels = async () => {
         channel.localBalance = channel.channel.localBalance;
         channel.remoteBalance = channel.channel.remoteBalance;
         channel.unifiedSigs = channel.channel.unifiedSigs;
+        // The funding output was spent by a transaction this lnd doesn't
+        // recognise (a splice made by a newer version, for instance): the
+        // channel is listed as waiting to close but nothing is closing it.
+        channel.fundingSpentUnknown = String(channel.channel.chanStatusFlags || "").includes(
+          "ChanStatusFundingSpentUnknown"
+        );
   
         delete channel.channel;
   

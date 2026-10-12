@@ -335,11 +335,20 @@ const actions = {
           ].indexOf(channel.type) > -1
         ) {
           pendingBalance += localBalance;
-          channel.status = "Closing";
+          if (channel.fundingSpentUnknown) {
+            // Not closing: its funds were moved by a transaction this
+            // version doesn't recognise, and nothing will happen to them
+            // until Lightning Fork is updated.
+            channel.status = "Needs update";
+            channel.name = "Needs update";
+            channel.purpose = "A channel this version of Lightning Fork can't follow";
+          } else {
+            channel.status = "Closing";
 
-          // Lnd doesn't provide initiator or autopilot data via rpc. So, we just display a generic closing message.
-          channel.name = "Closing Channel";
-          channel.purpose = "A channel that is in the process of closing";
+            // Lnd doesn't provide initiator or autopilot data via rpc. So, we just display a generic closing message.
+            channel.name = "Closing Channel";
+            channel.purpose = "A channel that is in the process of closing";
+          }
         } else {
           channel.status = "Unknown";
         }

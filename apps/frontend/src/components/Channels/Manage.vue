@@ -31,6 +31,13 @@
 
     <transition name="mode-change" mode="out-in">
       <div v-if="!isReviewingChannelClose">
+        <b-alert v-if="channel.fundingSpentUnknown" variant="warning" show>
+          This channel's funds were moved by a transaction this version of
+          Lightning Fork doesn't recognise, most likely a resize made with a
+          newer version. Nothing will be closed or swept until you update
+          Lightning Fork from the StartOS Marketplace, the Umbrel App Store or
+          the release page.
+        </b-alert>
         <div
           class="d-flex justify-content-between align-items-center mt-1 mb-3"
         >
@@ -273,7 +280,8 @@ export default {
     canCloseChannel() {
       if (
         this.channel.status === "Opening" ||
-        this.channel.status === "Closing"
+        this.channel.status === "Closing" ||
+        this.channel.status === "Needs update"
       ) {
         return false;
       }
