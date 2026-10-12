@@ -477,9 +477,11 @@ async function getOnChainTransactions() {
       }
     }
   
+    // A splice moves a channel's funding output: the transaction that
+    // opened it is named by its original channel point, open or closed.
     const openChannelTransactions = [];
     for (const channel of openChannels) {
-      const openTransaction = channel.channelPoint.split(":").shift();
+      const openTransaction = (channel.originalChannelPoint || channel.channelPoint).split(":").shift();
       openChannelTransactions.push(openTransaction);
     }
   
@@ -488,7 +490,7 @@ async function getOnChainTransactions() {
       const closedTransaction = channel.closingTxHash.split(":").shift();
       closedChannelTransactions.push(closedTransaction);
   
-      const openTransaction = channel.channelPoint.split(":").shift();
+      const openTransaction = (channel.originalChannelPoint || channel.channelPoint).split(":").shift();
       openChannelTransactions.push(openTransaction);
     }
   
@@ -496,7 +498,11 @@ async function getOnChainTransactions() {
     for (const transaction of transactions) {
       const txHash = transaction.txHash;
   
-      if (openChannelTransactions.includes(txHash)) {
+      // A channel resize first: its transaction spends a channel's funding
+      // output like a close and creates one like an open.
+      if (isSpliceLabel(transaction.label)) {
+        transaction.type = "CHANNEL_RESIZE";
+      } else if (openChannelTransactions.includes(txHash)) {
         transaction.type = "CHANNEL_OPEN";
       } else if (closedChannelTransactions.includes(txHash)) {
         transaction.type = "CHANNEL_CLOSE";
@@ -528,6 +534,11 @@ async function getOnChainTransactions() {
   } catch(e) {
     console.error('getOnChainTransactions error: ', e.message)
   }
+}
+
+// A splice's wallet label, "splice:<scid>:<in|out>".
+function isSpliceLabel(label) {
+  return String(label || "").startsWith("splice:");
 }
 
 function getTxnHashFromChannelPoint(channelPoint) {
@@ -683,8 +694,11 @@ const getChannels = async () => {
             // Defaulting to 1 just in case.
             channel.remainingConfirmations = 1;
           } else if (channel.type === "PENDING_OPEN_CHANNEL") {
+            // The node says how many it waits for; older nodes don't.
             channel.remainingConfirmations =
-              constants.LN_REQUIRED_CONFIRMATIONS - numConfirmations;
+              channel.confirmationsUntilActive > 0
+                ? channel.confirmationsUntilActive
+                : Math.max(0, constants.LN_REQUIRED_CONFIRMATIONS - numConfirmations);
           }
         }
       }

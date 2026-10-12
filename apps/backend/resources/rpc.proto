@@ -465,6 +465,19 @@ service Lightning {
         };
     }
 
+    /** lncli: `splice estimate`
+    EstimateSplice reports what adding funds to, or moving funds out of, an
+    open channel would cost and allow, for a splice this node would start.
+    */
+    rpc EstimateSplice (EstimateSpliceRequest) returns (EstimateSpliceResponse);
+
+    /** lncli: `splice in`, `splice out`
+    SpliceChannel adds funds from the wallet to an open channel, or moves funds
+    out of it to an address, without closing it. The stream reports progress
+    until the splice locks or ends.
+    */
+    rpc SpliceChannel (SpliceChannelRequest) returns (stream SpliceUpdate);
+
     /** lncli: `abandonchannel`
     AbandonChannel removes all channel state from the database except for a
     close summary. This method can be used to get rid of permanently unusable
@@ -1308,8 +1321,279 @@ message Channel {
 
     /// Whether the channel's signatures bind to this chain (option_unified_sigs).
     bool unified_sigs = 1001 [json_name = "unified_sigs"];
+
+    /// Whether this node can start a splice now: "ok", or why not.
+    string splice_status = 1002 [json_name = "splice_status"];
+
+    /// The splice in progress, if any.
+    PendingSplice pending_splice = 1003 [json_name = "pending_splice"];
+
+    /// The most recent splice that ended, if any.
+    LastSplice last_splice = 1004 [json_name = "last_splice"];
+
+    /// The outpoint the channel was opened with; channel_point is the current one.
+    string original_channel_point = 1005 [json_name = "original_channel_point"];
+
+    /// The short channel id the channel was opened with; chan_id is the current one.
+    uint64 original_chan_id = 1006 [json_name = "original_chan_id"];
 }
 
+/*
+A splice that has started and not yet locked or ended.
+*/
+message PendingSplice {
+    // Which side started the splice.
+    Initiator initiator = 1;
+
+    /*
+    The splice's state: "preparing", "negotiating", "signed", "broadcast",
+    "confirmed" (at least one confirmation, waiting for the lock depth).
+    */
+    string state = 2;
+
+    // The change to this node's balance in the channel, in satoshis.
+    int64 local_delta_sat = 3;
+
+    // The change to the peer's balance in the channel, in satoshis.
+    int64 remote_delta_sat = 4;
+
+    // The splice transaction's fee.
+    int64 fee_sat = 5;
+
+    // The part of the fee this node pays.
+    int64 our_fee_sat = 6;
+
+    // The splice transaction's fee rate.
+    uint64 sat_per_vbyte = 7;
+
+    // The splice transaction's id, once known.
+    string txid = 8;
+
+    // The height at which this node first broadcast it.
+    uint32 broadcast_height = 9;
+
+    // The splice transaction's confirmations.
+    uint32 confirmations = 10;
+
+    // The confirmations at which the splice locks.
+    uint32 lock_depth = 11;
+
+    // Whether this node has sent splice_locked.
+    bool we_locked = 12;
+
+    // Whether the peer has sent splice_locked.
+    bool peer_locked = 13;
+
+    /*
+    Whether the splice can no longer confirm: one of its inputs was spent by
+    another transaction, now buried. The channel keeps working on its
+    previous funding output.
+    */
+    bool dead = 14;
+
+    /*
+    What is known of the transaction's relay: "in_mempool", "rejected" (see
+    relay_reason), "unknown".
+    */
+    string relay_status = 15;
+
+    // The backend's reason when relay_status is "rejected".
+    string relay_reason = 16;
+
+    // The funding outpoint the splice moves the channel to.
+    string new_channel_point = 17;
+
+    // The channel's capacity once the splice locks.
+    int64 new_capacity_sat = 18;
+}
+
+/*
+The most recent splice of a channel that ended.
+*/
+message LastSplice {
+    // Which side started the splice.
+    Initiator initiator = 1;
+
+    // The change to this node's balance in the channel, in satoshis.
+    int64 local_delta_sat = 2;
+
+    // The change to the peer's balance in the channel, in satoshis.
+    int64 remote_delta_sat = 3;
+
+    // The splice transaction's id, if one was agreed.
+    string txid = 4;
+
+    // When the splice locked or ended, in Unix seconds.
+    int64 time = 5;
+
+    // How it ended: "locked", "aborted", "dead".
+    string outcome = 6;
+
+    /*
+    Why it did not lock: one of this node's refusal codes, or the peer's
+    reason (printable ASCII, at most 160 bytes, from the peer: show it as
+    the peer's words).
+    */
+    string reason = 7;
+
+    // Whether reason is the peer's text rather than a refusal code.
+    bool reason_from_peer = 8;
+}
+
+enum SpliceDirection {
+    // Add funds from this node's wallet to the channel.
+    SPLICE_IN = 0;
+
+    // Move funds out of the channel to an address.
+    SPLICE_OUT = 1;
+}
+
+message EstimateSpliceRequest {
+    // The channel, by its current or original channel point.
+    ChannelPoint channel_point = 1;
+
+    // Which way the funds move.
+    SpliceDirection direction = 2;
+
+    // The amount to add or move out. Ignored with use_max.
+    int64 amount_sat = 3;
+
+    /*
+    Add everything the wallet can spend after the fee, or move out everything
+    this node's balance allows after the fee and reserves.
+    */
+    bool use_max = 4;
+
+    // The fee rate. Zero: from target_conf.
+    uint64 sat_per_vbyte = 5;
+
+    // The confirmation target for the fee rate. Zero with no rate: 6.
+    int32 target_conf = 6;
+
+    /*
+    For SPLICE_OUT, the address the funds go to. Empty: a new address of this
+    node's wallet.
+    */
+    string addr = 7;
+}
+
+message EstimateSpliceResponse {
+    // The splice transaction's fee, all of it paid by this node.
+    int64 fee_sat = 1;
+
+    // The splice transaction's size, for working out fees at other rates.
+    int64 vbytes = 2;
+
+    // The fee rate used.
+    uint64 sat_per_vbyte = 3;
+
+    // The amount used: the one asked for, or the maximum.
+    int64 amount_sat = 4;
+
+    // The smallest amount accepted.
+    int64 min_sat = 5;
+
+    // The most that can be added from the wallet at this fee rate.
+    int64 max_in_sat = 6;
+
+    // The most that can be moved out at this fee rate.
+    int64 max_out_sat = 7;
+
+    // The lowest fee rate accepted without forcing it.
+    uint64 min_sat_per_vbyte = 8;
+
+    /*
+    What min_sat_per_vbyte is based on: "estimate", or "relay_minimum" when
+    the backend has no fee estimate.
+    */
+    string fee_estimate_source = 9;
+
+    // The wallet balance kept back for fee bumping of anchor channels.
+    int64 anchor_reserve_sat = 10;
+
+    // The channel's capacity after the splice.
+    int64 new_capacity_sat = 11;
+
+    // This node's balance in the channel after the splice.
+    int64 new_local_sat = 12;
+
+    // The confirmations at which the splice would lock.
+    uint32 lock_depth = 13;
+
+    // Whether the destination belongs to this node's default wallet account.
+    bool destination_is_ours = 14;
+
+    /*
+    Empty when the splice is possible; otherwise why not: "insufficient_funds",
+    "immature_inputs", "below_min", "above_max_out", "fee_below_floor",
+    "reserve_on_change", "close_address_set", "node_cap", or one of
+    Channel.splice_status's values.
+    */
+    string refusal_code = 15;
+}
+
+message SpliceChannelRequest {
+    // The channel, by its current or original channel point.
+    ChannelPoint channel_point = 1;
+
+    // Which way the funds move.
+    SpliceDirection direction = 2;
+
+    // The amount to add or move out. Ignored with use_max.
+    int64 amount_sat = 3;
+
+    // As in EstimateSpliceRequest.
+    bool use_max = 4;
+
+    // The fee rate. Zero: from target_conf.
+    uint64 sat_per_vbyte = 5;
+
+    // The confirmation target for the fee rate. Zero with no rate: 6.
+    int32 target_conf = 6;
+
+    /*
+    For SPLICE_OUT, the address the funds go to. Empty: a new address of this
+    node's wallet.
+    */
+    string addr = 7;
+
+    /*
+    Accept a fee rate below min_sat_per_vbyte. Never below the minimum relay
+    fee.
+    */
+    bool force_low_fee = 8;
+}
+
+message SpliceUpdate {
+    /*
+    The splice's state: "preparing", "negotiating", "signed", "broadcast",
+    "confirmed", "locked", "aborted".
+    */
+    string state = 1;
+
+    // The splice transaction's id, from "signed" on.
+    string txid = 2;
+
+    // The funding outpoint the splice moves the channel to, from "signed" on.
+    string new_channel_point = 3;
+
+    // Confirmations, from "confirmed" on.
+    uint32 confirmations = 4;
+
+    // For "aborted": a refusal code, or the peer's reason.
+    string reason = 5;
+
+    // Whether reason is the peer's text rather than a refusal code.
+    bool reason_from_peer = 6;
+}
+
+
+enum Initiator {
+    INITIATOR_UNKNOWN = 0;
+    INITIATOR_LOCAL = 1;
+    INITIATOR_REMOTE = 2;
+    INITIATOR_BOTH = 3;
+}
 
 message ListChannelsRequest {
     bool active_only = 1;
@@ -1361,6 +1645,9 @@ message ChannelCloseSummary {
 
     /// Details on how the channel was closed.
     ClosureType close_type = 10 [json_name = "close_type"];
+
+    /// The outpoint the channel was opened with, when a splice moved it.
+    string original_channel_point = 1002 [json_name = "original_channel_point"];
 }
 
 message ClosedChannelsRequest {
@@ -1646,6 +1933,9 @@ message PendingChannelsResponse {
 
         /// Whether the channel's signatures bind to this chain (option_unified_sigs).
         bool unified_sigs = 1001 [json_name = "unified_sigs"];
+
+        /// The outpoint the channel was opened with, when a splice moved it.
+        string original_channel_point = 1002 [json_name = "original_channel_point"];
     }
 
     message PendingOpenChannel {
@@ -1673,6 +1963,9 @@ message PendingChannelsResponse {
         transaction. This value can later be updated once the channel is open.
         */
         int64 fee_per_kw = 6 [ json_name = "fee_per_kw" ];
+
+        /// Confirmations left before the channel is usable.
+        uint32 confirmations_until_active = 7 [ json_name = "confirmations_until_active" ];
     }
 
     message WaitingCloseChannel {
@@ -1745,6 +2038,7 @@ message ChannelEventUpdate {
         ChannelCloseSummary closed_channel = 2 [ json_name = "closed_channel" ];
         ChannelPoint active_channel = 3 [ json_name = "active_channel" ];
         ChannelPoint inactive_channel = 4 [ json_name = "inactive_channel" ];
+        SpliceEvent splice_event = 1001 [ json_name = "splice_event" ];
     }
 
     enum UpdateType {
@@ -1752,10 +2046,39 @@ message ChannelEventUpdate {
          CLOSED_CHANNEL = 1;
          ACTIVE_CHANNEL = 2;
          INACTIVE_CHANNEL = 3;
+         SPLICE_EVENT = 1001;
     }
 
     UpdateType type = 5 [ json_name = "type" ];
 }
+
+/*
+A splice of a channel moved on, or a channel's funding output was spent by a
+transaction this node doesn't recognise.
+*/
+message SpliceEvent {
+    // The channel's current funding outpoint.
+    string channel_point = 1;
+
+    // The outpoint the channel was opened with.
+    string original_channel_point = 2;
+
+    /*
+    What happened: "started", "signed", "locked", "aborted", "dead",
+    "funding_spent_unknown".
+    */
+    string kind = 3;
+
+    // The splice transaction's id, when there is one.
+    string txid = 4;
+
+    // For "aborted": a refusal code, or the peer's reason.
+    string reason = 5;
+
+    // Whether reason is the peer's text rather than a refusal code.
+    bool reason_from_peer = 6;
+}
+
 
 message WalletBalanceRequest {
 }
@@ -1796,6 +2119,12 @@ message ChannelBalanceResponse {
 
     /// The local balance in channels still opening.
     Amount pending_open_local_balance = 7;
+
+    /// This node's contributions to splices that have not locked.
+    int64 pending_splice_in_sat = 1002 [json_name = "pending_splice_in_sat"];
+
+    /// Outputs to this node's wallet in splice transactions not yet confirmed.
+    int64 pending_splice_to_wallet_sat = 1003 [json_name = "pending_splice_to_wallet_sat"];
 }
 
 message Amount {

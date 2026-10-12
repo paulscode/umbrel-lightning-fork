@@ -29,8 +29,12 @@ router.post('/lnd-config', safeHandler(async (req, res) => {
     const oldSettingsJson = await diskService.readJsonFile(constants.JSON_SETTINGS_FILE);
     const oldUmbrelLndConfFile = await diskService.readUtf8File(constants.UMBREL_LND_CONF_FILEPATH);
 
+    // Whether the user chose the resize setting, so that a later default
+    // doesn't override a choice (the value itself is written either way).
+    const marks = req.body.lndConfig.protocolSpliceChosen === true ? { spliceChosen: true } : {};
+
     try {
-        await configLogic.writeLndConfig(newLndConfig);
+        await configLogic.writeLndConfig(newLndConfig, undefined, marks);
         await lndLogic.stopDaemon();
         return res.json({ status: 'success' });
     } catch (error) {
@@ -291,6 +295,11 @@ function validateSettings(settings) {
     // protocol.wumbo-channels (larger channels)
     if (typeof wumboChannels !== "boolean") {
         errors.push(booleanError("Larger Channels"));
+    }
+
+    // protocol.splice (resizing channels)
+    if (typeof settings["protocol.splice"] !== "boolean") {
+        errors.push(booleanError("Resize Channels"));
     }
 
     // BOLT

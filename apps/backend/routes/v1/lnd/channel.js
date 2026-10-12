@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const lightningLogic = require("logic/lightning.js");
+const spliceLogic = require("logic/splice.js");
 const ValidationError = require("models/errors.js").ValidationError;
 const safeHandler = require("utils/safeHandler");
 const validator = require("utils/validator.js");
@@ -167,6 +168,20 @@ router.post(
       .openChannel(pubKey, ip, port, amt, satPerByte, name, purpose, isPrivate)
       .then(channel => res.json(channel));
   })
+);
+
+// What a resize would cost and allow. Purely local.
+router.post(
+  "/splice/estimate",
+  safeHandler(async (req, res) => res.json(await spliceLogic.estimate(req.body)))
+);
+
+// Starts a resize; answers once it is agreed with the peer ("signed",
+// "broadcast") or refused ("aborted", with the reason and whether it is the
+// peer's own text).
+router.post(
+  "/splice",
+  safeHandler(async (req, res) => res.json(await spliceLogic.start(req.body)))
 );
 
 module.exports = router;

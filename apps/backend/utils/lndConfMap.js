@@ -43,6 +43,7 @@ module.exports = {
     cachesChannelCacheSize: 'caches.channel-cache-size',
 // protocol
     protocolWumboChannels: 'protocol.wumbo-channels',
+    protocolSplice: 'protocol.splice',
 // bolt
     dbBoltAutoCompact: 'db.bolt.auto-compact',
     dbBoltAutoCompactMinAge: 'db.bolt.auto-compact-min-age',

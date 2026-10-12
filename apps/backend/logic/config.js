@@ -139,14 +139,30 @@ const deriveConfigFile = async (configObject, bridge = {}) => {
 // writes umbrel-lnd.conf and settings.json to disk
 // pass this function DEFAULT_CONFIG to reset the config to defaults
 // The bridge section is carried over unless a new one is given.
-async function writeLndConfig(configObject, bridge) {
+// marks are what the user chose rather than took by default (spliceChosen),
+// kept across writes: a later default must not override a choice.
+async function readMarks() {
+  try {
+    if (!(await diskService.fileExists(constants.JSON_SETTINGS_FILE))) {
+      return {};
+    }
+    const settings = await diskService.readJsonFile(constants.JSON_SETTINGS_FILE);
+    return settings && typeof settings.marks === "object" && settings.marks ? settings.marks : {};
+  } catch (error) {
+    return {};
+  }
+}
+
+async function writeLndConfig(configObject, bridge, marks) {
   const bridgeSettings = bridge === undefined ? await readBridgeSettings() : bridge;
   const lndConfigString = await deriveConfigFile(configObject, bridgeSettings);
+  const allMarks = { ...(await readMarks()), ...(marks || {}) };
   await Promise.all([
     diskService.writePlainTextFile(constants.UMBREL_LND_CONF_FILEPATH, lndConfigString),
     diskService.writeJsonFile(constants.JSON_SETTINGS_FILE, {
       lnd: Object.keys(configObject).length > 0 ? configObject : DEFAULT_CONFIG,
       ...(Object.keys(bridgeSettings).length > 0 ? {bridge: bridgeSettings} : {}),
+      ...(Object.keys(allMarks).length > 0 ? {marks: allMarks} : {}),
     })
   ]);
 }

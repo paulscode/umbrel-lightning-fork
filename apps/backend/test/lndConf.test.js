@@ -16,9 +16,10 @@ const stub = (name, exports) => {
 stub("utils/logger.js", { info() {}, warn() {}, error() {}, debug() {} });
 
 const written = [];
+const writtenMarks = [];
 stub("logic/config.js", {
   normalizeSettings: (s) => s,
-  writeLndConfig: async (config) => { written.push(config); },
+  writeLndConfig: async (config, bridge, marks) => { written.push(config); writtenMarks.push(marks); },
 });
 stub("logic/lightning.js", { stopDaemon: async () => {} });
 stub("services/disk.js", {
@@ -94,4 +95,25 @@ test("generate refuses a line break or a strange key as a last resort", () => {
   assert.throws(() => lndConfig.generate({ externalip: ["1.2.3.4", "5.6.7.8\nx=y"] }), /line break/);
   assert.throws(() => lndConfig.generate({ "a b": "c" }), /key/);
   assert.match(lndConfig.generate({ alias: "fine = name" }), /\nalias=fine = name$/);
+});
+
+test("resizing channels is a boolean setting, its choice marked", async () => {
+  written.length = 0;
+  writtenMarks.length = 0;
+  let r = await post({ ...camel, protocolSplice: true, protocolSpliceChosen: true });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(written[0]["protocol.splice"], true);
+  assert.equal(written[0].protocolSpliceChosen, undefined, "the mark is no lnd.conf line");
+  assert.deepEqual(writtenMarks[0], { spliceChosen: true });
+  assert.match(lndConfig.generate(written[0]), /^protocol\.splice=true$/m);
+
+  // Saved without touching it: no mark.
+  r = await post({ ...camel });
+  assert.equal(r.status, 200);
+  assert.deepEqual(writtenMarks[1], {});
+  assert.equal(written[1]["protocol.splice"], false);
+
+  r = await post({ ...camel, protocolSplice: "yes" });
+  assert.equal(r.status, 400);
+  assert.ok(r.body.validationErrors.some((e) => /Resize Channels/.test(e)));
 });
