@@ -3,8 +3,14 @@
 const lndService = require("services/lnd.js");
 const bitcoindService = require("services/bitcoind.js");
 const ValidationError = require("models/errors.js").ValidationError;
+const { createIdempotency } = require("utils/idempotency.js");
 
 const PEER_TEXT_MAX = 160; // eslint-disable-line no-magic-numbers
+// A custom fee rate's ceiling, as the mobile API's: a typo of a few zeros
+// would otherwise spend the amount on fees.
+const MAX_SAT_PER_VBYTE = 10000; // eslint-disable-line no-magic-numbers
+// How long a start waits for the node before answering "uncertain".
+const START_WAIT_MS = 90 * 1000; // eslint-disable-line no-magic-numbers
 const BLOCK_SAMPLE = 144; // eslint-disable-line no-magic-numbers
 const BLOCK_MINUTES_TTL_MS = 10 * 60 * 1000; // eslint-disable-line no-magic-numbers
 
@@ -35,6 +41,9 @@ function spliceOptions(body) {
   const satPerVbyte = num(b.satPerVbyte);
   if (!Number.isSafeInteger(satPerVbyte) || satPerVbyte < 0) {
     throw new ValidationError("Fee rate must be a whole number of sat/vB.");
+  }
+  if (satPerVbyte > MAX_SAT_PER_VBYTE) {
+    throw new ValidationError(`Fee rate must be at most ${MAX_SAT_PER_VBYTE} sat/vB.`);
   }
   const targetConf = num(b.targetConf);
   if (!Number.isSafeInteger(targetConf) || targetConf < 0 || targetConf > 1008) { // eslint-disable-line no-magic-numbers
@@ -142,9 +151,34 @@ async function start(body) {
   }
 }
 
+// Each request id starts one resize: a browser that lost the answer asks
+// again with the same id and gets the first start's outcome instead of a
+// second resize. An answer the node hasn't given within the wait is
+// "uncertain" (the route sends a 504); asking again with the id gives the
+// outcome once it is known.
+const starts = createIdempotency({ ttlMs: 60 * 60 * 1000 }); // eslint-disable-line no-magic-numbers
+
+async function startOnce(body, { waitMs = START_WAIT_MS } = {}) {
+  const { requestId, ...rest } = body || {};
+  // Checked first: a bad request is a 400, and never takes the id.
+  const fingerprint = JSON.stringify(spliceOptions(rest));
+  const outcome = starts.run("dashboard", requestId, () => start(rest), fingerprint);
+  let timer;
+  const wait = new Promise((resolve) => {
+    timer = setTimeout(() => resolve({ state: "uncertain" }), waitMs);
+  });
+  try {
+    return await Promise.race([outcome, wait]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 module.exports = {
   estimate,
   start,
+  startOnce,
+  MAX_SAT_PER_VBYTE,
   spliceOptions,
   peerText,
   recentBlockMinutes,

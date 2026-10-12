@@ -176,6 +176,10 @@
           {{ minutesText(estimate.lockMinutes) }}, longer if
           {{ peerName }} waits for more).
         </p>
+        <p class="small text-muted">
+          {{ estimate.amountSat | btc }} BTC,
+          {{ estimate.amountSat | satsToFiat }}
+        </p>
         <p>
           Network fee: <b>{{ estimate.feeSat | localize }} sats</b> ({{
             estimate.satPerVbyte
@@ -603,10 +607,16 @@ export default {
     },
     async start() {
       this.step = "agreeing";
+      // One id per press of the button: a repeat after a lost answer is
+      // the same start, not a second resize.
+      const requestId = `resize-${Date.now().toString(36)}-${Math.random()
+        .toString(36)
+        .slice(2, 10)}`;
       try {
         const res = await this.post(
           "splice",
           this.request({
+            requestId,
             satPerVbyte: this.estimate.satPerVbyte,
             amountSat: this.estimate.amountSat,
             useMax: false

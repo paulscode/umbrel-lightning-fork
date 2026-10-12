@@ -48,6 +48,10 @@ test("the buttons explain why they can't be used, or hide", () => {
   assert.match(resize.statusText("disabled"), /Advanced Settings/);
   assert.match(resize.statusText("disabled", { platform: "startos" }), /StartOS/);
   assert.ok(resize.statusText("something_new").length > 0);
+  for (const code of ["peer_not_locked", "peer_not_announcing", "peer_misbehaved", "chain_not_synced"]) {
+    assert.notEqual(resize.statusText(code), resize.statusText("something_new"), code);
+  }
+  assert.match(resize.statusText("peer_not_locked"), /force close/);
 });
 
 const pending = (over) => ({

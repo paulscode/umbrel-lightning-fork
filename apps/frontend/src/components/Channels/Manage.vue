@@ -110,6 +110,15 @@
             </div>
           </b-alert>
           <p v-else class="mb-0">{{ pendingSummary }}</p>
+          <small
+            v-if="pendingSplice.relayStatus === 'rejected' && !pendingSplice.dead"
+            class="d-block text-warning mt-1"
+          >
+            Your node's mempool refused the transaction<template
+              v-if="relayReason"
+            >: {{ relayReason }}</template>. It is offered again at every
+            block.
+          </small>
           <small v-if="slowSplice" class="d-block text-muted mt-1">
             This is taking longer than usual. The resize's fee rate is below
             what the network asks for now; it confirms once blocks have room.
@@ -447,6 +456,11 @@ export default {
       }
       const depth = Number(this.pendingSplice.lockDepth) || 0;
       return Math.max(0, depth - (Number(this.pendingSplice.confirmations) || 0));
+    },
+    // The backend's reason, kept short.
+    relayReason() {
+      const r = String((this.pendingSplice && this.pendingSplice.relayReason) || "");
+      return r.length > 160 ? `${r.slice(0, 160)}…` : r; // eslint-disable-line no-magic-numbers
     },
     // Six blocks since it went out, unconfirmed, at a rate under
     // what the Low level asks now.

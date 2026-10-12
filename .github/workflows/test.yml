@@ -1,6 +1,6 @@
 name: Test
 
-# The backend's tests on every push; and the
+# The backend's and the frontend helpers' tests on every push; and the
 # image itself built (amd64, not pushed), which is what catches a frontend
 # that no longer compiles. Images are published by hand with buildx when a
 # release is cut; nothing here pushes one.
@@ -29,6 +29,19 @@ jobs:
       - name: Backend tests
         working-directory: apps/backend
         run: node --test test/
+      # The frontend's helpers (wording and arithmetic) load without the
+      # Vue build.
+      - name: Frontend helper tests
+        working-directory: apps/frontend
+        run: node --test test/
+      # Text from peers and services reaches the page (a peer's reason for
+      # stopping a resize, invoice descriptions): never as HTML.
+      - name: No v-html
+        run: |
+          if grep -rn "v-html" apps/frontend/src; then
+            echo "v-html renders text as HTML; use text interpolation" >&2
+            exit 1
+          fi
 
   image:
     runs-on: ubuntu-24.04

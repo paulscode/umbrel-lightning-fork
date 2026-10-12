@@ -99,6 +99,14 @@ export function statusText(status, { platform } = {}) {
       return "Channels that were usable before their first confirmation can't be resized yet.";
     case "pending":
       return "A resize is in progress. You can start another once it's done.";
+    case "peer_not_locked":
+      return "Your node considers the last resize done, but the peer still hasn't confirmed it, long after it was deep enough. The channel works at its old size meanwhile. If the peer never does, the only way out is to force close the channel.";
+    case "peer_not_announcing":
+      return "The resized channel isn't announced to the network yet: the peer hasn't sent its part. Payments from other nodes can't use it until then. If this lasts, consider closing the channel.";
+    case "peer_misbehaved":
+      return "This peer broke an earlier resize, so resizing this channel is refused until your node restarts.";
+    case "chain_not_synced":
+      return "Your node is still catching up with the chain. Try again once it is synced.";
     case "disabled":
       return platform === "startos"
         ? "Resizing is turned off. Turn it on in Lightning Fork's Actions > Channel Settings in StartOS."

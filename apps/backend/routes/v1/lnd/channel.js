@@ -178,10 +178,15 @@ router.post(
 
 // Starts a resize; answers once it is agreed with the peer ("signed",
 // "broadcast") or refused ("aborted", with the reason and whether it is the
-// peer's own text).
+// peer's own text), or with a 504 "uncertain" when the node is slow to say.
+// A requestId makes a repeat answer for the first start instead of starting
+// another.
 router.post(
   "/splice",
-  safeHandler(async (req, res) => res.json(await spliceLogic.start(req.body)))
+  safeHandler(async (req, res) => {
+    const result = await spliceLogic.startOnce(req.body);
+    res.status(result.state === "uncertain" ? 504 : 200).json(result); // eslint-disable-line no-magic-numbers
+  })
 );
 
 module.exports = router;

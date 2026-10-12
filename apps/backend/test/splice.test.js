@@ -153,3 +153,32 @@ test("an open channel's resize fields pass through, with this chain's pace", asy
     openChannels = () => [{ channelPoint: `${TXID}:0`, originalChannelPoint: `${OPEN_TXID}:0` }];
   }
 });
+
+test("a fee rate above the ceiling is refused", () => {
+  assert.throws(() => splice.spliceOptions({ ...base, satPerVbyte: splice.MAX_SAT_PER_VBYTE + 1 }), /at most/);
+  assert.equal(splice.spliceOptions({ ...base, satPerVbyte: splice.MAX_SAT_PER_VBYTE }).satPerVbyte, splice.MAX_SAT_PER_VBYTE);
+});
+
+test("a request id starts one resize; a slow node is uncertain, then known", async () => {
+  let release;
+  spliceResult = new Promise((resolve) => {
+    release = resolve;
+  });
+  const before = calls.splice.length;
+  const body = { ...base, requestId: "resize-0001" };
+
+  const first = await splice.startOnce(body, { waitMs: 20 });
+  assert.deepEqual(first, { state: "uncertain" });
+
+  // Asked again with the id: the same start, not another.
+  release({ state: "broadcast", txid: TXID, newChannelPoint: `${TXID}:0` });
+  const again = await splice.startOnce(body, { waitMs: 1000 });
+  assert.equal(again.state, "broadcast");
+  assert.equal(calls.splice.length, before + 1);
+
+  // The id with other parameters is refused.
+  await assert.rejects(splice.startOnce({ ...body, amountSat: 1 }, { waitMs: 20 }), /different request/);
+  // A bad request never takes an id.
+  assert.throws(() => splice.spliceOptions({ ...body, direction: "x" }));
+  spliceResult = null;
+});
