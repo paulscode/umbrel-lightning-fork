@@ -60,3 +60,22 @@ test("splice fields carry lnd's numbers", () => {
     { name: "original_channel_point", id: 1002 }
   );
 });
+
+// Every field the resize requests set is in its message: protobufjs refuses
+// an unknown one, and the route answers 500.
+test("resize requests encode against their messages", () => {
+  const { spliceRequest, spliceChannelRequest } = require("../utils/spliceRequest.js");
+  const builder = ProtoBuf.loadProtoFile(PROTO);
+  const options = {
+    fundingTxid: "a".repeat(64), outputIndex: 1, direction: "out", amountSat: 300000, useMax: false,
+    satPerVbyte: 2, targetConf: 6, addr: "bcrt1qxyz", forceLowFee: true,
+  };
+  const Estimate = builder.build("lnrpc.EstimateSpliceRequest");
+  const Start = builder.build("lnrpc.SpliceChannelRequest");
+  const estimate = Estimate.decode(new Estimate(spliceRequest(options)).encode());
+  assert.equal(estimate.addr, "bcrt1qxyz");
+  assert.equal(estimate.target_conf, 6);
+  const start = Start.decode(new Start(spliceChannelRequest(options)).encode());
+  assert.equal(start.force_low_fee, true);
+  assert.equal(start.amount_sat.toNumber(), 300000);
+});

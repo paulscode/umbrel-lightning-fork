@@ -9,6 +9,7 @@ const NodeError = require("models/errors.js").NodeError;
 
 const lndService = require("services/lnd.js");
 const bitcoindLogic = require("logic/bitcoind.js");
+const spliceLogic = require("logic/splice.js");
 
 const constants = require("utils/const.js");
 const convert = require("utils/convert.js");
@@ -722,6 +723,17 @@ const getChannels = async () => {
       //   channel.name = '';
       //   channel.purpose = '';
       // }
+    }
+
+    // A resize's time left, at this chain's own pace rather than ten
+    // minutes a block.
+    if (allChannels.some(channel => channel.pendingSplice)) {
+      const blockMinutes = await spliceLogic.recentBlockMinutes();
+      for (const channel of allChannels) {
+        if (channel.pendingSplice) {
+          channel.pendingSplice.blockMinutes = blockMinutes;
+        }
+      }
     }
   
     return allChannels;

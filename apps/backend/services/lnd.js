@@ -1,6 +1,8 @@
 /* eslint-disable camelcase, max-lines */
 const grpc = require("grpc");
 const camelizeKeys = require("camelize-keys");
+const { spliceRequest, spliceChannelRequest } = require("utils/spliceRequest.js");
+const { followSplice } = require("utils/spliceStream.js");
 
 const diskService = require("services/disk");
 const LndError = require("models/errors.js").LndError;
@@ -245,19 +247,6 @@ function closeChannel(fundingTxId, index, force) {
 
 // The request both splice calls take: the channel by its current or original
 // channel point, which way the funds move, and how much at what fee.
-function spliceRequest({ fundingTxid, outputIndex, direction, amountSat, useMax, satPerVbyte, targetConf, addr, forceLowFee }) {
-  return {
-    channel_point: { funding_txid_str: fundingTxid, output_index: outputIndex },
-    direction: direction === "out" ? "SPLICE_OUT" : "SPLICE_IN",
-    amount_sat: amountSat || 0,
-    use_max: !!useMax,
-    sat_per_vbyte: satPerVbyte || 0,
-    target_conf: targetConf || 0,
-    addr: addr || "",
-    force_low_fee: !!forceLowFee,
-  };
-}
-
 // What a splice this node would start costs and allows. Purely local.
 function estimateSplice(options) {
   return initializeRPCClient().then(({ lightning }) =>
@@ -265,52 +254,12 @@ function estimateSplice(options) {
   );
 }
 
-// Starts a splice and waits until it is agreed with the peer ("signed": our
-// signatures went out, the splice can no longer be dropped; "broadcast") or
-// refused ("aborted", rejected with the reason and whether it is the peer's
-// text). The splice carries on after the stream is let go.
+// Starts a splice and waits until it is agreed with the peer ("broadcast",
+// or "signed" when our signatures went out and the peer's are slow to come)
+// or refused (rejected with the reason and whether it is the peer's text).
+// See utils/spliceStream.js.
 function spliceChannel(options) {
-  return initializeRPCClient().then(
-    ({ lightning }) =>
-      new Promise((resolve, reject) => {
-        let done = false;
-        const finish = (fn) => {
-          if (done) return;
-          done = true;
-          fn();
-        };
-        try {
-          const call = lightning.SpliceChannel(spliceRequest(options));
-          call.on("data", (update) => {
-            if (update.state === "signed" || update.state === "broadcast" || update.state === "locked") {
-              finish(() => {
-                resolve({ state: update.state, txid: update.txid, newChannelPoint: update.new_channel_point });
-                call.cancel();
-              });
-            } else if (update.state === "aborted") {
-              finish(() =>
-                reject(
-                  Object.assign(new LndError("The resize did not go through", { code: 9, details: update.reason }), {
-                    spliceReason: update.reason,
-                    reasonFromPeer: !!update.reason_from_peer,
-                  })
-                )
-              );
-            }
-          });
-          call.on("error", (error) => {
-            finish(() => reject(new LndError("Unable to resize the channel", error)));
-          });
-          call.on("end", () => {
-            finish(() =>
-              reject(new LndError("Unable to resize the channel", { code: 4, details: "the node ended the request without an answer" }))
-            );
-          });
-        } catch (error) {
-          finish(() => reject(error));
-        }
-      })
-  );
+  return initializeRPCClient().then(({ lightning }) => followSplice(lightning.SpliceChannel(spliceChannelRequest(options))));
 }
 
 // Connects to a peer at a host:port that is already formatted for lnd (an
@@ -1063,6 +1012,7 @@ module.exports = {
   estimateSplice,
   spliceChannel,
   spliceRequest,
+  spliceChannelRequest,
   bakeMacaroon,
   listMacaroonIds,
   deleteMacaroonId,

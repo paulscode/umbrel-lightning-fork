@@ -14,6 +14,7 @@ const stub = (name, exports) => {
 
 const calls = { estimate: [], splice: [] };
 let spliceResult = null;
+let openChannels = () => [{ channelPoint: `${TXID}:0`, originalChannelPoint: `${OPEN_TXID}:0` }];
 const TXID = "a".repeat(64);
 const OPEN_TXID = "b".repeat(64);
 stub("utils/logger.js", { info() {}, warn() {}, error() {}, debug() {} });
@@ -37,7 +38,7 @@ stub("services/lnd.js", {
     { txHash: OPEN_TXID, amount: "-1000000", destAddresses: [], label: "" },
   ],
   // The channel was opened by OPEN_TXID and moved by TXID.
-  getOpenChannels: async () => [{ channelPoint: `${TXID}:0`, originalChannelPoint: `${OPEN_TXID}:0` }],
+  getOpenChannels: async () => openChannels(),
   getClosedChannels: async () => [],
   getPendingChannels: async () => ({
     pendingOpenChannels: [], pendingClosingChannels: [], pendingForceClosingChannels: [], waitingCloseChannels: [],
@@ -117,4 +118,38 @@ test("a resize transaction is a resize, and the opening one stays an open", asyn
   const byHash = Object.fromEntries(txs.map((t) => [t.txHash, t.type]));
   assert.equal(byHash[TXID], "CHANNEL_RESIZE");
   assert.equal(byHash[OPEN_TXID], "CHANNEL_OPEN");
+});
+
+test("an open channel's resize fields pass through, with this chain's pace", async () => {
+  const pendingSplice = {
+    initiator: "INITIATOR_LOCAL", state: "broadcast", localDeltaSat: "500000", remoteDeltaSat: "0",
+    confirmations: 2, lockDepth: 6, weLocked: false, peerLocked: false, dead: false,
+  };
+  const lastSplice = { outcome: "aborted", reason: "not_quiescent", reasonFromPeer: false };
+  openChannels = () => [
+    {
+      channelPoint: `${TXID}:0`, originalChannelPoint: `${OPEN_TXID}:0`, initiator: true,
+      localBalance: "1000000", remoteBalance: "500000", commitFee: "300", capacity: "1500000",
+      remotePubkey: "02".padEnd(66, "1"), spliceStatus: "pending", pendingSplice, lastSplice,
+    },
+    {
+      channelPoint: `${OPEN_TXID}:1`, originalChannelPoint: `${OPEN_TXID}:1`, initiator: true,
+      localBalance: "1", remoteBalance: "1", commitFee: "0", capacity: "2",
+      remotePubkey: "03".padEnd(66, "1"), spliceStatus: "ok",
+    },
+  ];
+  try {
+    const channels = await lightning.getChannels();
+    const [moving, still] = channels;
+    assert.equal(moving.type, "OPEN");
+    assert.equal(moving.originalChannelPoint, `${OPEN_TXID}:0`);
+    assert.equal(moving.spliceStatus, "pending");
+    assert.equal(moving.pendingSplice.localDeltaSat, "500000");
+    assert.ok(Math.abs(moving.pendingSplice.blockMinutes - 2.1667) < 0.001);
+    assert.equal(moving.lastSplice.reason, "not_quiescent");
+    assert.equal(still.spliceStatus, "ok");
+    assert.equal(still.pendingSplice, undefined);
+  } finally {
+    openChannels = () => [{ channelPoint: `${TXID}:0`, originalChannelPoint: `${OPEN_TXID}:0` }];
+  }
 });
