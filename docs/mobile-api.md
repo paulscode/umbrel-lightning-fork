@@ -81,7 +81,7 @@ Every other call takes the key as `Authorization: Bearer lf_…`.
 | `GET /bitcoin-invoices` | | `{configured, label, onion, premium, terms, error, reference, referenceError}`: the service's terms now (`{open, refusal, rate, spread, minSat, maxSat}`) and the market rate; asks the service, over Tor for an onion, so it can take a while. Set up only in the dashboard |
 | `POST /unpair` | | `{unpaired: true}`; the phone removes itself, its key stops at once |
 | `GET /endpoints` | | `{onionUrl, lanUrl, lanIp, caPem, caSha256}`, the current addresses |
-| `GET /wallet` | | `{onchain: {confirmedSat, unconfirmedSat, lockedSat, reservedSat}, lightning: {outboundSat, inboundSat, pendingOutboundSat}, syncedToChain, blockHeight, updatedAt}` |
+| `GET /wallet` | | `{onchain: {confirmedSat, unconfirmedSat, lockedSat, reservedSat, fromChannelsSat}, lightning: {outboundSat, inboundSat, pendingOutboundSat, inMotionSat}, syncedToChain, blockHeight, updatedAt}`; see Channel resizes |
 | `GET /fees` | | `{source: {kind, name}, warning, minimumSatPerVbyte, low, medium, high}`, each rate `{satPerVbyte, label, eta}` |
 | `POST /decode` | `{input}` | a payment target, below; send `X-LF-Capabilities` to be shown more kinds |
 | `POST /onchain/estimate` | `{address, amountSat \| sendAll, satPerVbyte}` | `{amountSat, feeSat, satPerVbyte, totalSat, sendAll, reservedSat?}`; sized by choosing coins largest first, as the node does; a sweep keeps back the anchor-channel reserve |
@@ -92,7 +92,7 @@ Every other call takes the key as `Authorization: Bearer lf_…`.
 | `POST /receive/invoice` | `{amountSat?, memo?, expirySeconds?}` | `{paymentRequest, paymentHash, amountSat, memo, createdAt, expiresAt, uri}` |
 | `GET /receive/invoice/<paymentHash>` | | `{state, amountSat, amountPaidSat, settledAt, expiresAt}`; `state` is `open`, `settled`, `canceled`, `accepted` or `expired` |
 | `POST /receive/offer` | `{description?, amountSat?}` | `{offer, offerId, amountSat, description, uri}` |
-| `GET /activity` | `?limit=1..100` | `{items: [{id, kind, direction, amountSat, feeSat, timestamp, status, confirmations?, description, reference, bitcoinInvoice?, preimage?}]}`, newest first |
+| `GET /activity` | `?limit=1..100` | `{items: [{id, kind, direction, amountSat, feeSat, timestamp, status, confirmations?, description, reference, bitcoinInvoice?, preimage?}]}`, newest first; an on-chain item of a channel reads "Channel opened", "Channel closed" or "Channel resized" |
 | `GET /price` | `?currency=USD` | `{currency, price}`, BTCB2 in that currency, or `null` |
 | `GET /currencies` | | `{currencies}`, the codes `/price` can answer now: `USD` always, others while the conversion table answers |
 | `GET /channels` | | `{channels}`, as the dashboard shows them |
@@ -429,3 +429,21 @@ credential), so they are in its backups.
 | `DEVICES_FILE` | where devices are kept, default `devices.json` beside `JSON_STORE_FILE` |
 | `BITCOIN_INVOICES_FILE` | where the service for paying SHA256 invoices is kept, default `bitcoin-invoices.json` beside `JSON_STORE_FILE` |
 | `TOR_PROXY_IP`, `TOR_PROXY_PORT` | the Tor proxy for a service on an onion, and for the market rate |
+
+## Channel resizes
+
+A channel can be resized from the dashboard (adding funds to it, or moving
+funds out); the app shows resizes but can't start one, and no route here
+reaches one. While a resize is in progress `GET /wallet` says what is in
+motion:
+
+- `lightning.inMotionSat`: what resizes are adding to channels from the
+  wallet. The wallet no longer counts it and no channel does yet, until the
+  resize locks; a total of the balances should add it.
+- `onchain.fromChannelsSat`: what resizes moved from channels to this
+  wallet and is still confirming. It is part of `unconfirmedSat`, which is
+  unchanged: an app that knows the field can show it on its own line, an
+  older app keeps showing it as unconfirmed.
+
+Both are 0 from a node that doesn't resize channels.
+

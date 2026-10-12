@@ -96,3 +96,13 @@ test("currencies lists what a price can be given in", async () => {
   const r = await call("GET", "/currencies");
   assert.deepEqual(r.body, { currencies: ["USD", "EUR"] });
 });
+
+// The app shows resizes but can't start one: no route of the mobile API
+// reaches a splice.
+test("the mobile API has no resize actions", () => {
+  const paths = router.stack.filter((l) => l.route).map((l) => `${Object.keys(l.route.methods).join(",")} ${l.route.path}`);
+  assert.ok(paths.length > 20, "the routes are read");
+  for (const p of paths) {
+    assert.doesNotMatch(p, /splice|resize/i, p);
+  }
+});

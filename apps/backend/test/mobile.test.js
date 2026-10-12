@@ -146,6 +146,52 @@ test("wallet: on-chain and Lightning balances", async () => {
   assert.equal(w.blockHeight, 900);
 });
 
+test("wallet: what resizes have in motion, and nothing from an older node", async () => {
+  const { mobile } = harness({
+    lnd: {
+      getChannelBalance: async () => ({
+        localBalance: { sat: "80000" },
+        remoteBalance: { sat: "120000" },
+        pendingOpenLocalBalance: { sat: "0" },
+        pendingSpliceInSat: "500000",
+        pendingSpliceToWalletSat: "1500",
+      }),
+    },
+  });
+  const w = await mobile.wallet();
+  assert.equal(w.lightning.inMotionSat, 500000);
+  assert.equal(w.onchain.fromChannelsSat, 1500);
+  // Part of unconfirmedSat, which stays what the node says.
+  assert.equal(w.onchain.unconfirmedSat, 2000);
+  assert.equal(w.lightning.outboundSat, 80000);
+
+  const old = await harness().mobile.wallet();
+  assert.equal(old.lightning.inMotionSat, 0);
+  assert.equal(old.onchain.fromChannelsSat, 0);
+});
+
+test("activity: a resize's transaction reads as one, before opens and closes", async () => {
+  const label = (l) => ({ txHash: l, amount: "-1000", totalFees: "100", timeStamp: String(NOW - 100), numConfirmations: 1, label: l });
+  const { mobile } = harness({
+    lnd: {
+      getOnChainTransactions: async () => [
+        label("splice:123:in"),
+        label("0:openchannel:shortchanid-1"),
+        label("0:closechannel:shortchanid-1"),
+        label("lf-send:abc"),
+      ],
+      listRecentPayments: async () => ({ payments: [] }),
+      getInvoices: async () => ({ invoices: [] }),
+    },
+  });
+  const { items } = await mobile.activity({ limit: 10 });
+  const by = Object.fromEntries(items.map((i) => [i.reference, i.description]));
+  assert.equal(by["splice:123:in"], "Channel resized");
+  assert.equal(by["0:openchannel:shortchanid-1"], "Channel opened");
+  assert.equal(by["0:closechannel:shortchanid-1"], "Channel closed");
+  assert.equal(by["lf-send:abc"], "");
+});
+
 test("fees: the Mempool app's rates, rounded up, never below the floor", async () => {
   const { mobile } = harness();
   const f = await mobile.fees();

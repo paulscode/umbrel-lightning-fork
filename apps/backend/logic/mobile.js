@@ -24,6 +24,21 @@ const MAX_INVOICE_EXPIRY = 7 * 24 * 3600;
 // lnd allows 639 bytes of BOLT 11 description; count bytes, not characters.
 const MAX_MEMO_BYTES = 639;
 
+
+// What an on-chain transaction did to a channel, from its wallet label. A
+// resize's label ("splice:...") is checked first: it can mention neither.
+function channelTxDescription(label) {
+  if (label.startsWith("splice:")) {
+    return "Channel resized";
+  }
+  if (/openchannel/.test(label)) {
+    return "Channel opened";
+  }
+  if (/closechannel|sweep/.test(label)) {
+    return "Channel closed";
+  }
+  return "";
+}
 function clip(text, maxBytes = MAX_MEMO_BYTES) {
   let out = String(text || "");
   while (Buffer.byteLength(out, "utf8") > maxBytes) {
@@ -380,11 +395,17 @@ function createMobile({
         unconfirmedSat: num(chain.unconfirmedBalance),
         lockedSat: num(chain.lockedBalance),
         reservedSat: num(chain.reservedBalanceAnchorChan),
+        // Part of unconfirmedSat: what channel resizes moved here and is
+        // still confirming. An older app keeps showing it as unconfirmed.
+        fromChannelsSat: num(channels.pendingSpliceToWalletSat),
       },
       lightning: {
         outboundSat: local,
         inboundSat: remote,
         pendingOutboundSat: pendingLocal,
+        // Funds on their way into channels by resizes: spent from the
+        // wallet and in no balance here until the resize locks.
+        inMotionSat: num(channels.pendingSpliceInSat),
       },
       syncedToChain: Boolean(state.syncedToChain),
       blockHeight: num(state.blockHeight),
@@ -1760,7 +1781,7 @@ function createMobile({
         timestamp: num(tx.timeStamp),
         status: num(tx.numConfirmations) > 0 ? "confirmed" : "pending",
         confirmations: num(tx.numConfirmations),
-        description: /openchannel/.test(label) ? "Channel opened" : /closechannel|sweep/.test(label) ? "Channel closed" : "",
+        description: channelTxDescription(label),
         reference: tx.txHash,
       });
     }
