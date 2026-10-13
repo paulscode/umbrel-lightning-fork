@@ -48,6 +48,18 @@ function withoutSpliceOff(settings) {
   return rest;
 }
 
+// Saved settings without the key had it off: off is never written (above),
+// and versions before it wrote no settings that could mean on. So a user's
+// choice of off still wins over a protocol.splice=true in lnd.conf, as any
+// saved setting does.
+function withSpliceChoice(settings) {
+  if (!settings || Object.keys(settings).length === 0 ||
+      settings['protocol.splice'] !== undefined) {
+    return settings;
+  }
+  return { ...settings, 'protocol.splice': false };
+}
+
 // merge config objects into single object with specific order of precedence
 // Note for arrays: we currently do not have any config options that are arrays in the DEFAULT_CONFIG (e.g., like externalip).
 // When we do, we will need to revisit the mergeArraysAndRemoveDuplicates customizer function and make sure a users config can override defaults if it makes sense.
@@ -144,7 +156,7 @@ const deriveConfigFile = async (configObject, bridge = {}) => {
     }
   }
 
-  const derivedConfigObject = {...deriveConfigObject(userLndConfig, configObject), ...bridgeConfig(bridge)};
+  const derivedConfigObject = {...deriveConfigObject(userLndConfig, withSpliceChoice(configObject)), ...bridgeConfig(bridge)};
 
   return lndConfig.generate(withoutSpliceOff(derivedConfigObject));
 }
@@ -197,7 +209,7 @@ async function getConfig() {
   const config = await diskService.fileExists(constants.JSON_SETTINGS_FILE)
                   ? normalizeSettings((await diskService.readJsonFile(constants.JSON_SETTINGS_FILE)).lnd)
                   : {};
-  return deriveConfigObject(await getManagedSettingsFromLndConf(), config);
+  return deriveConfigObject(await getManagedSettingsFromLndConf(), withSpliceChoice(config));
 }
 
 // parses lnd.conf and returns an object of only those settings that are managed by Umbrel in [settings.json[].lnd
