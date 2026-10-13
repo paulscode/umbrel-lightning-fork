@@ -34,3 +34,24 @@ test("a choice is kept across writes", async () => {
   assert.deepEqual(settings.marks, { spliceChosen: true });
   assert.equal(settings.lnd["protocol.splice"], true);
 });
+
+test("resizing channels off is never written, so an older version can start", async () => {
+  await config.writeLndConfig({ "protocol.splice": false, alias: "a" }, {});
+  const settings = JSON.parse(files[constants.JSON_SETTINGS_FILE]);
+  assert.equal("protocol.splice" in settings.lnd, false);
+  assert.doesNotMatch(files[constants.UMBREL_LND_CONF_FILEPATH], /protocol\.splice/);
+
+  // Restore Defaults the same.
+  await config.writeLndConfig(require("utils/defaultConfig"), {});
+  assert.equal("protocol.splice" in JSON.parse(files[constants.JSON_SETTINGS_FILE]).lnd, false);
+  assert.doesNotMatch(files[constants.UMBREL_LND_CONF_FILEPATH], /protocol\.splice/);
+
+  // On, it is.
+  await config.writeLndConfig({ "protocol.splice": true }, {});
+  assert.equal(JSON.parse(files[constants.JSON_SETTINGS_FILE]).lnd["protocol.splice"], true);
+  assert.match(files[constants.UMBREL_LND_CONF_FILEPATH], /^protocol\.splice=true$/m);
+
+  // Read back without the key: off, as lnd's default.
+  await config.writeLndConfig({ alias: "a" }, {});
+  assert.equal((await config.getConfig())["protocol.splice"], false);
+});

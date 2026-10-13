@@ -35,6 +35,19 @@ const mergeArraysAndRemoveDuplicates = (objValue, srcValue) => {
   }
 };
 
+// Resizing channels off is lnd's default, so it is never written, to
+// umbrel-lnd.conf or settings.json: the lnd of a version before it refuses
+// the line (unknown option) and its dashboard copies every saved setting
+// into lnd.conf, so a node that never turned it on could not go back. The
+// user's choice is kept in marks.
+function withoutSpliceOff(settings) {
+  if (!settings || settings['protocol.splice'] !== false) {
+    return settings;
+  }
+  const { 'protocol.splice': _off, ...rest } = settings;
+  return rest;
+}
+
 // merge config objects into single object with specific order of precedence
 // Note for arrays: we currently do not have any config options that are arrays in the DEFAULT_CONFIG (e.g., like externalip).
 // When we do, we will need to revisit the mergeArraysAndRemoveDuplicates customizer function and make sure a users config can override defaults if it makes sense.
@@ -133,7 +146,7 @@ const deriveConfigFile = async (configObject, bridge = {}) => {
 
   const derivedConfigObject = {...deriveConfigObject(userLndConfig, configObject), ...bridgeConfig(bridge)};
 
-  return lndConfig.generate(derivedConfigObject);
+  return lndConfig.generate(withoutSpliceOff(derivedConfigObject));
 }
 
 // writes umbrel-lnd.conf and settings.json to disk
@@ -160,7 +173,7 @@ async function writeLndConfig(configObject, bridge, marks) {
   await Promise.all([
     diskService.writePlainTextFile(constants.UMBREL_LND_CONF_FILEPATH, lndConfigString),
     diskService.writeJsonFile(constants.JSON_SETTINGS_FILE, {
-      lnd: Object.keys(configObject).length > 0 ? configObject : DEFAULT_CONFIG,
+      lnd: withoutSpliceOff(Object.keys(configObject).length > 0 ? configObject : DEFAULT_CONFIG),
       ...(Object.keys(bridgeSettings).length > 0 ? {bridge: bridgeSettings} : {}),
       ...(Object.keys(allMarks).length > 0 ? {marks: allMarks} : {}),
     })
