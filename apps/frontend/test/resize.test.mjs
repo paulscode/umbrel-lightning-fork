@@ -126,3 +126,9 @@ test("lock times read in minutes, then hours", () => {
   assert.equal(resize.minutesText(180), "3 hours");
   assert.equal(resize.minutesText(0), "1 minute");
 });
+
+test("a fee rate under the floor names the node's minimum, not the network's", () => {
+  const text = resize.refusalText("fee_below_floor", { minSatPerVbyte: 12 });
+  assert.match(text, /12 sat\/vB/);
+  assert.doesNotMatch(text, /network relays/);
+});

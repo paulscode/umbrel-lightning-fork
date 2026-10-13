@@ -477,6 +477,7 @@ export default {
       return refusalText(est.refusalCode, {
         minSat: est.minSat,
         maxOutSat: est.maxOutSat,
+        minSatPerVbyte: est.minSatPerVbyte,
         peerName: this.peerName
       });
     },

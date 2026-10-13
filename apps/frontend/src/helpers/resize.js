@@ -16,7 +16,7 @@ export function refusalCode(reason) {
 }
 
 // Why a resize was refused, from the node's refusal codes.
-export function refusalText(reason, { minSat, maxOutSat, peerName } = {}) {
+export function refusalText(reason, { minSat, maxOutSat, minSatPerVbyte, peerName } = {}) {
   const peer = peerName || "Your peer";
   const code = refusalCode(reason);
   switch (code) {
@@ -40,7 +40,9 @@ export function refusalText(reason, { minSat, maxOutSat, peerName } = {}) {
     case "above_max_size":
       return "That would make the channel larger than your peer accepts.";
     case "fee_below_floor":
-      return "The fee rate is below what the network relays. Choose a higher rate.";
+      return minSatPerVbyte
+        ? `The fee rate is below your node's minimum for a resize, ${localize(minSatPerVbyte)} sat/vB, so the transaction might not confirm in time. Choose a higher rate.`
+        : "The fee rate is below your node's minimum for a resize. Choose a higher rate.";
     case "relay_rejected":
       return "Your node's mempool refused the transaction.";
     case "timeout":
