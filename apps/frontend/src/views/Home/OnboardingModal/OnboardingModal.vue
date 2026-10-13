@@ -159,7 +159,11 @@ export default {
 
       /*eslint no-constant-condition: ["error", { "checkLoops": false }]*/
       while (true) {
-        await this.$store.dispatch("user/getSeed");
+        try {
+          await this.$store.dispatch("user/getSeed");
+        } catch (error) {
+          // not stored yet, or the node not answering: asked again
+        }
         if (this.seed.length) {
           break;
         }

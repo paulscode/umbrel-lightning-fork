@@ -22,7 +22,19 @@
         </a>
       </div>
     </template>
+    <div v-if="askingPassword" class="pt-2 px-3 pb-3 w-100">
+      <step-up-password
+        input-id="connect-wallet-password"
+        why="Asked again because a connected wallet keeps its access after you sign out."
+        action="Show connection details"
+        :busy="loadingUrls"
+        :error="passwordError"
+        @submit="load"
+        @cancel="$bvModal.hide('connect-wallet-modal')"
+      ></step-up-password>
+    </div>
     <div
+      v-else
       class="pt-2 px-3 d-flex flex-column justify-content-between w-100 mt-n4"
     >
       <div class="pb-2 pb-sm-3 mt-3">
@@ -140,10 +152,15 @@ import { mapState } from "vuex";
 import QrCode from "@/components/Utility/QrCode";
 import InputCopy from "@/components/Utility/InputCopy";
 import { decode } from "lndconnect";
+import StepUpPassword from "@/components/Utility/StepUpPassword";
+import getErrorMessage from "@/helpers/error-message";
 
 export default {
   data() {
     return {
+      askingPassword: false,
+      loadingUrls: false,
+      passwordError: "",
       chosenMode: "restTor",
       modes: [
         { value: "restTor", text: "REST (Tor)" },
@@ -170,9 +187,50 @@ export default {
       return this.lndConnectUrls.restLocal ? decode(this.lndConnectUrls[this.chosenMode]).macaroon : "";
     },
   },
+  created() {
+    // The connection details carry the admin macaroon: asked for each time
+    // the screen opens, with the dashboard password where there is one,
+    // and forgotten when it closes.
+    this.$root.$on("bv::modal::shown", (bvEvent, modalId) => {
+      if (modalId !== "connect-wallet-modal") {
+        return;
+      }
+      this.passwordError = "";
+      if (this.$store.state.system.auth.passwordEnabled) {
+        this.askingPassword = true;
+        return;
+      }
+      this.load();
+    });
+    this.$root.$on("bv::modal::hidden", (bvEvent, modalId) => {
+      if (modalId === "connect-wallet-modal") {
+        this.askingPassword = false;
+        this.$store.dispatch("lightning/clearLndConnectUrls");
+      }
+    });
+  },
+  methods: {
+    async load(password) {
+      this.loadingUrls = true;
+      this.passwordError = "";
+      try {
+        await this.$store.dispatch("lightning/getLndConnectUrls", {
+          password
+        });
+        this.askingPassword = false;
+      } catch (error) {
+        this.passwordError = getErrorMessage(
+          error,
+          "Unable to get the connection details."
+        );
+      }
+      this.loadingUrls = false;
+    }
+  },
   components: {
     QrCode,
-    InputCopy
+    InputCopy,
+    StepUpPassword
   }
 };
 </script>

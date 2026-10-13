@@ -27,7 +27,19 @@
         </a>
       </div>
     </template>
+    <div v-if="askingPassword" class="px-3 pb-3">
+      <step-up-password
+        input-id="secret-words-password"
+        why="Asked again because anyone with these words can take every coin of this node."
+        action="Show secret words"
+        :busy="loading"
+        :error="passwordError"
+        @submit="load"
+        @cancel="$bvModal.hide('secret-words-modal')"
+      ></step-up-password>
+    </div>
     <secret-words-display
+      v-else
       :disable-verify="true"
     />
   </b-modal>
@@ -35,13 +47,32 @@
 
 <script>
 import SecretWordsDisplay from "./SecretWordsDisplay.vue";
+import StepUpPassword from "@/components/Utility/StepUpPassword";
+import getErrorMessage from "@/helpers/error-message";
 
 export default {
   data() {
     return {
+      askingPassword: false,
+      loading: false,
+      passwordError: ""
     };
   },
   methods: {
+    async load(password) {
+      this.loading = true;
+      this.passwordError = "";
+      try {
+        await this.$store.dispatch("user/getSeed", { password });
+        this.askingPassword = false;
+      } catch (error) {
+        this.passwordError = getErrorMessage(
+          error,
+          "Unable to get the secret words."
+        );
+      }
+      this.loading = false;
+    },
     finish() {
       this.$bvModal.hide("secret-words-modal");
       // this resets the modal to show words without flickering on modal disappear
@@ -49,21 +80,30 @@ export default {
     }
   },
   async created() {
-    // only call getSeed when displaying secret modal
+    // only call getSeed when displaying secret modal, with the dashboard
+    // password asked again where there is one
     this.$root.$on("bv::modal::shown", async (bvEvent, modalId) => {
-      if (modalId === "secret-words-modal") {
-        await this.$store.dispatch("user/getSeed");
+      if (modalId !== "secret-words-modal") {
+        return;
       }
+      this.passwordError = "";
+      if (this.$store.state.system.auth.passwordEnabled) {
+        this.askingPassword = true;
+        return;
+      }
+      await this.load();
     });
     // clear the seed from state after viewing
     this.$root.$on("bv::modal::hidden", async (bvEvent, modalId) => {
       if (modalId === "secret-words-modal") {
+        this.askingPassword = false;
         this.$store.dispatch("user/clearSeed");
       }
     });
   },
   components: {
     SecretWordsDisplay,
+    StepUpPassword
   }
 };
 </script>

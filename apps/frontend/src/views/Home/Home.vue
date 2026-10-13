@@ -101,7 +101,7 @@
             >
             <!-- On StartOS the service's interfaces, actions and backups
                  cover these, so the dashboard keeps to the node itself. -->
-            <b-dropdown-item v-if="!isStartOS" href="#" v-b-modal.connect-wallet-modal @click="getLndConnectUrls"
+            <b-dropdown-item v-if="!isStartOS" href="#" v-b-modal.connect-wallet-modal
               >Connect wallet</b-dropdown-item
             >
             <b-dropdown-item v-if="!isStartOS" href="#" v-b-modal.secret-words-modal
@@ -590,9 +590,6 @@ export default {
         toaster: "b-toaster-bottom-right",
       });
       return this.closeRecoverChannelsModal();
-    },
-    getLndConnectUrls() {
-      this.$store.dispatch("lightning/getLndConnectUrls");
     },
     onAddToChannel({ channel, amount }) {
       this.$refs["open-channel-modal"].hide();

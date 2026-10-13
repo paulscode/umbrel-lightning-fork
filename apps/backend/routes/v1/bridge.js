@@ -6,6 +6,7 @@ const express = require("express");
 const bridgeOperator = require("logic/bridgeOperator.js");
 const bridgeSwitch = require("logic/bridgeSwitch.js");
 const { ValidationError } = require("models/errors.js");
+const stepUp = require("logic/stepUp.js");
 const { createJsonErrorHandler } = require("middlewares/jsonErrors.js");
 
 const router = express.Router();
@@ -95,10 +96,11 @@ router.post("/sha256/withdraw", handle((req) => {
 // The SHA256 node's recovery phrase. A POST, and only when the request says
 // it knows what it is asking for, so a stray GET or a prefetch never puts it
 // on a screen.
-router.post("/sha256/recovery", handle((req) => {
+router.post("/sha256/recovery", handle(async (req) => {
   if (body(req).confirm !== true) {
     throw new ValidationError("Confirm that you want the recovery phrase shown.", 400);
   }
+  await stepUp.requirePassword(body(req).password, "show the recovery phrase");
   return logic().recoveryPhrase();
 }));
 
@@ -115,7 +117,12 @@ router.get("/sha256/channel-backup", async (req, res, next) => {
   }
 });
 
-router.post("/participants", handle((req) => logic().issueCode(body(req).label)));
+// A participant's code is a credential that outlasts this session: the
+// dashboard password is asked again, as for a macaroon.
+router.post("/participants", handle(async (req) => {
+  await stepUp.requirePassword(body(req).password, "invite a participant");
+  return logic().issueCode(body(req).label);
+}));
 router.delete("/participants/:rootKeyId", handle((req) => logic().revokeCode(req.params.rootKeyId)));
 
 // While the bridge is on, its SHA256 node is kept reading what was chosen,

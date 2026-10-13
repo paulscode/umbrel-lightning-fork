@@ -526,13 +526,20 @@ const actions = {
     commit("setChannelFocus", channel);
   },
 
-  async getLndConnectUrls({ commit }) {
-    const urls = await API.get(
-      `${process.env.VUE_APP_API_BASE_URL}/v1/system/lndconnect-urls`
+  // The URLs carry the admin macaroon: the dashboard password is asked
+  // again where there is one. Throws on a refusal, for the screen to show.
+  async getLndConnectUrls({ commit }, { password } = {}) {
+    const res = await API.post(
+      `${process.env.VUE_APP_API_BASE_URL}/v1/system/lndconnect-urls`,
+      password ? { password } : {}
     );
-    if (urls) {
-      commit("setLndConnectUrls", urls);
+    if (res && res.data) {
+      commit("setLndConnectUrls", res.data);
     }
+  },
+
+  clearLndConnectUrls({ commit }) {
+    commit("setLndConnectUrls", {});
   },
 
   async getWatchtowerServiceUri({ commit }) {

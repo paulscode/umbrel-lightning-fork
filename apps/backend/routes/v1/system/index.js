@@ -8,6 +8,7 @@ const constants = require("utils/const.js");
 const umbrelOnly = require("middlewares/umbrelOnly.js");
 const mempoolLogic = require("logic/mempool.js");
 const ValidationError = require("models/errors.js").ValidationError;
+const stepUp = require("logic/stepUp.js");
 
 // Which platform hosts the dashboard, so the frontend can hide what the
 // platform provides itself. Answered before any other state is read.
@@ -18,10 +19,14 @@ router.get(
   }))
 );
 
-router.get(
+// The lndconnect URLs carry the admin macaroon, which outlasts this session:
+// the dashboard password is asked again, as for pairing a phone. A POST, so
+// the password travels in the body.
+router.post(
   "/lndconnect-urls",
   umbrelOnly,
   safeHandler(async (req, res) => {
+    await stepUp.requirePassword((req.body || {}).password, "connect a wallet");
     const urls = await systemLogic.getLndConnectUrls();
 
     return res.status(constants.STATUS_CODES.OK).json(urls);
@@ -52,11 +57,16 @@ router.post(
   })
 );
 
-router.get(
+// The recovery phrase: the dashboard password asked again, except while
+// onboarding shows it to the user who just created the wallet.
+router.post(
   "/seed",
   umbrelOnly,
   safeHandler(async (req, res) => {
-    const {seed} = await diskLogic.getJsonStore();
+    const {seed, onboarding} = await diskLogic.getJsonStore();
+    if (onboarding !== true) {
+      await stepUp.requirePassword((req.body || {}).password, "show your secret words");
+    }
 
     return res.json({seed});
   })

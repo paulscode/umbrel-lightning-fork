@@ -773,17 +773,27 @@
                 placeholder="Their name"
                 maxlength="64"
                 :disabled="issuing"
-                @keyup.enter="issue"
+                @keyup.enter="requestIssue"
               ></b-form-input>
               <b-button
                 size="sm"
                 variant="outline-primary"
                 class="mb-1"
                 :disabled="issuing || !newLabel.trim()"
-                @click="issue"
+                @click="requestIssue"
                 >{{ issuing ? "Creating…" : "Create a code" }}</b-button
               >
             </div>
+            <step-up-password
+              v-if="issueAsking"
+              class="mt-2"
+              input-id="bridge-issue-password"
+              why="Asked again because a participant's code keeps working after you sign out."
+              action="Create the code"
+              :busy="issuing"
+              @submit="issue"
+              @cancel="issueAsking = false"
+            ></step-up-password>
             <small v-else class="d-block text-muted">
               Participants reach your node over Tor, and this node has no Tor
               address for it yet.
@@ -817,8 +827,19 @@
             what the bridge node holds.</b> Make sure nobody else can see
             your screen.
           </small>
-          <b-button size="sm" variant="danger" class="mr-2" :disabled="recovery.loading" @click="showRecovery">{{ recovery.loading ? "Deriving…" : "Show the words" }}</b-button>
-          <b-button size="sm" variant="link" @click="recovery.confirming = false">Cancel</b-button>
+          <step-up-password
+            v-if="passwordEnabled"
+            input-id="bridge-recovery-password"
+            why="Asked again because these words outlast this session."
+            action="Show the words"
+            :busy="recovery.loading"
+            @submit="showRecovery"
+            @cancel="recovery.confirming = false"
+          ></step-up-password>
+          <template v-else>
+            <b-button size="sm" variant="danger" class="mr-2" :disabled="recovery.loading" @click="showRecovery()">{{ recovery.loading ? "Deriving…" : "Show the words" }}</b-button>
+            <b-button size="sm" variant="link" @click="recovery.confirming = false">Cancel</b-button>
+          </template>
         </div>
         <div v-if="recovery.shown" class="neu-card p-3 mb-2">
           <ol class="words pl-0 mb-2">
@@ -903,6 +924,7 @@ import {
 import QrCode from "@/components/Utility/QrCode";
 import InputCopy from "@/components/Utility/InputCopy";
 import Sha256NodeList from "@/views/Home/Sha256NodeList";
+import StepUpPassword from "@/components/Utility/StepUpPassword";
 
 // How often the window asks again while it is open. Nothing is asked while
 // it is closed, so a node that never bridges pays nothing for it.
@@ -961,7 +983,7 @@ const emptyRecovery = () => ({
 // the steps to get it going, its SHA256 node, the rate and the people it
 // serves. Everything shown is read from the nodes each time, not remembered.
 export default {
-  components: { QrCode, InputCopy, Sha256NodeList },
+  components: { QrCode, InputCopy, Sha256NodeList, StepUpPassword },
   data() {
     return {
       overview: null,
@@ -976,6 +998,7 @@ export default {
       savingRate: false,
       pricing: emptyPricing(),
       newLabel: "",
+      issueAsking: false,
       issuing: false,
       issued: null,
       confirmRevoke: "",
@@ -994,6 +1017,9 @@ export default {
     };
   },
   computed: {
+    passwordEnabled() {
+      return Boolean(this.$store.state.system.auth.passwordEnabled);
+    },
     drainingCount() {
       const o = this.overview || {};
       return o.unfinished !== null && o.unfinished !== undefined
@@ -1468,7 +1494,19 @@ export default {
       }
       this.savingRate = false;
     },
-    async issue() {
+    // A code outlasts the session: the dashboard password first, where
+    // there is one.
+    requestIssue() {
+      if (!this.newLabel.trim() || this.issuing) {
+        return;
+      }
+      if (this.passwordEnabled) {
+        this.issueAsking = true;
+        return;
+      }
+      this.issue();
+    },
+    async issue(password) {
       const label = this.newLabel.trim();
       if (!label) {
         return;
@@ -1478,7 +1516,11 @@ export default {
       this.issued = null;
       const generation = this.generation;
       try {
-        const res = await API.post(bridgeUrl("/participants"), { label });
+        const res = await API.post(bridgeUrl("/participants"), {
+          label,
+          ...(password ? { password } : {})
+        });
+        this.issueAsking = false;
         if (generation !== this.generation) {
           return;
         }
@@ -1526,13 +1568,14 @@ export default {
           "Could not download the bridge node's channel backup: it may not be answering. Please try again.";
       }
     },
-    async showRecovery() {
+    async showRecovery(password) {
       this.recovery.loading = true;
       this.error = "";
       const generation = this.generation;
       try {
         const res = await API.post(bridgeUrl("/sha256/recovery"), {
-          confirm: true
+          confirm: true,
+          ...(password ? { password } : {})
         });
         if (generation !== this.generation) {
           return;

@@ -20,14 +20,17 @@ const mutations = {
 
 // Functions to get data from the API
 const actions = {
-  async getSeed({ commit }) {
-    //get user's stored seed if already registered
-    const rawSeed = await API.get(
-      `${process.env.VUE_APP_API_BASE_URL}/v1/system/seed`
+  // The stored seed, if any. Outside onboarding the dashboard password is
+  // asked again where there is one: throws on a refusal, for the screen to
+  // show.
+  async getSeed({ commit }, { password } = {}) {
+    const res = await API.post(
+      `${process.env.VUE_APP_API_BASE_URL}/v1/system/seed`,
+      password ? { password } : {}
     );
 
-    if (rawSeed && rawSeed.seed) {
-      commit("setSeed", rawSeed.seed);
+    if (res && res.data && res.data.seed) {
+      commit("setSeed", res.data.seed);
     }
   },
   async clearSeed({ commit }) {
