@@ -766,34 +766,36 @@
                 </div>
               </div>
             </div>
-            <div v-if="overview.canIssueCodes" class="d-flex flex-wrap align-items-center">
-              <b-form-input
-                v-model="newLabel"
-                class="neu-input label-input mr-2 mb-1"
-                placeholder="Their name"
-                maxlength="64"
-                :disabled="issuing"
-                @keyup.enter="requestIssue"
-              ></b-form-input>
-              <b-button
-                size="sm"
-                variant="outline-primary"
-                class="mb-1"
-                :disabled="issuing || !newLabel.trim()"
-                @click="requestIssue"
-                >{{ issuing ? "Creating…" : "Create a code" }}</b-button
-              >
-            </div>
-            <step-up-password
-              v-if="issueAsking"
-              class="mt-2"
-              input-id="bridge-issue-password"
-              why="Asked again because a participant's code keeps working after you sign out."
-              action="Create the code"
-              :busy="issuing"
-              @submit="issue"
-              @cancel="issueAsking = false"
-            ></step-up-password>
+            <template v-if="overview.canIssueCodes">
+              <div class="d-flex flex-wrap align-items-center">
+                <b-form-input
+                  v-model="newLabel"
+                  class="neu-input label-input mr-2 mb-1"
+                  placeholder="Their name"
+                  maxlength="64"
+                  :disabled="issuing"
+                  @keyup.enter="requestIssue"
+                ></b-form-input>
+                <b-button
+                  size="sm"
+                  variant="outline-primary"
+                  class="mb-1"
+                  :disabled="issuing || !newLabel.trim()"
+                  @click="requestIssue"
+                  >{{ issuing ? "Creating…" : "Create a code" }}</b-button
+                >
+              </div>
+              <step-up-password
+                v-if="issueAsking"
+                class="mt-2"
+                input-id="bridge-issue-password"
+                why="Asked again because a participant's code keeps working after you sign out."
+                action="Create the code"
+                :busy="issuing"
+                @submit="issue"
+                @cancel="issueAsking = false"
+              ></step-up-password>
+            </template>
             <small v-else class="d-block text-muted">
               Participants reach your node over Tor, and this node has no Tor
               address for it yet.

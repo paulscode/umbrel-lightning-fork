@@ -500,12 +500,20 @@ export default {
     canCoopClose() {
       return this.channel.status === "Online" && !this.pendingSplice;
     },
+    // The delay in blocks, and in time only at the chain's recent pace
+    // when known: this chain's blocks don't come every ten minutes.
     csvDelayText() {
       const blocks = parseInt(this.channel.csvDelay, 10);
       if (!Number.isFinite(blocks) || blocks <= 0) {
-        return "a delay of up to two weeks";
+        return "a delay set when the channel was opened";
       }
-      const hours = Math.round((blocks * 10) / 60); // eslint-disable-line no-magic-numbers
+      const minutes = Number(
+        this.pendingSplice && this.pendingSplice.blockMinutes
+      );
+      if (!(minutes > 0)) {
+        return `${blocks.toLocaleString()} blocks`;
+      }
+      const hours = Math.round((blocks * minutes) / 60); // eslint-disable-line no-magic-numbers
       let about;
       if (hours < 2) { // eslint-disable-line no-magic-numbers
         about = "about an hour";

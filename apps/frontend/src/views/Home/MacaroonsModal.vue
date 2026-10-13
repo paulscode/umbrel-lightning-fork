@@ -426,7 +426,7 @@ const ENTITIES = {
   onchain: {
     name: "On-chain wallet",
     read: "See the on-chain balance and transactions",
-    write: "Send on-chain funds, and open and close channels"
+    write: "Send on-chain funds, open and close channels, and add funds to or move funds out of channels"
   },
   address: {
     name: "Addresses",

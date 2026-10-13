@@ -197,6 +197,10 @@
           ({{ estimate.amountSat | btc }} BTC,
           {{ estimate.amountSat | satsToFiat }}) go to
           <template v-if="toWallet">your Bitcoin wallet.</template>
+          <template v-else-if="toCloseAddress"
+            >the address chosen when this channel was opened, the only one
+            its funds can go to:</template
+          >
           <template v-else>this address:</template>
         </p>
         <p v-if="!toWallet" class="text-monospace address-groups">
@@ -371,10 +375,20 @@ export default {
     isIn() {
       return this.direction === "in";
     },
+    // Where the funds go, as the node's estimate says: "Your Bitcoin
+    // wallet" is the channel's close address when it was opened with one,
+    // which may be outside this node.
     toWallet() {
+      if (this.estimate) {
+        return Boolean(this.estimate.destinationIsOurs);
+      }
+      return this.destination === "wallet";
+    },
+    toCloseAddress() {
       return (
-        this.destination === "wallet" ||
-        Boolean(this.estimate && this.estimate.destinationIsOurs)
+        !this.toWallet &&
+        this.destination === "wallet" &&
+        Boolean(this.channel.closeAddress)
       );
     },
     hasAmount() {
@@ -440,7 +454,10 @@ export default {
       );
     },
     addressGroups() {
-      return (this.address.trim().match(/.{1,4}/g) || []).join(" ");
+      const address = this.toCloseAddress
+        ? this.channel.closeAddress
+        : this.address;
+      return (address.trim().match(/.{1,4}/g) || []).join(" ");
     },
     canReview() {
       return Boolean(
