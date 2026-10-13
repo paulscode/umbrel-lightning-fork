@@ -3,9 +3,22 @@
 
 const localize = n => Number(n || 0).toLocaleString();
 
+// The refusal code a node's text starts with: lnd sends "splice refused:
+// code: details", and an aborted splice's reason is "code: details". Text
+// that doesn't start with a code (a peer's own words) is kept whole.
+export function refusalCode(reason) {
+  if (typeof reason !== "string") {
+    return reason;
+  }
+  const text = reason.replace(/^splice refused: /, "");
+  const match = /^([a-z_]+)(?::|$)/.exec(text);
+  return match ? match[1] : text;
+}
+
 // Why a resize was refused, from the node's refusal codes.
-export function refusalText(code, { minSat, maxOutSat, peerName } = {}) {
+export function refusalText(reason, { minSat, maxOutSat, peerName } = {}) {
   const peer = peerName || "Your peer";
+  const code = refusalCode(reason);
   switch (code) {
     case "":
     case undefined:
@@ -53,6 +66,9 @@ export function refusalText(code, { minSat, maxOutSat, peerName } = {}) {
         "this peer"} stopped several times today. Try again tomorrow.`;
     case "peer_offline":
       return "The peer is offline. Resizing needs both nodes online.";
+    case "peer_disconnected":
+      return `The connection to ${peerName ||
+        "your peer"} dropped before the resize was agreed. Nothing was spent; try again.`;
     case "peer_unsupported":
     case "peer_contribution_unsupported":
       return "This peer's node can't resize channels yet.";
@@ -73,7 +89,7 @@ export function refusalText(code, { minSat, maxOutSat, peerName } = {}) {
     case "internal_error":
       return "Your node ran into an error. Check its logs for details.";
     default:
-      return `The resize was refused (${code}).`;
+      return `The resize was refused (${reason}).`;
   }
 }
 

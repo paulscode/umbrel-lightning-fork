@@ -56,3 +56,19 @@ test("a stream that ends before our signatures is an error", async () => {
   call.emit("end");
   await assert.rejects(answer, (err) => err.spliceReason === undefined);
 });
+
+test("refused before it started: the node's reason, as an answer", async () => {
+  const call = stream();
+  const answer = followSplice(call, { graceMs: 1000 });
+  call.emit("error", { code: 9, details: "splice refused: pending" });
+  await assert.rejects(answer, (e) => {
+    assert.equal(e.spliceReason, "splice refused: pending");
+    assert.equal(e.reasonFromPeer, false);
+    return true;
+  });
+
+  const other = stream();
+  const failed = followSplice(other, { graceMs: 1000 });
+  other.emit("error", { code: 14, details: "connection refused" });
+  await assert.rejects(failed, (e) => e.spliceReason === undefined);
+});

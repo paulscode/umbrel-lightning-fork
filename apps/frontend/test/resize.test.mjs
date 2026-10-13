@@ -19,7 +19,7 @@ const NODE_CODES = [
   "peer_contribution_unsupported", "peer_misbehaved", "insufficient_funds",
   "below_min", "above_max_out", "peer_offline", "peer_unsupported",
   "too_many_splices", "too_many_aborts", "close_address_set",
-  "relay_rejected", "funding_spent_unknown",
+  "relay_rejected", "funding_spent_unknown", "peer_disconnected",
 ];
 
 test("every refusal code the node sends has its own sentence", () => {
@@ -32,6 +32,22 @@ test("every refusal code the node sends has its own sentence", () => {
   }
   assert.equal(resize.refusalText(""), "");
   assert.match(resize.refusalText("new_code"), /new_code/);
+});
+
+test("a refusal with details is worded by its code", () => {
+  const fee = resize.refusalText("fee_below_floor");
+  assert.equal(
+    resize.refusalText("fee_below_floor: 253 sat/kw replacing 500 sat/kw"),
+    fee
+  );
+  assert.equal(
+    resize.refusalText("splice refused: fee_below_floor: 1 sat/vB"),
+    fee
+  );
+  assert.equal(resize.refusalText("splice refused: pending"),
+    resize.refusalText("pending"));
+  // A peer's own words aren't a code: shown as they are.
+  assert.match(resize.refusalText("changed my mind"), /changed my mind/);
 });
 
 test("refusals carry their amounts", () => {

@@ -57,7 +57,24 @@ function followSplice(call, { graceMs = SIGNED_GRACE_MS } = {}) {
     // Once our signatures went out the resize can no longer be dropped: a
     // stream that fails after that still answers "signed".
     call.on("error", (error) => {
-      finish(() => (signed ? resolve(answer(signed)) : reject(new LndError("Unable to resize the channel", error))));
+      if (signed) {
+        finish(() => resolve(answer(signed)));
+        return;
+      }
+      // Refused before it started (FAILED_PRECONDITION: "splice refused:
+      // code: details"; INVALID_ARGUMENT: a request out of range): an
+      // answer, worded by its code, not an error of the node's.
+      const refused = error && (error.code === 9 || error.code === 3) && error.details;
+      finish(() =>
+        reject(
+          refused
+            ? Object.assign(new LndError("The resize did not go through", error), {
+                spliceReason: error.details,
+                reasonFromPeer: false,
+              })
+            : new LndError("Unable to resize the channel", error)
+        )
+      );
     });
     call.on("end", () => {
       finish(() =>
