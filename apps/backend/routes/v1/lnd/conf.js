@@ -12,13 +12,19 @@ const { isHostPort } = require("utils/peerAddress");
 
 router.get('/lnd-config', safeHandler(async(req, res) => {
     const settings = await diskService.readJsonFile(constants.JSON_SETTINGS_FILE);
-    return res.json(configLogic.normalizeSettings(settings.lnd));
+    // Resize Channels off is not saved (lnd's default; see logic/config.js):
+    // the form gets it as a value all the same.
+    return res.json({ 'protocol.splice': false, ...configLogic.normalizeSettings(settings.lnd) });
   }));
 
 // POSTing an empty object {} for lndConfig triggers a reset to DEFAULT_CONFIG
 router.post('/lnd-config', safeHandler(async (req, res) => {
     // TODO: remove mapKeys if we remove legacy camelCaseReqMiddleware (converts req keys to camelCase)
     const newLndConfig = Object.keys(req.body.lndConfig).length > 0 ? mapKeys(req.body.lndConfig) : DEFAULT_CONFIG;
+    // Absent, Resize Channels is off, as it is never saved off.
+    if (newLndConfig !== DEFAULT_CONFIG && newLndConfig['protocol.splice'] === undefined) {
+        newLndConfig['protocol.splice'] = false;
+    }
 
     const validationErrors = validateSettings(newLndConfig);
     if (validationErrors.length > 0) {

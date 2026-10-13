@@ -304,7 +304,7 @@
                       id="splice-channels"
                       class="align-self-center"
                       :on="settings['protocol.splice']"
-                      @toggle="status => { settings['protocol.splice'] = status; spliceChosen = true; }"
+                      @toggle="status => { $set(settings, 'protocol.splice', status); spliceChosen = true; }"
                       ></toggle-switch>
                     </div>
                   </div>
