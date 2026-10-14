@@ -26,7 +26,7 @@ test("pending channels carry their status flags (lnd field 11)", () => {
 // Splicing: every field the routes read, with lnd's number.
 test("splice fields carry lnd's numbers", () => {
   const want = {
-    Channel: { splice_status: 1002, pending_splice: 1003, last_splice: 1004, original_channel_point: 1005, original_chan_id: 1006 },
+    Channel: { close_address: 25, splice_status: 1002, pending_splice: 1003, last_splice: 1004, original_channel_point: 1005, original_chan_id: 1006 },
     PendingSplice: {
       initiator: 1, state: 2, local_delta_sat: 3, remote_delta_sat: 4, fee_sat: 5, our_fee_sat: 6,
       sat_per_vbyte: 7, txid: 8, broadcast_height: 9, confirmations: 10, lock_depth: 11, we_locked: 12,

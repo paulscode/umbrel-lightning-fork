@@ -1319,6 +1319,10 @@ message Channel {
     */
     bool static_remote_key = 22 [json_name = "static_remote_key"];
 
+    /// The address a cooperative close pays out to, set when the channel was
+    /// opened with one; funds a resize moves out go there too.
+    string close_address = 25 [json_name = "close_address"];
+
     /// Whether the channel's signatures bind to this chain (option_unified_sigs).
     bool unified_sigs = 1001 [json_name = "unified_sigs"];
 
