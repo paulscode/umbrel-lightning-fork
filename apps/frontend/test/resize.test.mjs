@@ -132,3 +132,22 @@ test("a fee rate under the floor names the node's minimum, not the network's", (
   assert.match(text, /12 sat\/vB/);
   assert.doesNotMatch(text, /network relays/);
 });
+
+test("a failed resize points to a normal close, not a force close", () => {
+  const out = resize.pendingText(pending({ dead: true, localDeltaSat: "-300640" }));
+  assert.match(out, /Closing the channel normally/);
+  assert.match(out, /300,640 sats it was moving out/);
+  assert.doesNotMatch(out, /force/i);
+  assert.doesNotMatch(resize.pendingText(pending({ dead: true })), /moving out/);
+  assert.match(resize.statusText("pending", { dead: true }), /closing the channel normally/i);
+  assert.match(resize.statusText("pending"), /once it's done/);
+});
+
+test("a failed resize allows a normal close in the channel's page", () => {
+  const vue = fs.readFileSync(
+    new URL("../src/components/Channels/Manage.vue", import.meta.url),
+    "utf8"
+  );
+  assert.match(vue, /!this\.pendingSplice \|\| this\.pendingSplice\.dead/);
+  assert.doesNotMatch(vue, /can only be\s+force\s+closed/);
+});

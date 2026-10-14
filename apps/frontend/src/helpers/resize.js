@@ -97,7 +97,7 @@ export function refusalText(reason, { minSat, maxOutSat, minSatPerVbyte, peerNam
 
 // Why the resize buttons can't be used, from the channel's splice status.
 // Empty when they can; null when they are hidden.
-export function statusText(status, { platform } = {}) {
+export function statusText(status, { platform, dead } = {}) {
   switch (status) {
     case "":
     case "ok":
@@ -116,7 +116,9 @@ export function statusText(status, { platform } = {}) {
     case "zero_conf":
       return "Channels that were usable before their first confirmation can't be resized yet.";
     case "pending":
-      return "A resize is in progress. You can start another once it's done.";
+      return dead
+        ? "A failed resize stays on this channel until it is closed, so a new one can't start. Closing the channel normally returns your balance to your wallet."
+        : "A resize is in progress. You can start another once it's done.";
     case "peer_not_locked":
       return "Your node considers the last resize done, but the peer still hasn't confirmed it, long after it was deep enough. The channel works at its old size meanwhile. If the peer never does, the only way out is to force close the channel.";
     case "peer_not_announcing":
@@ -144,11 +146,15 @@ export function pendingText(pending, { peerName, blockMinutes } = {}) {
     return "";
   }
   const peer = peerName || "Your peer";
-  if (pending.dead) {
-    return "This resize can no longer go through: one of the coins in it was spent elsewhere. The channel works at its old size. To get rid of the failed resize, the channel has to be force closed, or you can keep using it as it is.";
-  }
   const localDelta = Number(pending.localDeltaSat) || 0;
   const remoteDelta = Number(pending.remoteDeltaSat) || 0;
+  if (pending.dead) {
+    const held =
+      localDelta < 0
+        ? ` Until then, the ${localize(-localDelta)} sats it was moving out can't be sent in payments.`
+        : "";
+    return `This resize can no longer go through: one of the coins in it was spent elsewhere. The channel works at its old size, but the failed resize stays on it until the channel is closed, and no new resize can start.${held} Closing the channel normally returns your full balance to your wallet.`;
+  }
   let what;
   if (isPeerInitiated(pending.initiator)) {
     if (remoteDelta >= 0) {

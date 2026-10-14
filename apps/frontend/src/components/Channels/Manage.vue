@@ -111,8 +111,8 @@
           <b-alert v-if="pendingSplice.dead" variant="warning" show class="mb-0">
             {{ pendingSummary }}
             <div class="mt-2">
-              <b-button size="sm" variant="outline-danger" @click="view = 'force'">
-                Force close…
+              <b-button size="sm" variant="outline-secondary" @click="reviewChannelClose">
+                Close channel…
               </b-button>
             </div>
           </b-alert>
@@ -307,13 +307,6 @@
             > ({{ spliceConfirmationsLeft }} confirmation{{ spliceConfirmationsLeft === 1 ? "" : "s" }} left)</template>.
           </p>
         </template>
-        <template v-else-if="pendingSplice && pendingSplice.dead">
-          <h3 class="mb-3">This channel has a failed resize</h3>
-          <p>
-            A channel with a resize that can no longer go through can only be
-            force closed. You can also keep using it at its old size.
-          </p>
-        </template>
         <template v-else-if="channel.status === 'Offline'">
           <h3 class="mb-3">The peer is offline</h3>
           <p>
@@ -497,8 +490,12 @@ export default {
         statusText(this.channel.spliceStatus) !== null
       );
     },
+    // A failed resize doesn't stand in the way: it can never confirm.
     canCoopClose() {
-      return this.channel.status === "Online" && !this.pendingSplice;
+      return (
+        this.channel.status === "Online" &&
+        (!this.pendingSplice || this.pendingSplice.dead)
+      );
     },
     // The delay in blocks, and in time only at the chain's recent pace
     // when known: this chain's blocks don't come every ten minutes.
@@ -563,6 +560,7 @@ export default {
     openResize(direction, amount) {
       const why = statusText(this.channel.spliceStatus, {
         platform: this.$store.state.system.platform,
+        dead: Boolean(this.pendingSplice && this.pendingSplice.dead),
       });
       // Said in the details; it doesn't stop a resize.
       if (why && this.channel.spliceStatus !== "peer_not_announcing") {
