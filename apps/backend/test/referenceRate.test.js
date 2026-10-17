@@ -177,3 +177,32 @@ test("BTC/USD is CoinGecko's at most every five minutes, else mempool.space's", 
   assert.equal(v.asked[ref.COINGECKO_RATES_URL], 2);
   assert.equal(v.asked[ref.MEMPOOL_PRICES_URL], 2);
 });
+
+test("half the spread of the venue the rate is from, capped", async () => {
+  assert.ok(Math.abs(ref.halfSpreadOf(0.00495, 0.00505) - 0.01) < 1e-12);
+  assert.equal(ref.halfSpreadOf(0.004, 0.006), ref.HALF_SPREAD_CAP);
+  assert.equal(ref.halfSpreadOf(0.005, 0.004), 0, "a crossed book");
+  assert.equal(ref.halfSpreadOf(undefined, 0.005), 0);
+  assert.ok(Math.abs(ref.minimumRate({ rate: 0.005, volatility: 0.02, halfSpread: 0.01 }, 0.05) - 0.005 / 1.08) < 1e-15);
+  assert.equal(ref.allowance({ volatility: 0.02 }, 0.05), 0.07);
+
+  // From Neoxa's ticker, and from NonKYC's when that is the rate.
+  const neoxaBook = async (url) => {
+    if (url === ref.TICKER_URL) {
+      return { success: true, pair: "BTCB2_BTC", ticker: { lastPrice: 0.006, bestBid: 0.00597, bestAsk: 0.00603 } };
+    }
+    if (url === ref.NONKYC_TICKER_URL) {
+      return { ticker_id: "BTCB2_USDT", last_price: "494.7", bid: "489.75", ask: "499.65" };
+    }
+    if (url === ref.COINGECKO_RATES_URL) {
+      return { rates: { usd: { value: 85000 } } };
+    }
+    throw new Error("down");
+  };
+  const got = await ref.createReferenceRate({ fetchJson: neoxaBook, log: () => {} }).get();
+  assert.equal(got.source, "NonKYC");
+  assert.ok(Math.abs(got.halfSpread - 9.9 / 989.4) < 1e-12, `${got.halfSpread}`);
+  const alone = await ref.createReferenceRate({ fetchJson: (url) => (url === ref.NONKYC_TICKER_URL ? Promise.reject(new Error("403")) : neoxaBook(url)), log: () => {} }).get();
+  assert.equal(alone.source, "Neoxa");
+  assert.ok(Math.abs(alone.halfSpread - 0.005) < 1e-12, `${alone.halfSpread}`);
+});

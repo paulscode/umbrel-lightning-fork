@@ -254,14 +254,14 @@ function memoryFiles() {
   };
 }
 
-function referenceFeed({ rate = REFERENCE, down = false, candles = [] } = {}) {
+function referenceFeed({ rate = REFERENCE, bid, ask, down = false, candles = [] } = {}) {
   return createReferenceRate({
     fetchJson: async (url) => {
       if (down) {
         throw new Error("connect ETIMEDOUT");
       }
       return url.includes("ticker")
-        ? { success: true, pair: "BTCB2_BTC", ticker: { lastPrice: rate } }
+        ? { success: true, pair: "BTCB2_BTC", ticker: { lastPrice: rate, bestBid: bid, bestAsk: ask } }
         : { success: true, pair: "BTCB2_BTC", interval: "5m", candles };
     },
     clock: () => NOW,
@@ -623,6 +623,42 @@ test("a price too far from the market rate is not paid, whatever the user agreed
   } finally {
     await swing.close();
   }
+});
+
+test("half the venue's bid/ask spread widens what is allowed, up to a cap", async () => {
+  // The service's 1% spread at these rates: 0.00479 is 5.4% under the
+  // market's 0.005 and 0.00474 is 6.5% under.
+  const pays = async (rate, reference) => {
+    const w = await world({ behave: { rate }, reference });
+    try {
+      const x = bitcoinInvoice(w.ledger);
+      const res = await w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: 10_000_000 }).catch((e) => e);
+      return res.status === "succeeded" ? true : res.refusal;
+    } finally {
+      await w.close();
+    }
+  };
+  // Shown before paying, too.
+  const shown = await world({ behave: { rate: 0.00479 }, reference: { bid: 0.00495, ask: 0.00505 } });
+  try {
+    const t = await shown.mobile.decode(bitcoinInvoice(shown.ledger).request, CAPABLE);
+    assert.ok(Math.abs(t.reference.premiumAllowed - 0.06) < 1e-12, `${t.reference.premiumAllowed}`);
+    assert.equal(t.reference.withinLimit, true);
+    assert.equal(t.messageCode, null);
+  } finally {
+    await shown.close();
+  }
+  // Without a book, 5% alone: 5.4% under is refused.
+  assert.equal(await pays(0.00479, {}), "rate");
+  // A book 0.00495..0.00505 adds 1%: 5.4% is inside 6%, 6.5% is not.
+  const book = { bid: 0.00495, ask: 0.00505 };
+  assert.equal(await pays(0.00479, book), true);
+  assert.equal(await pays(0.00474, book), "rate");
+  // A book 0.004..0.006 would add 20%; it adds 2%: 6.5% is inside 7%,
+  // 7.5% (0.00469) is not.
+  const wide = { bid: 0.004, ask: 0.006 };
+  assert.equal(await pays(0.00474, wide), true);
+  assert.equal(await pays(0.00469, wide), "rate");
 });
 
 test("without the market rate nothing is paid", async () => {

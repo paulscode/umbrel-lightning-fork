@@ -201,7 +201,10 @@
             </div>
             <small class="d-block text-muted">
               Your premium below, plus the market's own movement over the last
-              hour ({{ percent(status.reference.volatilityAllowance) }}).
+              hour ({{ percent(status.reference.volatilityAllowance) }}) and
+              half the gap between its buyers and sellers ({{
+                percent(status.reference.spreadAllowance || 0)
+              }}).
             </small>
           </template>
         </div>

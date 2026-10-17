@@ -12,9 +12,12 @@
 //
 // A price is accepted when it is no worse for the payer than that rate by
 // more than the premium the user allows, widened by how far the market itself
-// moved in the last hour: a service that set its rate at the top of a swing
-// must not be refused for the swing. The widening is capped, so a market in
-// turmoil cannot open the door to any price at all.
+// moved in the last hour (a service that set its rate at the top of a swing
+// must not be refused for the swing) and by half the bid/ask spread of the
+// venue the rate is from (a bridge prices from the side of the book a swap
+// trades against, which on a wide book sits that far from the ticker's
+// middle). Both widenings are capped, so a market in turmoil or a broken
+// book cannot open the door to any price at all.
 //
 // Without a usable rate nothing is paid: the check is never skipped.
 const { ValidationError } = require("../models/errors.js");
@@ -42,6 +45,7 @@ const FAILURE_TTL_MS = 15 * 1000;
 // what is allowed.
 const WINDOW_SECONDS = 60 * 60;
 const VOLATILITY_CAP = 0.1;
+const HALF_SPREAD_CAP = 0.02;
 
 const UNAVAILABLE = "The market rate to check the service's price against is not available right now, so nothing was paid. Try again in a minute.";
 
@@ -139,10 +143,27 @@ function worseVenue(neoxa, second) {
   return { rate: Math.max(second, neoxa * (1 - MAX_VENUE_GAP)), source: "NonKYC" };
 }
 
+// Half a ticker's bid/ask spread as a fraction of its middle, capped; zero
+// without a usable book, which only ever allows less.
+function halfSpreadOf(bid, ask) {
+  const b = positive(bid);
+  const a = positive(ask);
+  if (!b || !a || b > a) {
+    return 0;
+  }
+  return Math.min(HALF_SPREAD_CAP, (a - b) / (a + b));
+}
+
+// What a price may be above the reference rate: the user's premium, the
+// market's movement and half the venue's spread.
+function allowance(reference, premium) {
+  return premium + reference.volatility + (reference.halfSpread || 0);
+}
+
 // The worst rate (outgoing per incoming, bitcoin per BTCB2) a price may
 // have and still be accepted.
 function minimumRate(reference, premium) {
-  return reference.rate / (1 + premium + reference.volatility);
+  return reference.rate / (1 + allowance(reference, premium));
 }
 
 function defaultFetchJson(url) {
@@ -198,11 +219,14 @@ function createReferenceRate({
     }
     const nk = nonKYCRate(second);
     const { rate, source } = worseVenue(neoxa, nk && dollars ? nk / dollars : null);
+    // The spread is the venue's whose rate this is.
+    const halfSpread = source === "NonKYC" ? halfSpreadOf(second.bid, second.ask) : halfSpreadOf(ticker.ticker.bestBid, ticker.ticker.bestAsk);
     // The hour's range is Neoxa's, measured against the rate it widens.
-    return { rate, volatility: volatilityOf(candles, neoxa, clock()), at: clock(), source };
+    return { rate, volatility: volatilityOf(candles, neoxa, clock()), halfSpread, at: clock(), source };
   }
 
-  // {rate, volatility, at, source}, or a ValidationError with a sentence.
+  // {rate, volatility, halfSpread, at, source}, or a ValidationError with a
+  // sentence.
   async function get() {
     if (!entry || (!entry.pending && now() - entry.at >= entry.ttl)) {
       const pending = load()
@@ -238,6 +262,9 @@ module.exports = {
   USD_TTL_MS,
   volatilityOf,
   minimumRate,
+  allowance,
+  halfSpreadOf,
+  HALF_SPREAD_CAP,
   TICKER_URL,
   CANDLES_URL,
   VOLATILITY_CAP,

@@ -19,7 +19,7 @@ const path = require("path");
 const { ValidationError } = require("../models/errors.js");
 const { parseBridgeCode, BridgeCodeError } = require("../utils/bridgeCode.js");
 const { createBridgeClient, refusal, REFUSALS } = require("./bitcoinBridge.js");
-const { createReferenceRate, minimumRate } = require("./referenceRate.js");
+const { createReferenceRate, minimumRate, allowance } = require("./referenceRate.js");
 
 const DIRECTION = "toSHA256";
 const DEFAULT_PREMIUM = 0.05;
@@ -395,7 +395,14 @@ function createBitcoinInvoices({
     }
     try {
       const ref = await reference.get();
-      out.reference = { rate: ref.rate, volatilityAllowance: ref.volatility, premiumAllowed: premium() + ref.volatility, at: ref.at, source: ref.source };
+      out.reference = {
+        rate: ref.rate,
+        volatilityAllowance: ref.volatility,
+        spreadAllowance: ref.halfSpread || 0,
+        premiumAllowed: allowance(ref, premium()),
+        at: ref.at,
+        source: ref.source,
+      };
     } catch (error) {
       out.referenceError = error.message;
     }
@@ -481,7 +488,7 @@ function createBitcoinInvoices({
     const out = { estimate };
     try {
       const ref = await reference.get();
-      const allowed = premium() + ref.volatility;
+      const allowed = allowance(ref, premium());
       const effective = amountMsat / est.incomingMsat;
       const withinLimit = effective >= minimumRate(ref, premium());
       out.reference = {
@@ -521,7 +528,7 @@ function createBitcoinInvoices({
     const outcome = beforePaying ? "so it can't be paid from here" : "so nothing was paid";
     return refuse(
       "rate",
-      `The service's price is ${percent(over)} above the market rate, more than the ${percent(premium() + ref.volatility)} allowed, ${outcome}. You can change what is allowed in the dashboard's settings, under Paying SHA256 invoices.`
+      `The service's price is ${percent(over)} above the market rate, more than the ${percent(allowance(ref, premium()))} allowed, ${outcome}. You can change what is allowed in the dashboard's settings, under Paying SHA256 invoices.`
     );
   }
 
