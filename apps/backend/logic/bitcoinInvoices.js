@@ -29,8 +29,11 @@ const MAX_PREMIUM = 0.25;
 // spread moving between the estimate and the quote. The estimate shows the
 // ceiling it gives, and the payment is held to the ceiling the user saw.
 const PRICE_TOLERANCE = 0.005;
-// The least time a request from the service must have left to be paid.
-const MIN_HOLD_SECONDS = 20;
+// The least time a request from the service must have left to be paid:
+// enough to check it and start the payment. A service's quote may last no
+// longer than the SHA256 invoice it pays, less a few seconds, so for an
+// invoice that lives a minute this is most of what there is.
+const MIN_HOLD_SECONDS = 10;
 // The least its own expiry must be ahead of this node's clock, which LND
 // checks it against before paying anything.
 const LOCAL_EXPIRY_MARGIN_SECONDS = 5;

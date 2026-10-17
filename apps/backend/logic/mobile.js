@@ -22,6 +22,11 @@ const {
 } = require("./bitcoinInvoices.js");
 
 const DEFAULT_INVOICE_EXPIRY = 3600;
+// How long after its request to pay a SHA256 invoice runs out, by this
+// node's clock, a service may still be holding it: the deadline here is
+// counted from when it was asked for, so the service's own expiry can be a
+// few seconds later, and the service ends a request about a second after.
+const QUOTE_END_SECONDS = 5;
 const MAX_INVOICE_EXPIRY = 7 * 24 * 3600;
 // lnd allows 639 bytes of BOLT 11 description; count bytes, not characters.
 const MAX_MEMO_BYTES = 639;
@@ -1548,8 +1553,11 @@ function createMobile({
           }
           throw alreadyPaid();
         }
-        if (error.refusal === "in_progress" && last && attemptDeadline(last) > now()) {
-          const seconds = Math.max(1, attemptDeadline(last) - now());
+        // Its last request for this invoice, too near its end to pay: the
+        // service turns down a new one until it has ended that one, a few
+        // seconds after it ran out (QUOTE_END_SECONDS).
+        if (error.refusal === "in_progress" && last && attemptDeadline(last) + QUOTE_END_SECONDS > now()) {
+          const seconds = Math.max(1, attemptDeadline(last) + QUOTE_END_SECONDS - now());
           throw refuse(
             "in_progress",
             `The service is still holding its last price for this invoice. Try again in ${seconds} seconds.`,

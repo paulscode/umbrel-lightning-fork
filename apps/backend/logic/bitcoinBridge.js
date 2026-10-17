@@ -19,10 +19,11 @@ const net = require("net");
 const tls = require("tls");
 const { ValidationError } = require("../models/errors.js");
 
-// A bridge's quote holds for a minute, and the check before paying needs
-// MIN_HOLD_SECONDS (20) of it left after decoding the request and reading the
-// market rate: a quote that took longer than half of it to arrive is not
-// waited for.
+// A bridge's quote holds for a minute at most (less for an invoice that
+// expires sooner), and the check before paying needs MIN_HOLD_SECONDS (10)
+// of it left, counted from when it was asked for: a quote that took longer
+// than half a minute to arrive is not waited for, and a shorter one that
+// arrives with too little left is refused by that check.
 const TIMEOUT_MS = { info: 30 * 1000, quote: 30 * 1000, swap: 30 * 1000 };
 const MAX_RESPONSE_BYTES = 1024 * 1024;
 
@@ -37,7 +38,7 @@ const REFUSALS = {
   no_amount: [400, "This invoice does not say how much to pay, so it can't be paid from here."],
   too_small: [400, "This amount is less than the service pays."],
   too_large: [400, "This amount is more than the service pays at once."],
-  expires_soon: [400, "This invoice expires too soon to be paid safely."],
+  expires_soon: [400, "This invoice expires too soon to pay through the service. Ask for a new invoice and pay it right away."],
   route_budget: [400, "The recipient's node asks for more time than the service can give a payment, so it can't be paid this way."],
   no_route: [400, "The service can't reach this invoice's recipient within its limits, so it can't be paid this way. Nothing was paid."],
   self_payment: [400, "This invoice was made by the service's own node."],

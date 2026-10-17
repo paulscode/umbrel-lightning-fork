@@ -584,7 +584,7 @@ const HOSTILE = [
   ["another node", { payee: "02" + "99".repeat(32) }, "invalid_hold_invoice", /invalid payment request, so nothing was paid/],
   ["an invoice without option_blake2b", { noBlake2b: true }, "invalid_hold_invoice", /nothing was paid/],
   ["more than the user agreed to", { amountFactor: 1.01 }, "price_changed", /more than the .* you agreed to, so nothing was paid/],
-  ["a request about to expire", { expiresIn: 10 }, "hold_expiring", /expire before it could be paid/],
+  ["a request about to expire", { expiresIn: 9 }, "hold_expiring", /expire before it could be paid/],
 ];
 
 for (const [what, behave, code, message] of HOSTILE) {
@@ -714,8 +714,12 @@ test("a quote's time left is the service's own, whatever its clock says", async 
   // A minute's quote from a service whose clock is 50 s behind: its
   // expiry reads 10 s away here, and it has a minute.
   assert.equal(await pays({ expiresIn: 60, clockSkew: -50 }), true);
-  // 50 s ahead with 15 s left: it reads 65 s away here, and is not paid.
-  assert.equal(await pays({ expiresIn: 15, clockSkew: 50 }), "hold_expiring");
+  // 50 s ahead with 9 s left: it reads 59 s away here, and is not paid.
+  assert.equal(await pays({ expiresIn: 9, clockSkew: 50 }), "hold_expiring");
+  // Ten seconds left is enough to pay it: a quote for an invoice that
+  // lives a minute is never much longer.
+  assert.equal(await pays({ expiresIn: 10 }), true);
+  assert.equal(await pays({ expiresIn: 10, clockSkew: 50 }), true);
   // A request already expired by this node's clock is refused before LND
   // refuses it: its own expiry is ten minutes, the service 11 minutes
   // behind.
@@ -732,6 +736,50 @@ test("a quote is waited for half its minute at most", async () => {
   });
   await client.quote({ macaroon: MACAROON }, "lnbc1");
   assert.deepEqual(seen, [["/v2/bridge/quote", 30 * 1000]]);
+});
+
+test("a request too near its end to pay: how long until the service takes a new one", async () => {
+  const w = await world({ behave: { expiresIn: 60 } });
+  try {
+    const x = bitcoinInvoice(w.ledger);
+    const est = await estimateOf(w, x.request);
+    // Refused for its price, which leaves it standing at the service.
+    await assert.rejects(() => w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: est.incomingSat - 1 }), (e) => e.refusal === "price_changed");
+    // Five seconds left: too few to pay, and the service still holds it.
+    w.tick(55);
+    const args = { request: x.request, maxIncomingSat: est.maxIncomingSat };
+    await assert.rejects(
+      () => w.mobile.payBitcoinInvoice(args),
+      (e) => e.refusal === "in_progress" && e.statusCode === 409 && e.details.retryAfterSeconds === 10 && /Try again in 10 seconds/.test(e.message)
+    );
+    // Run out by this node's clock, not yet ended by the service.
+    w.tick(7);
+    await assert.rejects(
+      () => w.mobile.payBitcoinInvoice(args),
+      (e) => e.refusal === "in_progress" && e.details.retryAfterSeconds === 3 && /still holding its last price/.test(e.message)
+    );
+    assert.equal(w.lnd.sends.length, 0);
+    // Ended there: a new request, paid.
+    w.ledger.swaps.get(x.hash).state = "expired";
+    const paid = await w.mobile.payBitcoinInvoice(args);
+    assert.equal(paid.status, "succeeded");
+  } finally {
+    await w.close();
+  }
+});
+
+test("an invoice too near its end for the service says to ask for a new one", async () => {
+  const w = await world({ behave: { quoteError: [400, "expires_soon", "the invoice has 29s left, less than the 20s a quote needs"] } });
+  try {
+    const x = bitcoinInvoice(w.ledger);
+    await assert.rejects(
+      () => w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: 1000 }),
+      (e) => e.refusal === "expires_soon" && e.statusCode === 400 && /expires too soon to pay through the service\. Ask for a new invoice and pay it right away\./.test(e.message)
+    );
+    assert.equal(w.lnd.sends.length, 0);
+  } finally {
+    await w.close();
+  }
 });
 
 test("without the market rate nothing is paid", async () => {

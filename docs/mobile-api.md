@@ -237,7 +237,7 @@ only if, decoded by the node:
    middle of its last trade, best bid and best ask), or NonKYC's BTCB2_USDT
    over BTC/USD when lower (down to 4% under Neoxa), fetched over Tor when
    the node has a Tor proxy, and **without it nothing is paid**;
-6. it has at least 20 seconds left by the service's own clock, counted from
+6. it has at least 10 seconds left by the service's own clock, counted from
    when the node asked for it (the two clocks may differ), and has not
    expired by the node's;
 7. it holds the payment for at most 2016 blocks of this chain (its final
