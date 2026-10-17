@@ -111,9 +111,9 @@ test("the worse venue for the payer, down to the bridge's bound under Neoxa", ()
   assert.deepEqual(ref.worseVenue(0.006, null), { rate: 0.006, source: "Neoxa" });
   assert.deepEqual(ref.worseVenue(0.006, 0.0062), { rate: 0.006, source: "Neoxa" });
   assert.deepEqual(ref.worseVenue(0.006, 0.00582), { rate: 0.00582, source: "NonKYC" });
-  // 10% under: no further than 4%.
+  // 10% under: no further than 4%, and said to be held there.
   const far = ref.worseVenue(0.006, 0.0054);
-  assert.ok(Math.abs(far.rate - 0.006 * (1 - ref.MAX_VENUE_GAP)) < 1e-15 && far.source === "NonKYC");
+  assert.ok(Math.abs(far.rate - 0.006 * (1 - ref.MAX_VENUE_GAP)) < 1e-15 && far.source === "NonKYC" && far.floored);
 });
 
 // A fake market: Neoxa's ticker at `neoxa`, NonKYC's at `usdt` dollars, and
@@ -201,8 +201,39 @@ test("half the spread of the venue the rate is from, capped", async () => {
   };
   const got = await ref.createReferenceRate({ fetchJson: neoxaBook, log: () => {} }).get();
   assert.equal(got.source, "NonKYC");
-  assert.ok(Math.abs(got.halfSpread - 9.9 / 989.4) < 1e-12, `${got.halfSpread}`);
+  // NonKYC's is 1%, Neoxa's 0.5%: the narrower.
+  assert.ok(Math.abs(got.halfSpread - 0.005) < 1e-12, `${got.halfSpread}`);
   const alone = await ref.createReferenceRate({ fetchJson: (url) => (url === ref.NONKYC_TICKER_URL ? Promise.reject(new Error("403")) : neoxaBook(url)), log: () => {} }).get();
   assert.equal(alone.source, "Neoxa");
   assert.ok(Math.abs(alone.halfSpread - 0.005) < 1e-12, `${alone.halfSpread}`);
+});
+
+// NonKYC pushed down and its book widened, in a quiet hour: the rate is held
+// 4% under Neoxa and nothing is added for NonKYC's spread on top, where the
+// floor and the spread's cap together let a price 11.5% over Neoxa through.
+// Short of the floor, NonKYC's spread counts only as far as Neoxa's.
+test("a spread widened on NonKYC widens nothing", async () => {
+  const market = (usdt, bid, ask) => async (url) => {
+    if (url === ref.TICKER_URL) {
+      return { success: true, pair: "BTCB2_BTC", ticker: { lastPrice: 0.006, bestBid: 0.00597, bestAsk: 0.00603 } };
+    }
+    if (url === ref.NONKYC_TICKER_URL) {
+      return { ticker_id: "BTCB2_USDT", last_price: String(usdt), bid: String(bid), ask: String(ask) };
+    }
+    if (url === ref.COINGECKO_RATES_URL) {
+      return { rates: { usd: { value: 85000 } } };
+    }
+    throw new Error("down");
+  };
+  // 10% under Neoxa, with a 10% spread.
+  const pushed = await ref.createReferenceRate({ fetchJson: market(459, 436, 482), log: () => {} }).get();
+  assert.equal(pushed.source, "NonKYC");
+  assert.equal(pushed.halfSpread, 0);
+  const over = 0.006 / ref.minimumRate(pushed, 0.05) - 1;
+  assert.ok(over < 0.096, `a price ${over} over Neoxa is accepted`);
+
+  // 3% under, with a 6% spread: Neoxa's 0.5%.
+  const wide = await ref.createReferenceRate({ fetchJson: market(494.7, 480, 510), log: () => {} }).get();
+  assert.equal(wide.source, "NonKYC");
+  assert.ok(Math.abs(wide.halfSpread - 0.005) < 1e-12, `${wide.halfSpread}`);
 });

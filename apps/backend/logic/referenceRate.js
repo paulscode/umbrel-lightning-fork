@@ -13,11 +13,15 @@
 // A price is accepted when it is no worse for the payer than that rate by
 // more than the premium the user allows, widened by how far the market itself
 // moved in the last hour (a service that set its rate at the top of a swing
-// must not be refused for the swing) and by half the bid/ask spread of the
-// venue the rate is from (a bridge prices from the side of the book a swap
-// trades against, which on a wide book sits that far from the ticker's
-// middle). Both widenings are capped, so a market in turmoil or a broken
-// book cannot open the door to any price at all.
+// must not be refused for the swing) and by half the bid/ask spread (a bridge
+// prices from the side of the book a swap trades against, which on a wide
+// book sits that far from the ticker's middle). The spread is Neoxa's, or
+// with NonKYC the rate, the narrower of the two venues': a spread widened on
+// the venue that sets the rate, as one order each side can do on a thin book,
+// then widens nothing. Held at the floor under Neoxa, the rate is already
+// more than the venue gap allows a bridge, and nothing is added for a spread.
+// Both widenings are capped, so a market in turmoil or a broken book cannot
+// open the door to any price at all.
 //
 // Without a usable rate nothing is paid: the check is never skipped.
 const { ValidationError } = require("../models/errors.js");
@@ -135,12 +139,17 @@ function usdOf(data) {
 }
 
 // The rate a payer is checked against: Neoxa's, or the second venue's when
-// that is lower, but never more than MAX_VENUE_GAP under Neoxa's.
+// that is lower, but never more than MAX_VENUE_GAP under Neoxa's; `floored`
+// when it is held there.
 function worseVenue(neoxa, second) {
   if (!second || second >= neoxa) {
     return { rate: neoxa, source: "Neoxa" };
   }
-  return { rate: Math.max(second, neoxa * (1 - MAX_VENUE_GAP)), source: "NonKYC" };
+  const floor = neoxa * (1 - MAX_VENUE_GAP);
+  if (second < floor) {
+    return { rate: floor, source: "NonKYC", floored: true };
+  }
+  return { rate: second, source: "NonKYC" };
 }
 
 // Half a ticker's bid/ask spread as a fraction of its middle, capped; zero
@@ -218,9 +227,13 @@ function createReferenceRate({
       return null;
     }
     const nk = nonKYCRate(second);
-    const { rate, source } = worseVenue(neoxa, nk && dollars ? nk / dollars : null);
-    // The spread is the venue's whose rate this is.
-    const halfSpread = source === "NonKYC" ? halfSpreadOf(second.bid, second.ask) : halfSpreadOf(ticker.ticker.bestBid, ticker.ticker.bestAsk);
+    const { rate, source, floored } = worseVenue(neoxa, nk && dollars ? nk / dollars : null);
+    // Neoxa's spread, or with NonKYC the rate the narrower of the two, and
+    // none at the floor (see the top of this file).
+    let halfSpread = halfSpreadOf(ticker.ticker.bestBid, ticker.ticker.bestAsk);
+    if (source === "NonKYC") {
+      halfSpread = floored ? 0 : Math.min(halfSpread, halfSpreadOf(second.bid, second.ask));
+    }
     // The hour's range is Neoxa's, measured against the rate it widens.
     return { rate, volatility: volatilityOf(candles, neoxa, clock()), halfSpread, at: clock(), source };
   }
