@@ -43,6 +43,10 @@ const sha256Dir = () => process.env.SHA256_LND_DIR || path.join(lndDir(), "sha25
 const sha256BackupPath = () => path.join(sha256Dir(), "data/chain/bitcoin", process.env.LND_NETWORK || "mainnet", "channel.backup");
 const sha256StatePath = () => path.join(lndDir(), ".channel-backup-sha256-state.json");
 
+const LABELS = {sftp: "SFTP", nextcloud: "Nextcloud", dropbox: "Dropbox", gdrive: "Google Drive", agent: "Channel backup"};
+const labelOf = provider => LABELS[provider] || provider;
+const PUBLISH_NEEDS = "publishing needs a home page, a privacy policy link and an authorized domain under Branding, and no logo";
+
 // ---------- the configuration file
 
 function emptyOauth() {
@@ -190,10 +194,20 @@ function publicConfig(cfg = readConfig()) {
     } else if (p === "nextcloud") {
       out[p] = {...base, url: t.url, user: t.user, hasPass: Boolean(t.pass), insecureTls: Boolean(t.insecureTls)};
     } else {
-      out[p] = {...base, clientId: t.clientId, hasClientSecret: Boolean(t.clientSecret), hasToken: Boolean(t.token)};
+      out[p] = {
+        ...base, clientId: t.clientId, hasClientSecret: Boolean(t.clientSecret), hasToken: Boolean(t.token),
+        signinRefused: Boolean(t.token) && signinRefused(p),
+      };
     }
   }
   return out;
+}
+
+// Whether the provider refused the saved sign-in when LND's agent last tried
+// it. The bridge node's agent uses the same sign-in, but its record can be
+// left over from before the bridge was turned off, so it is not consulted.
+function signinRefused(provider, state = readState()) {
+  return state.failures.some(f => f.target === provider && f.code === "signin");
 }
 
 // ---------- validation
@@ -354,6 +368,15 @@ function httpsPostForm(host, pathname, form, headers) {
   });
 }
 
+// Google sends refresh_token_expires_in only for a sign-in it will end, as it
+// ends every sign-in to a Cloud app still in Testing after 7 days.
+function googleSigninEnds(r, now = Date.now()) {
+  const secs = Number(r && r.refresh_token_expires_in);
+  return Number.isFinite(secs) && secs > 0 ? new Date(now + secs * 1000) : null;
+}
+
+// Returns {token, signinEnds}: the rclone token JSON, and when the provider
+// will end the sign-in, if it said so.
 async function exchangeCode(provider, clientId, clientSecret, code) {
   const id = line(clientId, "Client ID");
   const secret = line(clientSecret, "Client secret", MAX_SECRET);
@@ -365,13 +388,19 @@ async function exchangeCode(provider, clientId, clientSecret, code) {
     const r = await httpsPostForm("oauth2.googleapis.com", "/token", new URLSearchParams({
       code: authCode, client_id: id, client_secret: secret, redirect_uri: "http://localhost", grant_type: "authorization_code",
     }));
+    if (r.error === "invalid_client") {
+      throw new InputError("Google refused this client ID and client secret. Copy both again from the same client in Google Cloud.");
+    }
     if (!r.access_token || !r.refresh_token) {
       throw new InputError("Google did not return valid tokens. Re-copy the full authorization code.");
     }
-    return JSON.stringify({
-      access_token: r.access_token, token_type: r.token_type || "Bearer", refresh_token: r.refresh_token,
-      expiry: new Date(Date.now() + (r.expires_in || 3600) * 1000).toISOString(),
-    });
+    return {
+      token: JSON.stringify({
+        access_token: r.access_token, token_type: r.token_type || "Bearer", refresh_token: r.refresh_token,
+        expiry: new Date(Date.now() + (r.expires_in || 3600) * 1000).toISOString(),
+      }),
+      signinEnds: googleSigninEnds(r),
+    };
   }
   if (provider === "dropbox") {
     const r = await httpsPostForm("api.dropboxapi.com", "/oauth2/token", new URLSearchParams({
@@ -380,10 +409,13 @@ async function exchangeCode(provider, clientId, clientSecret, code) {
     if (!r.refresh_token) {
       throw new InputError("Dropbox did not return a refresh token. The code may have expired or already been used; approve the app again and paste the fresh code.");
     }
-    return JSON.stringify({
-      access_token: r.access_token, token_type: "bearer", refresh_token: r.refresh_token,
-      expiry: new Date(Date.now() + (r.expires_in || 14400) * 1000).toISOString(),
-    });
+    return {
+      token: JSON.stringify({
+        access_token: r.access_token, token_type: "bearer", refresh_token: r.refresh_token,
+        expiry: new Date(Date.now() + (r.expires_in || 14400) * 1000).toISOString(),
+      }),
+      signinEnds: null,
+    };
   }
   throw new InputError("Unknown provider");
 }
@@ -479,6 +511,8 @@ async function saveProviderNow(provider, input) {
   let next;
   let needsHostKeyConfirmation = false;
   let fingerprints = "";
+  let signinEnds = null;
+  let renewed = false;
 
   if (provider === "sftp") {
     const host = line(input.host, "SFTP host");
@@ -529,16 +563,26 @@ async function saveProviderNow(provider, input) {
   } else {
     const google = provider === "gdrive";
     const clientId = line(input.clientId, "Client ID");
-    const clientSecret = forget ? "" : line(input.clientSecret, "Client secret", MAX_SECRET) || (prev && prev.clientSecret) || "";
+    const newSecret = line(input.clientSecret, "Client secret", MAX_SECRET);
+    // The stored secret belongs to the stored client: kept for another one,
+    // it would be refused only at the code exchange, or by rclone later.
+    if (!forget && prev && prev.clientId && clientId && clientId !== prev.clientId && !newSecret) {
+      throw new InputError(google
+        ? "Google Drive: a new client ID needs its own client secret. Paste the secret from the same client."
+        : "Dropbox: a new app key needs its own app secret. Paste the secret from the same app.");
+    }
+    const clientSecret = forget ? "" : newSecret || (prev && prev.clientSecret) || "";
     // A token belongs to the client that issued it.
     const clientChanged = !prev || clientId !== (prev.clientId || "") || clientSecret !== (prev.clientSecret || "");
     let token = forget || clientChanged ? null : (prev && prev.token) || null;
     const code = extractAuthCode(input.authCode);
     const refresh = line(input.refreshToken, "Refresh token", MAX_SECRET);
     if (code) {
-      token = await exchangeCode(provider, clientId, clientSecret, code);
+      ({token, signinEnds} = await exchangeCode(provider, clientId, clientSecret, code));
+      renewed = true;
     } else if (refresh) {
       token = tokenFromRefresh(refresh, google);
+      renewed = true;
     }
     next = {...emptyOauth(), enabled, clientId, clientSecret, token, path: folder(input.path)};
   }
@@ -558,8 +602,17 @@ async function saveProviderNow(provider, input) {
   cfg[provider] = next;
   writeConfig(cfg);
 
+  // A sign-in the provider refused needs a new one: the link again, and a
+  // new code pasted back.
+  const refused = enabled && !renewed && (provider === "gdrive" || provider === "dropbox") && Boolean(next.token) && signinRefused(provider);
   let message;
-  if (needsHostKeyConfirmation) {
+  let authorizeUrl = null;
+  if (refused) {
+    authorizeUrl = authUrl(provider, next.clientId);
+    message = provider === "gdrive"
+      ? "Google refused the saved sign-in. Open the authorization page, approve it, then paste the new code here and save again. While the Google Cloud app is in Testing, Google ends every sign-in after 7 days; publishing the app stops that."
+      : "Dropbox refused the saved sign-in. Open the authorization page, approve it, then paste the new code here and save again.";
+  } else if (needsHostKeyConfirmation) {
     message = `The SFTP server identified itself as:\n${fingerprints}\nCompare this with your server, then save again with "Host key verified" turned on. Nothing is sent to it until then.`;
   } else if (enabled && !ready(provider, next)) {
     message = `${label} is enabled but not ready: complete its credentials.`;
@@ -568,7 +621,10 @@ async function saveProviderNow(provider, input) {
   } else {
     message = `${label} is off.`;
   }
-  return {config: publicConfig(cfg), message, needsHostKeyConfirmation, fingerprints};
+  if (signinEnds) {
+    message += ` Google will end this sign-in on ${signinEnds.toISOString().slice(0, 10)}, because the Google Cloud app is still in Testing. Sign in here again before then, or publish the app and sign in again: ${PUBLISH_NEEDS}.`;
+  }
+  return {config: publicConfig(cfg), message, needsHostKeyConfirmation, fingerprints, authorizeUrl, signinEnds: signinEnds ? signinEnds.toISOString() : null};
 }
 
 // ---------- the agent
@@ -650,13 +706,32 @@ async function runAgentNow(args, timeoutMs) {
   });
 }
 
+// One sentence for a failure record the agent leaves, as the StartOS package
+// words them (channelBackupStatus.ts there).
+function failureMessage(f) {
+  const target = labelOf(f.target);
+  switch (f.code) {
+    case "signin":
+      return f.target === "gdrive"
+        ? `${target}: Google refused the saved sign-in. Sign in again in Channel backups. While the Google Cloud app is in Testing, Google ends every sign-in after 7 days; publishing the app stops that.`
+        : `${target}: the saved sign-in was refused. Sign in again in Channel backups.`;
+    case "nocreds":
+      return f.target === "gdrive" || f.target === "dropbox"
+        ? `${target}: not signed in yet. Finish the sign-in in Channel backups.`
+        : `${target}: its saved settings are incomplete. Save it again in Channel backups.`;
+    default:
+      return `${target}: ${f.code}${f.detail ? ` (${f.detail})` : ""}`;
+  }
+}
+const withMessage = f => ({...f, message: failureMessage(f)});
+
 function readState(file = statePath()) {
   try {
     const s = JSON.parse(fs.readFileSync(file, "utf8"));
     return {
       attempt: Number(s.attempt) || 0,
       lastSuccess: typeof s.lastSuccess === "number" ? s.lastSuccess : null,
-      failures: Array.isArray(s.failures) ? s.failures.map(f => ({target: String(f.target || ""), code: String(f.code || ""), detail: String(f.detail || "")})) : [],
+      failures: Array.isArray(s.failures) ? s.failures.map(f => withMessage({target: String(f.target || ""), code: String(f.code || ""), detail: String(f.detail || "")})) : [],
     };
   } catch (error) {
     return {attempt: 0, lastSuccess: null, failures: []};
@@ -665,14 +740,16 @@ function readState(file = statePath()) {
 
 function status() {
   const cfg = readConfig();
-  const targets = PROVIDERS.filter(p => cfg[p] && cfg[p].enabled).map(p => ({provider: p, ready: ready(p, cfg[p])}));
+  const state = readState();
+  // A sign-in the provider refused is not ready until a new one.
+  const targets = PROVIDERS.filter(p => cfg[p] && cfg[p].enabled).map(p => ({provider: p, ready: ready(p, cfg[p]) && !signinRefused(p, state)}));
   let backupMtime = null;
   try {
     backupMtime = Math.floor(fs.statSync(backupPath()).mtimeMs / 1000);
   } catch (error) {
     backupMtime = null;
   }
-  return {targets, hasBackup: backupMtime !== null, backupMtime, state: readState()};
+  return {targets, hasBackup: backupMtime !== null, backupMtime, state};
 }
 
 // The same, for the bridge's SHA256 node's copy.
@@ -708,7 +785,7 @@ async function backupNow() {
     case 124:
       return {ok: false, message: "The backup did not finish in time. Check that the target is reachable.", state};
     default: {
-      const detail = state.failures.map(f => `${f.target}: ${f.code}${f.detail ? ` (${f.detail})` : ""}`).join("; ");
+      const detail = state.failures.map(f => f.message).join("; ");
       return {ok: false, message: detail ? `The copy failed: ${detail}` : "The copy failed.", state};
     }
   }
@@ -744,7 +821,10 @@ async function pull() {
     }
     return {provider: p, size, mtime};
   });
-  return {retrieved, unreachable: Array.isArray(parsed.unreachable) ? parsed.unreachable : [], message: null};
+  const unreachable = (Array.isArray(parsed.unreachable) ? parsed.unreachable : [])
+    .filter(u => u && typeof u === "object")
+    .map(u => withMessage({target: String(u.target || ""), code: String(u.code || ""), detail: String(u.detail || "")}));
+  return {retrieved, unreachable, message: null};
 }
 
 function pulledBackup(provider) {
@@ -886,6 +966,7 @@ function stopSha256Watcher() {
 module.exports = {
   PROVIDERS, DEFAULT_FOLDER, InputError,
   readConfig, publicConfig, ready, saveProvider, authUrl, exchangeCode, extractAuthCode, tokenFromRefresh,
+  googleSigninEnds, failureMessage, signinRefused,
   status, sha256Status, readState, backupNow, pull, pulledBackup, startWatcher, stopWatcher, startSha256Watcher, stopSha256Watcher,
   // for tests
   folder, port, line, normalizeKeyPem, scanHostKeys, validateConfig, rejectLocalOrOnion, hostOf,

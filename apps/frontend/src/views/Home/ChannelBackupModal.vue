@@ -35,12 +35,15 @@
           v-for="failure in failures"
           :key="failure.target + failure.code"
           class="d-block text-warning"
-          >{{ label(failure.target) }}: {{ failure.code }}
-          {{ failure.detail ? `(${failure.detail})` : "" }}</small
+          >{{ failure.message || `${label(failure.target)}: ${failure.code}${failure.detail ? ` (${failure.detail})` : ""}` }}</small
         >
       </div>
 
-      <b-alert :show="Boolean(result)" :variant="resultVariant" class="pre-wrap">{{ result }}</b-alert>
+      <b-alert :show="Boolean(result)" :variant="resultVariant" class="pre-wrap"
+        >{{ result }}<template v-if="authorizeUrl"
+          ><br /><a :href="authorizeUrl" target="_blank" rel="noopener">Open the authorization page</a></template
+        ></b-alert
+      >
 
       <!-- Provider -->
       <b-form-group label="Backup target">
@@ -105,13 +108,19 @@
             <small v-else>
               In Google Cloud Console, enable the Drive API and create an OAuth
               client of type "Desktop app"; copy its client ID and secret here.
+              Publish the app before signing in, or Google ends the sign-in
+              after 7 days and the copies stop: publishing needs a home page, a
+              privacy policy link and an authorized domain under Branding, and
+              no logo. Without a website of your own you would have to sign in
+              again every 7 days, so Dropbox, Nextcloud or SFTP may suit you
+              better.
             </small>
           </p>
           <b-form-group :label="provider === 'dropbox' ? 'App key' : 'Client ID'"><b-form-input v-model="form.clientId" size="sm" class="neu-input"></b-form-input></b-form-group>
           <b-form-group :label="provider === 'dropbox' ? 'App secret' : 'Client secret'" :description="stored[provider] && stored[provider].hasClientSecret ? 'A secret is stored. Leave blank to keep it.' : ''">
             <b-form-input v-model="form.clientSecret" type="password" autocomplete="off" size="sm" class="neu-input"></b-form-input>
           </b-form-group>
-          <b-form-group label="Authorization" :description="stored[provider] && stored[provider].hasToken ? 'This app is authorized. Paste a new code only to re-authorize.' : ''">
+          <b-form-group label="Authorization" :description="authorizationNote">
             <b-button size="sm" variant="outline-primary" :disabled="!form.clientId" @click="openAuthPage">Open the authorization page</b-button>
             <b-form-input v-model="form.authCode" class="neu-input mt-2" size="sm" placeholder="Paste the authorization code (or the whole redirect URL) here"></b-form-input>
           </b-form-group>
@@ -156,7 +165,8 @@ export default {
       saving: false,
       backingUp: false,
       result: "",
-      resultVariant: "info"
+      resultVariant: "info",
+      authorizeUrl: null
     };
   },
   computed: {
@@ -178,6 +188,13 @@ export default {
     },
     failures() {
       return this.status ? this.status.state.failures : [];
+    },
+    authorizationNote() {
+      const t = this.stored[this.provider];
+      if (t && t.signinRefused) {
+        return `${this.label(this.provider)} refused the saved sign-in. Open the authorization page, approve it, then paste the new code here and save.`;
+      }
+      return t && t.hasToken ? "This app is authorized. Paste a new code only to re-authorize." : "";
     },
     hasStoredSecret() {
       const t = this.stored[this.provider];
@@ -241,13 +258,15 @@ export default {
     async save() {
       this.saving = true;
       this.result = "";
+      this.authorizeUrl = null;
       try {
         const answer = await this.$store.dispatch("system/saveChannelBackupProvider", {
           provider: this.provider,
           settings: this.form
         });
         this.result = answer.message;
-        this.resultVariant = answer.needsHostKeyConfirmation ? "warning" : "success";
+        this.authorizeUrl = answer.authorizeUrl || null;
+        this.resultVariant = answer.needsHostKeyConfirmation || answer.authorizeUrl || answer.signinEnds ? "warning" : "success";
         await this.$store.dispatch("system/getChannelBackupStatus");
       } catch (error) {
         this.result = (error.response && error.response.data && error.response.data.error) || "The settings could not be saved.";
@@ -258,6 +277,7 @@ export default {
     async backupNow() {
       this.backingUp = true;
       this.result = "";
+      this.authorizeUrl = null;
       try {
         const answer = await this.$store.dispatch("system/channelBackupNow");
         this.result = answer.message;

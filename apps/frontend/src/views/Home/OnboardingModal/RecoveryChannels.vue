@@ -99,7 +99,7 @@ export default {
       if (this.copies.length === 0) {
         this.uploadNote = result.message
           || (this.unreachable.length
-            ? `Your backup target could not be reached (${this.unreachable.map(u => `${u.target}: ${u.code}`).join("; ")}).`
+            ? `Your backup target could not be reached (${this.unreachable.map(u => u.message || `${u.target}: ${u.code}`).join("; ")}).`
             : "No backup target holds a copy of channel.backup.");
         return this.changeStep('recovery-upload-backup');
       }

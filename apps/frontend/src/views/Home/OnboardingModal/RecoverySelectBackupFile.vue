@@ -24,7 +24,7 @@
       </div>
     </div>
     <p v-if="unreachable.length" class="text-warning">
-      Not reached: {{ unreachable.map(u => `${label(u.target)} (${u.code})`).join(", ") }}
+      Not reached: {{ unreachable.map(u => u.message || `${label(u.target)} (${u.code})`).join("; ") }}
     </p>
     <p class="text-muted">Or upload your own channel backup file</p>
     <div>

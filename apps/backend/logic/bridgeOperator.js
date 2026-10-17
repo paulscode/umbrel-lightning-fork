@@ -423,7 +423,7 @@ function sha256BackupView(st) {
   if (st.state && st.state.failures && st.state.failures.length) {
     return {
       state: "failing",
-      detail: st.state.failures.map((f) => `${f.target}: ${f.code}${f.detail ? ` (${f.detail})` : ""}`).join("; "),
+      detail: st.state.failures.map((f) => f.message || `${f.target}: ${f.code}${f.detail ? ` (${f.detail})` : ""}`).join("; "),
     };
   }
   if (st.state && st.state.lastSuccess) {

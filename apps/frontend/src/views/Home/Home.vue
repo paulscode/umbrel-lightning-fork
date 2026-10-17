@@ -483,7 +483,7 @@ export default {
       const names = status.targets.map(t => this.providerLabel(t.provider)).join(", ");
       const failures = status.state.failures || [];
       if (failures.length) {
-        return `Backup to ${names} is failing: ${failures.map(f => `${this.providerLabel(f.target)} ${f.code}`).join("; ")}`;
+        return `Backup to ${names} is failing: ${failures.map(f => f.message || `${this.providerLabel(f.target)} ${f.code}`).join("; ")}`;
       }
       if (status.state.lastSuccess) {
         return `Copied to ${names} ${moment(status.state.lastSuccess * 1000).fromNow()}.`;

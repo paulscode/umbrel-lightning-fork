@@ -101,7 +101,7 @@ test("status reads the agent's state file and notices the backup file", () => {
   const s = cb.status();
   assert.equal(s.state.attempt, 3);
   assert.equal(s.state.lastSuccess, 1700000000);
-  assert.deepEqual(s.state.failures, [{ target: "sftp", code: "upload", detail: "no route" }]);
+  assert.deepEqual(s.state.failures, [{ target: "sftp", code: "upload", detail: "no route", message: "SFTP: upload (no route)" }]);
   assert.equal(s.hasBackup, false);
   fs.writeFileSync(process.env.CHANNEL_BACKUP_FILE, "x");
   assert.equal(cb.status().hasBackup, true);
@@ -134,10 +134,16 @@ test("a target must be off to be forgotten, and complete to be on", async () => 
   await assert.rejects(cb.saveProvider("dropbox", { enabled: true, clientId: "k", clientSecret: "s" }), /authorization/);
 });
 
-test("a new OAuth client drops the token the old one issued", async () => {
+test("a new OAuth client drops the token the old one issued, and needs its own secret", async () => {
   await cb.saveProvider("gdrive", { enabled: true, clientId: "id-1", clientSecret: "s-1", refreshToken: "rt" });
   assert.equal(cb.publicConfig().gdrive.hasToken, true);
-  await cb.saveProvider("gdrive", { enabled: false, clientId: "id-2", clientSecret: "" });
+  const file = path.join(dir, "channel-backup.json");
+  const before = fs.readFileSync(file, "utf8");
+  await assert.rejects(cb.saveProvider("gdrive", { enabled: false, clientId: "id-2", clientSecret: "" }),
+    /a new client ID needs its own client secret/, "id-1's secret is not kept for id-2");
+  assert.equal(fs.readFileSync(file, "utf8"), before, "and nothing was saved");
+  await assert.rejects(cb.saveProvider("dropbox", { enabled: false, clientId: "k-2", clientSecret: "" }), /a new app key needs its own app secret/);
+  await cb.saveProvider("gdrive", { enabled: false, clientId: "id-2", clientSecret: "s-2" });
   assert.equal(cb.publicConfig().gdrive.hasToken, false, "the token belonged to id-1");
   await cb.saveProvider("gdrive", { enabled: false, clientId: "id-2", clientSecret: "s-2", refreshToken: "rt2" });
   await cb.saveProvider("gdrive", { enabled: false, clientId: "id-2", clientSecret: "" });
