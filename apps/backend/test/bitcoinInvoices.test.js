@@ -661,6 +661,44 @@ test("half the venue's bid/ask spread widens what is allowed, up to a cap", asyn
   assert.equal(await pays(0.00469, wide), "rate");
 });
 
+test("what the service says it widened its fee by is allowed on top, up to a cap", async () => {
+  const pays = async (behave) => {
+    const w = await world({ behave });
+    try {
+      const x = bitcoinInvoice(w.ledger);
+      const res = await w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: 10_000_000 }).catch((e) => e);
+      return res.status === "succeeded" ? true : res.refusal;
+    } finally {
+      await w.close();
+    }
+  };
+  // A bridge running low charges three times its 1.5% fee: 4.5% at
+  // 0.00495 is 5.6% over the market's 0.005, inside 5% and the 3% it
+  // widened by.
+  const draining = { rate: 0.00495, spread: 0.045 };
+  assert.equal(await pays(draining), true);
+  const shown = await world({ behave: draining });
+  try {
+    const t = await shown.mobile.decode(bitcoinInvoice(shown.ledger).request, CAPABLE);
+    assert.ok(Math.abs(t.reference.serviceWidening - 0.03) < 1e-12, `${t.reference.serviceWidening}`);
+    assert.ok(Math.abs(t.reference.premiumAllowed - 0.08) < 1e-12, `${t.reference.premiumAllowed}`);
+    assert.equal(t.reference.withinLimit, true);
+    assert.equal(t.messageCode, null);
+    const st = await shown.invoices.status();
+    assert.ok(Math.abs(st.reference.serviceWidening - 0.03) < 1e-12 && Math.abs(st.reference.premiumAllowed - 0.08) < 1e-12);
+  } finally {
+    await shown.close();
+  }
+  // At its base fee nothing is added: 1.5% at 0.00475 is 6.9% over.
+  assert.equal(await pays({ rate: 0.00475, spread: 0.015 }), "rate");
+  // A service saying 20% gains 5% and no more: 0.005 at 20% is 20% over,
+  // past 10%; at 14%, 14% over, past it still.
+  assert.equal(await pays({ rate: 0.005, spread: 0.2 }), "rate");
+  assert.equal(await pays({ rate: 0.005, spread: 0.14 }), "rate");
+  // At 9%, 9% over, inside 5% and the 5% cap.
+  assert.equal(await pays({ rate: 0.005, spread: 0.09 }), true);
+});
+
 test("without the market rate nothing is paid", async () => {
   const w = await world({ reference: { down: true } });
   try {
@@ -782,6 +820,9 @@ test("after a price rise, the estimate is the price still standing, and paying i
 test("a payment that came back while the service still waits pays the same request again", async () => {
   let attempt = 0;
   const w = await world({
+    // A bridge running low, whose widened fee is allowed on the request
+    // paid again as on the first.
+    behave: { rate: 0.00495, spread: 0.045 },
     pay: async (pr, d, settle) => {
       attempt++;
       if (attempt === 1) {

@@ -48,18 +48,25 @@ export function costPerBitcoinSat(rate) {
   })} BTCB2 sats`;
 }
 
-// How far a price is from the market rate, in words.
+// How far a price is from the market rate, in words, with what the service
+// widened its fee by when that is part of what is allowed.
 export function marketComparison(reference) {
   if (!reference || !Number.isFinite(Number(reference.premium))) {
     return "";
   }
   const p = Number(reference.premium);
+  const widening =
+    Number(reference.serviceWidening) > 0
+      ? `, including ${percent(
+          reference.serviceWidening
+        )} the service added to its fee`
+      : "";
   const allowed = percent(reference.premiumAllowed);
   if (Math.abs(p) < 0.0005) {
-    return `At the market rate (up to ${allowed} above it is allowed)`;
+    return `At the market rate (up to ${allowed} above it is allowed${widening})`;
   }
   return p > 0
-    ? `${percent(p)} above the market rate (up to ${allowed} is allowed)`
+    ? `${percent(p)} above the market rate (up to ${allowed} is allowed${widening})`
     : `${percent(-p)} below the market rate`;
 }
 

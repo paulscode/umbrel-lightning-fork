@@ -23,6 +23,15 @@
 // Both widenings are capped, so a market in turmoil or a broken book cannot
 // open the door to any price at all.
 //
+// On top of all that, what the service says it widened its own fee by: a
+// bridge charges up to three times its fee on the side it is running low on,
+// and adds the market's own movement, a book too thin for its largest swap
+// and a market far from its day's median. Its quote says only the spread it
+// charges in all, not which part is its base fee, so what is above a bridge's
+// default fee (BASE_FEE) counts, capped at SERVICE_WIDENING_CAP: honest
+// widened quotes are paid, and a service that says more than it does gains
+// no more than the cap.
+//
 // Without a usable rate nothing is paid: the check is never skipped.
 const { ValidationError } = require("../models/errors.js");
 
@@ -50,6 +59,10 @@ const FAILURE_TTL_MS = 15 * 1000;
 const WINDOW_SECONDS = 60 * 60;
 const VOLATILITY_CAP = 0.1;
 const HALF_SPREAD_CAP = 0.02;
+// A bridge's default fee (bridgerpc.spread), and the most of what a service
+// charges above it that is allowed on top.
+const BASE_FEE = 0.015;
+const SERVICE_WIDENING_CAP = 0.05;
 
 const UNAVAILABLE = "The market rate to check the service's price against is not available right now, so nothing was paid. Try again in a minute.";
 
@@ -163,16 +176,27 @@ function halfSpreadOf(bid, ask) {
   return Math.min(HALF_SPREAD_CAP, (a - b) / (a + b));
 }
 
+// What a service that charges `spread` in all says it widened its fee by:
+// what is above BASE_FEE, capped; zero for anything unreadable.
+function serviceWidening(spread) {
+  const s = Number(spread);
+  if (!Number.isFinite(s) || s <= BASE_FEE) {
+    return 0;
+  }
+  return Math.min(SERVICE_WIDENING_CAP, s - BASE_FEE);
+}
+
 // What a price may be above the reference rate: the user's premium, the
-// market's movement and half the venue's spread.
-function allowance(reference, premium) {
-  return premium + reference.volatility + (reference.halfSpread || 0);
+// market's movement, half the venue's spread and what the service widened
+// its fee by (serviceWidening).
+function allowance(reference, premium, widening = 0) {
+  return premium + reference.volatility + (reference.halfSpread || 0) + widening;
 }
 
 // The worst rate (outgoing per incoming, bitcoin per BTCB2) a price may
 // have and still be accepted.
-function minimumRate(reference, premium) {
-  return reference.rate / (1 + allowance(reference, premium));
+function minimumRate(reference, premium, widening = 0) {
+  return reference.rate / (1 + allowance(reference, premium, widening));
 }
 
 function defaultFetchJson(url) {
@@ -276,6 +300,9 @@ module.exports = {
   volatilityOf,
   minimumRate,
   allowance,
+  serviceWidening,
+  BASE_FEE,
+  SERVICE_WIDENING_CAP,
   halfSpreadOf,
   HALF_SPREAD_CAP,
   TICKER_URL,

@@ -36,7 +36,7 @@ let service = null;
 stub("logic/bitcoinInvoices.js", {
   instance: () => ({
     get: () => ({ service, premium: 0.05 }),
-    status: async () => ({ service, terms: { open: true, rate: 0.0049, spread: 0.01, minSat: 1, maxSat: 150000 }, reference: { rate: 0.005, premiumAllowed: 0.06, source: "Neoxa", volatilityAllowance: 0.01 } }),
+    status: async () => ({ service, terms: { open: true, rate: 0.0049, spread: 0.01, minSat: 1, maxSat: 150000 }, reference: { rate: 0.005, premiumAllowed: 0.06, serviceWidening: 0.01, source: "Neoxa", volatilityAllowance: 0.01 } }),
   }),
 });
 stub("logic/price.js", { getSupportedCurrencies: async () => ["USD", "EUR"], getPrice: async () => 1 });
@@ -83,6 +83,7 @@ test("bitcoin-invoices gives the service's terms, and nothing to ask when there 
   r = await call("GET", "/bitcoin-invoices");
   assert.equal(r.body.terms.open, true);
   assert.equal(r.body.reference.source, "Neoxa");
+  assert.equal(r.body.reference.serviceWidening, 0.01, "what the service widened its fee by, inside premiumAllowed");
 });
 
 test("an error body carries its code and details", async () => {

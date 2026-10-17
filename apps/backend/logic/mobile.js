@@ -1519,7 +1519,7 @@ function createMobile({
       last.expiresAt - now() >= MIN_HOLD_SECONDS &&
       (waiting || theirs === null)
     ) {
-      quoted = { holdInvoice: last.holdInvoice, expiresAt: last.expiresAt, hash: last.hash || "" };
+      quoted = { holdInvoice: last.holdInvoice, expiresAt: last.expiresAt, hash: last.hash || "", spread: last.spread || 0 };
     } else if (last && theirs && !ended && !waiting) {
       throw refuse(
         "in_progress",

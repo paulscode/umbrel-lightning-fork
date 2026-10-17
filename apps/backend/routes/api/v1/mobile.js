@@ -176,7 +176,12 @@ router.get(
       terms: st.terms || null,
       error: st.error || null,
       reference: st.reference
-        ? { rate: st.reference.rate, premiumAllowed: st.reference.premiumAllowed, source: st.reference.source }
+        ? {
+            rate: st.reference.rate,
+            premiumAllowed: st.reference.premiumAllowed,
+            serviceWidening: st.reference.serviceWidening || 0,
+            source: st.reference.source,
+          }
         : null,
       referenceError: st.referenceError || null,
     };

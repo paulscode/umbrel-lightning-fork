@@ -19,7 +19,7 @@ const path = require("path");
 const { ValidationError } = require("../models/errors.js");
 const { parseBridgeCode, BridgeCodeError } = require("../utils/bridgeCode.js");
 const { createBridgeClient, refusal, REFUSALS } = require("./bitcoinBridge.js");
-const { createReferenceRate, minimumRate, allowance } = require("./referenceRate.js");
+const { createReferenceRate, minimumRate, allowance, serviceWidening } = require("./referenceRate.js");
 
 const DIRECTION = "toSHA256";
 const DEFAULT_PREMIUM = 0.05;
@@ -393,13 +393,16 @@ function createBitcoinInvoices({
     } catch (error) {
       out.error = error.message;
     }
+    // What the service's fee is widened by now, allowed on top.
+    const widening = out.terms ? serviceWidening(out.terms.spread) : 0;
     try {
       const ref = await reference.get();
       out.reference = {
         rate: ref.rate,
         volatilityAllowance: ref.volatility,
         spreadAllowance: ref.halfSpread || 0,
-        premiumAllowed: allowance(ref, premium()),
+        serviceWidening: widening,
+        premiumAllowed: allowance(ref, premium(), widening),
         at: ref.at,
         source: ref.source,
       };
@@ -486,20 +489,23 @@ function createBitcoinInvoices({
       messageCode = "too_large";
     }
     const out = { estimate };
+    // What the service says it widened its fee by, allowed on top.
+    const widening = serviceWidening(d.spread);
     try {
       const ref = await reference.get();
-      const allowed = allowance(ref, premium());
+      const allowed = allowance(ref, premium(), widening);
       const effective = amountMsat / est.incomingMsat;
-      const withinLimit = effective >= minimumRate(ref, premium());
+      const withinLimit = effective >= minimumRate(ref, premium(), widening);
       out.reference = {
         rate: ref.rate,
         premiumAllowed: allowed,
+        serviceWidening: widening,
         premium: ref.rate / effective - 1,
         withinLimit,
         source: ref.source,
       };
       if (!withinLimit && !message) {
-        message = rateRefusal(ref, effective, true).message;
+        message = rateRefusal(ref, effective, widening, true).message;
         messageCode = "rate";
       }
     } catch (error) {
@@ -523,12 +529,12 @@ function createBitcoinInvoices({
 
   // `beforePaying`: said while the user is still looking at the price, when
   // nothing has been attempted, rather than after a payment was stopped.
-  function rateRefusal(ref, effective, beforePaying = false) {
+  function rateRefusal(ref, effective, widening, beforePaying = false) {
     const over = ref.rate / effective - 1;
     const outcome = beforePaying ? "so it can't be paid from here" : "so nothing was paid";
     return refuse(
       "rate",
-      `The service's price is ${percent(over)} above the market rate, more than the ${percent(allowance(ref, premium()))} allowed, ${outcome}. You can change what is allowed in the dashboard's settings, under Paying SHA256 invoices.`
+      `The service's price is ${percent(over)} above the market rate, more than the ${percent(allowance(ref, premium(), widening))} allowed, ${outcome}. You can change what is allowed in the dashboard's settings, under Paying SHA256 invoices.`
     );
   }
 
@@ -634,10 +640,13 @@ function createBitcoinInvoices({
         `The service asks to be able to hold your payment for up to ${holdHours(y.cltvExpiry)} hours if it never pays, longer than the ${holdHours(MAX_HOLD_BLOCKS)} allowed, so nothing was paid.`
       );
     }
+    // What the quote says the service widened its fee by is allowed on
+    // top, capped (see referenceRate.js).
+    const widening = serviceWidening(quoted.spread);
     const ref = await reference.get();
     const effective = x.amountMsat / y.amountMsat;
-    if (effective < minimumRate(ref, premium())) {
-      throw rateRefusal(ref, effective);
+    if (effective < minimumRate(ref, premium(), widening)) {
+      throw rateRefusal(ref, effective, widening);
     }
     // Last, since fetching the market rate can take a while over Tor.
     const expiresAt = Math.min(y.expiresAt, quoted.expiresAt);

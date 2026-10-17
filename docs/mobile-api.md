@@ -190,7 +190,7 @@ bridge's node cannot pay (not ready, or not enough in its channels). See
               "open": true, "refusal": "…when not open",
               "refusalCode": "…the service's code, when not open"},
  "reference": {"rate": 0.004875, "premiumAllowed": 0.0638, "premium": 0.0048,
-               "withinLimit": true, "source": "Neoxa"},
+               "serviceWidening": 0, "withinLimit": true, "source": "Neoxa"},
  "referenceError": "…when there is no market rate"}
 ```
 
@@ -208,7 +208,10 @@ bridge's node cannot pay (not ready, or not enough in its channels). See
   `message` then says why.
 - `reference` is the market rate the price is checked against (below);
   `premium` is how far the estimate is from it, `premiumAllowed` how far it
-  may be.
+  may be. `serviceWidening` is the part of `premiumAllowed` that is the
+  service's spread above a bridge's default 1.5% fee (a bridge running low,
+  or on an unsettled market, widens its fee), at most 5%; show it beside
+  the allowance when it is not zero.
 - `payable` is false whenever `message` is set: no service, no amount,
   expired, the service closed or out of its bounds, the price past the
   allowed premium, no market rate. Show `message`. `messageCode` names the
@@ -395,7 +398,7 @@ form (`{error, code?, uncertain?}`).
 | Call | |
 |---|---|
 | `GET /v1/bitcoin-invoices` | `{service: {label, url, node, onion, cert, addedAt} \| null, premium, premiumMin, premiumMax}`; never the credential |
-| `GET /v1/bitcoin-invoices/status` | `{service, terms: {open, refusal, rate, spread, minSat, maxSat}, reference: {rate, volatilityAllowance, premiumAllowed, at, source}}`, or `error` / `referenceError` sentences |
+| `GET /v1/bitcoin-invoices/status` | `{service, terms: {open, refusal, rate, spread, minSat, maxSat}, reference: {rate, volatilityAllowance, spreadAllowance, serviceWidening, premiumAllowed, at, source}}`, or `error` / `referenceError` sentences |
 | `POST /v1/bitcoin-invoices/service` | `{code}`: sets the service from its operator's code (`lfbridge:…`), after asking it once that the code works and the node key matches; answers as `GET`, plus `terms` |
 | `DELETE /v1/bitcoin-invoices/service` | removes it |
 | `POST /v1/bitcoin-invoices/premium` | `{premium}`, a fraction, 0.005–0.25 |

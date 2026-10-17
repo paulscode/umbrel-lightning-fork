@@ -201,10 +201,13 @@
             </div>
             <small class="d-block text-muted">
               Your premium below, plus the market's own movement over the last
-              hour ({{ percent(status.reference.volatilityAllowance) }}) and
+              hour ({{ percent(status.reference.volatilityAllowance) }}),
               half the gap between its buyers and sellers ({{
                 percent(status.reference.spreadAllowance || 0)
-              }}).
+              }}) and what the service adds to its fee while it runs low or
+              the market is unsettled ({{
+                percent(status.reference.serviceWidening || 0)
+              }}, at most 5%).
             </small>
           </template>
         </div>

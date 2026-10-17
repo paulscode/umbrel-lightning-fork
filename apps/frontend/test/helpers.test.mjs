@@ -75,6 +75,19 @@ test("the rate against the market is said from the payer's side", () => {
   assert.match(bridge.marketDifference(-0.02), /below the market$/);
 });
 
+test("a price against the market says what the service's own widening adds", () => {
+  assert.equal(invoices.marketComparison(null), "");
+  assert.equal(
+    invoices.marketComparison({ premium: 0.03, premiumAllowed: 0.06 }),
+    "3% above the market rate (up to 6% is allowed)"
+  );
+  assert.equal(
+    invoices.marketComparison({ premium: 0.056, premiumAllowed: 0.08, serviceWidening: 0.03 }),
+    "5.6% above the market rate (up to 8% is allowed, including 3% the service added to its fee)"
+  );
+  assert.equal(invoices.marketComparison({ premium: -0.01, premiumAllowed: 0.08, serviceWidening: 0.03 }), "1% below the market rate");
+});
+
 test("node states have a phrase, and unknown ones say themselves", () => {
   assert.equal(bridge.nodeState("ready").variant, "success");
   assert.deepEqual(bridge.nodeState("odd"), { text: "odd", variant: "muted" });
