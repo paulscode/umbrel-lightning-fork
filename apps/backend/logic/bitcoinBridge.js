@@ -19,7 +19,11 @@ const net = require("net");
 const tls = require("tls");
 const { ValidationError } = require("../models/errors.js");
 
-const TIMEOUT_MS = { info: 30 * 1000, quote: 60 * 1000, swap: 30 * 1000 };
+// A bridge's quote holds for a minute, and the check before paying needs
+// MIN_HOLD_SECONDS (20) of it left after decoding the request and reading the
+// market rate: a quote that took longer than half of it to arrive is not
+// waited for.
+const TIMEOUT_MS = { info: 30 * 1000, quote: 30 * 1000, swap: 30 * 1000 };
 const MAX_RESPONSE_BYTES = 1024 * 1024;
 
 // What each of the service's refusal codes means to the person paying, and

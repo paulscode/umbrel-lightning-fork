@@ -231,11 +231,15 @@ only if, decoded by the node:
 4. it asks no more than `maxIncomingSat`;
 5. its price, BTC (SHA256) out per BTCB2 in, is no worse than the market
    rate by more than the premium the user allows (5% unless changed,
-   0.5%–25%) plus the market's own range over the last hour (at most 10%);
-   the rate is Neoxa's BTCB2_BTC market (the middle of its last trade, best
-   bid and best ask), fetched over Tor when the node has a Tor proxy, and
-   **without it nothing is paid**;
-6. it has at least 20 seconds left;
+   0.5%–25%) plus the market's own range over the last hour (at most 10%),
+   half the venue's bid/ask spread (at most 2%) and what the quote's spread
+   is above 1.5% (at most 5%); the rate is Neoxa's BTCB2_BTC market (the
+   middle of its last trade, best bid and best ask), or NonKYC's BTCB2_USDT
+   over BTC/USD when lower (down to 4% under Neoxa), fetched over Tor when
+   the node has a Tor proxy, and **without it nothing is paid**;
+6. it has at least 20 seconds left by the service's own clock, counted from
+   when the node asked for it (the two clocks may differ), and has not
+   expired by the node's;
 7. it holds the payment for at most 2016 blocks of this chain (its final
    CLTV; LND's own maximum, about two weeks), the longest it can stay held
    if the service never pays.

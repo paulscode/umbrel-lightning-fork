@@ -10,6 +10,8 @@ const { setsBlake2b: bolt12SetsBlake2b } = require("../utils/bolt12Features.js")
 const {
   routingFeeLimit,
   MIN_HOLD_SECONDS,
+  holdDeadline,
+  attemptDeadline,
   ENDED_STATES,
   WAITING_STATES,
   NO_AMOUNT,
@@ -1143,6 +1145,7 @@ function createMobile({
       blake2b: surelySetsBlake2b(res.features),
       amountMsat: msatOf(res),
       cltvExpiry: num(res.cltvExpiry),
+      createdAt: created,
       expiresAt: created + (num(res.expiry) || DEFAULT_INVOICE_EXPIRY),
     };
   }
@@ -1516,10 +1519,16 @@ function createMobile({
       last.holdInvoice &&
       !last.invalid &&
       last.state !== "succeeded" &&
-      last.expiresAt - now() >= MIN_HOLD_SECONDS &&
+      attemptDeadline(last) - now() >= MIN_HOLD_SECONDS &&
       (waiting || theirs === null)
     ) {
-      quoted = { holdInvoice: last.holdInvoice, expiresAt: last.expiresAt, hash: last.hash || "", spread: last.spread || 0 };
+      quoted = {
+        holdInvoice: last.holdInvoice,
+        expiresAt: last.expiresAt,
+        sentAt: last.sentAt || null,
+        hash: last.hash || "",
+        spread: last.spread || 0,
+      };
     } else if (last && theirs && !ended && !waiting) {
       throw refuse(
         "in_progress",
@@ -1539,8 +1548,8 @@ function createMobile({
           }
           throw alreadyPaid();
         }
-        if (error.refusal === "in_progress" && last && last.expiresAt > now()) {
-          const seconds = Math.max(1, last.expiresAt - now());
+        if (error.refusal === "in_progress" && last && attemptDeadline(last) > now()) {
+          const seconds = Math.max(1, attemptDeadline(last) - now());
           throw refuse(
             "in_progress",
             `The service is still holding its last price for this invoice. Try again in ${seconds} seconds.`,
@@ -1554,6 +1563,7 @@ function createMobile({
         state: "quoted",
         holdInvoice: quoted.holdInvoice,
         expiresAt: quoted.expiresAt,
+        sentAt: quoted.sentAt,
         hash: quoted.hash,
         quotedIncomingMsat: quoted.incomingMsat,
         quotedOutgoingMsat: quoted.outgoingMsat,
@@ -1565,6 +1575,9 @@ function createMobile({
     let y;
     try {
       y = await readHold(quoted.holdInvoice);
+      // When it stops being payable on this node's clock, for asking
+      // again (see holdDeadline).
+      service.updateAttempt(hash, { deadline: holdDeadline(quoted, y) });
       await service.checkHold({ x, y, quoted, maxIncomingSat: max });
     } catch (error) {
       if (error.refusal) {

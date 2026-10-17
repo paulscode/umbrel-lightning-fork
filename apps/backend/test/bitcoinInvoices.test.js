@@ -121,13 +121,14 @@ function startService(ledger, behave = {}) {
           paymentHash: b.hash || x.paymentHash,
           numSatoshis: String(Math.floor(incoming / 1000)),
           numMsat: String(incoming),
-          timestamp: String(ledger.now()),
+          // The service's clock, which may not be this node's.
+          timestamp: String(ledger.now() + (b.clockSkew || 0)),
           expiry: "600",
           description: "swap toSHA256",
           cltvExpiry: String(b.cltv || 333),
           features: b.noBlake2b ? { 9: {}, 14: {} } : { 9: {}, 14: {}, 512: { name: "option_blake2b" } },
         });
-        const expiresAt = ledger.now() + (b.expiresIn === undefined ? 120 : b.expiresIn);
+        const expiresAt = ledger.now() + (b.clockSkew || 0) + (b.expiresIn === undefined ? 120 : b.expiresIn);
         ledger.swaps.set(x.paymentHash, { state: "offered", hold: y, incoming, out, preimage: x.preimage, expiresAt });
         return send(200, {
           hold_invoice: y,
@@ -699,6 +700,40 @@ test("what the service says it widened its fee by is allowed on top, up to a cap
   assert.equal(await pays({ rate: 0.005, spread: 0.09 }), true);
 });
 
+test("a quote's time left is the service's own, whatever its clock says", async () => {
+  const pays = async (behave) => {
+    const w = await world({ behave });
+    try {
+      const x = bitcoinInvoice(w.ledger);
+      const res = await w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: 10_000_000 }).catch((e) => e);
+      return res.status === "succeeded" ? true : res.refusal;
+    } finally {
+      await w.close();
+    }
+  };
+  // A minute's quote from a service whose clock is 50 s behind: its
+  // expiry reads 10 s away here, and it has a minute.
+  assert.equal(await pays({ expiresIn: 60, clockSkew: -50 }), true);
+  // 50 s ahead with 15 s left: it reads 65 s away here, and is not paid.
+  assert.equal(await pays({ expiresIn: 15, clockSkew: 50 }), "hold_expiring");
+  // A request already expired by this node's clock is refused before LND
+  // refuses it: its own expiry is ten minutes, the service 11 minutes
+  // behind.
+  assert.equal(await pays({ expiresIn: 60, clockSkew: -660 }), "hold_expiring");
+});
+
+test("a quote is waited for half its minute at most", async () => {
+  const seen = [];
+  const client = createBridgeClient({
+    request: async ({ path, timeoutMs }) => {
+      seen.push([path, timeoutMs]);
+      return { status: 200, text: "{}" };
+    },
+  });
+  await client.quote({ macaroon: MACAROON }, "lnbc1");
+  assert.deepEqual(seen, [["/v2/bridge/quote", 30 * 1000]]);
+});
+
 test("without the market rate nothing is paid", async () => {
   const w = await world({ reference: { down: true } });
   try {
@@ -821,8 +856,9 @@ test("a payment that came back while the service still waits pays the same reque
   let attempt = 0;
   const w = await world({
     // A bridge running low, whose widened fee is allowed on the request
-    // paid again as on the first.
-    behave: { rate: 0.00495, spread: 0.045 },
+    // paid again as on the first; and whose clock is 50 s behind, so that
+    // its minute reads 10 s here.
+    behave: { rate: 0.00495, spread: 0.045, expiresIn: 60, clockSkew: -50 },
     pay: async (pr, d, settle) => {
       attempt++;
       if (attempt === 1) {

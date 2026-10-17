@@ -31,6 +31,9 @@ const MAX_PREMIUM = 0.25;
 const PRICE_TOLERANCE = 0.005;
 // The least time a request from the service must have left to be paid.
 const MIN_HOLD_SECONDS = 20;
+// The least its own expiry must be ahead of this node's clock, which LND
+// checks it against before paying anything.
+const LOCAL_EXPIRY_MARGIN_SECONDS = 5;
 // What a payment to the service may spend on routing: 1%, at least 10 sats.
 const ROUTING_FEE_FRACTION = 0.01;
 const ROUTING_FEE_FLOOR_SAT = 10;
@@ -100,6 +103,28 @@ const sat = (msat) => Math.ceil(msat / 1000);
 
 function percent(fraction) {
   return `${Math.round(fraction * 1000) / 10}%`;
+}
+
+// When the service's request `y`, from the quote `quoted`, stops being
+// payable, on this node's clock (seconds). The two clocks may disagree by
+// any amount, so this is the time the request has by the service's own
+// clock (its expiry, or the quote's if sooner, less when it made the
+// request) counted from when this node asked for it: never later than the
+// service's own deadline, since the request was made after it was asked
+// for. Without when it was asked (a record from before this was kept), the
+// expiry as the service states it.
+function holdDeadline(quoted, y) {
+  const expiresAt = Math.min(y.expiresAt, quoted.expiresAt);
+  if (!(Number(quoted.sentAt) > 0) || !(Number(y.createdAt) > 0)) {
+    return expiresAt;
+  }
+  return Number(quoted.sentAt) + (expiresAt - Number(y.createdAt));
+}
+
+// When the attempt `a` stops being payable on this node's clock: its
+// deadline once its request was read, else the quote's expiry.
+function attemptDeadline(a) {
+  return Number(a.deadline) || a.expiresAt;
 }
 
 function premiumValue(value) {
@@ -546,6 +571,8 @@ function createBitcoinInvoices({
     if (!s) {
       throw refuse("no_service", NO_SERVICE);
     }
+    // When it was asked, on this node's clock (see holdDeadline).
+    const sentAt = now();
     let raw;
     try {
       raw = await bridge.quote(s, request);
@@ -565,6 +592,7 @@ function createBitcoinInvoices({
     return {
       holdInvoice,
       expiresAt,
+      sentAt,
       hash: raw.hash ? Buffer.from(String(raw.hash), "base64").toString("hex") : "",
       incomingMsat: Number(raw.incoming_msat) || null,
       outgoingMsat: Number(raw.outgoing_msat) || null,
@@ -648,10 +676,17 @@ function createBitcoinInvoices({
     if (effective < minimumRate(ref, premium(), widening)) {
       throw rateRefusal(ref, effective, widening);
     }
-    // Last, since fetching the market rate can take a while over Tor.
-    const expiresAt = Math.min(y.expiresAt, quoted.expiresAt);
-    if (expiresAt - now() < MIN_HOLD_SECONDS) {
+    // Last, since fetching the market rate can take a while over Tor. By
+    // the service's own clock (holdDeadline); and LND refuses a request
+    // already expired by this node's.
+    if (holdDeadline(quoted, y) - now() < MIN_HOLD_SECONDS) {
       throw refuse("hold_expiring", "The service's request would expire before it could be paid, so nothing was paid. Try again.");
+    }
+    if (y.expiresAt - now() < LOCAL_EXPIRY_MARGIN_SECONDS) {
+      throw refuse(
+        "hold_expiring",
+        "The service's request has already expired by this node's clock, which disagrees with the service's, so nothing was paid. Check this node's clock."
+      );
     }
     return { reference: ref, effective };
   }
@@ -714,7 +749,7 @@ function createBitcoinInvoices({
     if (!last || !last.holdInvoice || last.invalid || last.state === "succeeded") {
       return 0;
     }
-    if (!(last.expiresAt - now() >= MIN_HOLD_SECONDS)) {
+    if (!(attemptDeadline(last) - now() >= MIN_HOLD_SECONDS)) {
       return 0;
     }
     return Number(last.quotedIncomingMsat) || 0;
@@ -854,6 +889,8 @@ module.exports = {
   MAX_PREMIUM,
   PRICE_TOLERANCE,
   MIN_HOLD_SECONDS,
+  holdDeadline,
+  attemptDeadline,
   ENDED_STATES,
   WAITING_STATES,
   NO_SERVICE,
