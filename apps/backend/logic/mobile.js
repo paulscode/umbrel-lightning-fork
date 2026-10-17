@@ -10,8 +10,11 @@ const { setsBlake2b: bolt12SetsBlake2b } = require("../utils/bolt12Features.js")
 const {
   routingFeeLimit,
   MIN_HOLD_SECONDS,
+  QUOTE_END_SECONDS,
   holdDeadline,
   attemptDeadline,
+  underWay,
+  sameRequest,
   ENDED_STATES,
   WAITING_STATES,
   NO_AMOUNT,
@@ -22,11 +25,6 @@ const {
 } = require("./bitcoinInvoices.js");
 
 const DEFAULT_INVOICE_EXPIRY = 3600;
-// How long after its request to pay a SHA256 invoice runs out, by this
-// node's clock, a service may still be holding it: the deadline here is
-// counted from when it was asked for, so the service's own expiry can be a
-// few seconds later, and the service ends a request about a second after.
-const QUOTE_END_SECONDS = 5;
 const MAX_INVOICE_EXPIRY = 7 * 24 * 3600;
 // lnd allows 639 bytes of BOLT 11 description; count bytes, not characters.
 const MAX_MEMO_BYTES = 639;
@@ -537,7 +535,7 @@ function createMobile({
     const amountMsat = msatOf(res);
     const expired = expiresAt <= now();
     const paymentHash = String(res.paymentHash || "").toLowerCase();
-    const described = await bitcoinInvoices().describe({ amountMsat, expired, paymentHash });
+    const described = await bitcoinInvoices().describe({ amountMsat, expired, paymentHash, request });
     return {
       kind: "bitcoin-invoice",
       request,
@@ -1262,7 +1260,7 @@ function createMobile({
     // finds out about it, through the service.
     if (
       inFlight.has(x.paymentHash) ||
-      (last && (["quoted", "paying", "succeeded", "lost"].includes(last.state) || again))
+      (last && (underWay(last, now()) || ["succeeded", "lost"].includes(last.state) || again))
     ) {
       return null;
     }
@@ -1438,6 +1436,10 @@ function createMobile({
   // `quoteOnly`: for a price to show before the user agrees to one (see
   // quoteBitcoinInvoice), so without a ceiling.
   async function serviceRequest(x, max, again, { quoteOnly = false } = {}) {
+    // Whether a request kept from before has time enough to pay is decided
+    // by when this was asked, not after the round trips below (over Tor
+    // they can take seconds): the phone counted its time to then.
+    const arrivedAt = now();
     const hash = x.paymentHash;
     const service = bitcoinInvoices();
     // Being paid by this dashboard right now: the service holds it.
@@ -1580,10 +1582,21 @@ function createMobile({
       last.holdInvoice &&
       !last.invalid &&
       last.state !== "succeeded" &&
-      attemptDeadline(last) - now() >= MIN_HOLD_SECONDS &&
+      attemptDeadline(last) - arrivedAt >= MIN_HOLD_SECONDS &&
       (waiting || theirs === null)
     ) {
+      if (!sameRequest(last, service.record(hash), x.request)) {
+        // The service's request was made for another invoice with the same
+        // payment hash, priced and checked for that one: never paid for
+        // this one, and the service is not asked while it stands.
+        throw refuse(
+          "other_invoice",
+          "Another invoice uses the same payment hash as this one, so nothing was paid. Ask the recipient for a new invoice.",
+          409
+        );
+      }
       quoted = {
+        reused: true,
         holdInvoice: last.holdInvoice,
         expiresAt: last.expiresAt,
         sentAt: last.sentAt || null,
@@ -1643,7 +1656,13 @@ function createMobile({
       // When it stops being payable on this node's clock, for asking
       // again (see holdDeadline).
       service.updateAttempt(hash, { deadline: holdDeadline(quoted, y) });
-      const checked = await service.checkHold({ x, y, quoted, maxIncomingSat: quoteOnly ? Infinity : max });
+      const checked = await service.checkHold({
+        x,
+        y,
+        quoted,
+        maxIncomingSat: quoteOnly ? Infinity : max,
+        at: quoted.reused ? arrivedAt : null,
+      });
       return { quoted, y, checked };
     } catch (error) {
       if (error.refusal) {

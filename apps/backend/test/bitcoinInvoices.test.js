@@ -885,6 +885,90 @@ test("own bridge: a firm price is nothing to ask for", async () => {
   }
 });
 
+test("another invoice with the same payment hash never gets this one's price, nor is paid with it", async () => {
+  const w = await world();
+  try {
+    const x = bitcoinInvoice(w.ledger, { amountMsat: 150000 });
+    // Made by someone else from x's payment hash, for another amount.
+    const other = `lnbc${w.ledger.counter++}xother`;
+    w.ledger.invoices.set(other, { ...w.ledger.invoices.get(x.request), numMsat: "450000", numSatoshis: "450", description: "not the shop" });
+    const theirs = await w.mobile.quoteBitcoinInvoice({ request: other });
+    assert.equal(w.service.calls.quote, 1);
+    // x's estimate is its own, not the price standing for the other.
+    const est = await estimateOf(w, x.request);
+    assert.equal(est.incomingSat, Math.ceil(estimateFor(150000, { rate: 0.0049, spread: 0.01 }).incomingMsat / 1000));
+    for (const attempt of [
+      () => w.mobile.quoteBitcoinInvoice({ request: x.request }),
+      () => w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: theirs.maxIncomingSat * 2 }),
+    ]) {
+      await assert.rejects(attempt, (e) => e.refusal === "other_invoice" && e.statusCode === 409 && /same payment hash/.test(e.message) && /nothing was paid/.test(e.message));
+    }
+    assert.equal(w.service.calls.quote, 1, "the service is not asked");
+    assert.equal(w.lnd.sends.length, 0, "nothing was paid");
+  } finally {
+    await w.close();
+  }
+  // The other way round: the real invoice's price first, lapsed, then the
+  // other's, which the record's first invoice must not pass for x's.
+  const w2 = await world();
+  try {
+    const x = bitcoinInvoice(w2.ledger, { amountMsat: 150000 });
+    const other = `lnbc${w2.ledger.counter++}xother`;
+    w2.ledger.invoices.set(other, { ...w2.ledger.invoices.get(x.request), numMsat: "450000", numSatoshis: "450" });
+    await w2.mobile.quoteBitcoinInvoice({ request: x.request });
+    w2.tick(130);
+    w2.ledger.swaps.get(x.hash).state = "expired";
+    await w2.mobile.quoteBitcoinInvoice({ request: other });
+    await assert.rejects(() => w2.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: 1_000_000 }), (e) => e.refusal === "other_invoice");
+    assert.equal(w2.lnd.sends.length, 0, "nothing was paid");
+  } finally {
+    await w2.close();
+  }
+});
+
+test("a firm price is still paid when it had its ten seconds when the payment was asked", async () => {
+  const w = await world({ behave: { expiresIn: 35 } });
+  try {
+    const x = bitcoinInvoice(w.ledger, { expiry: 105 });
+    const q = await w.mobile.quoteBitcoinInvoice({ request: x.request });
+    // Asking the service about the attempt takes three seconds, over Tor.
+    const swapState = w.invoices.swapState;
+    w.invoices.swapState = async (hash) => {
+      const st = await swapState(hash);
+      w.tick(3);
+      return st;
+    };
+    // Twelve seconds left when the payment is asked, nine once asked.
+    w.tick(23);
+    const paid = await w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: q.maxIncomingSat });
+    assert.equal(paid.status, "succeeded");
+    assert.equal(w.service.calls.quote, 1);
+  } finally {
+    await w.close();
+  }
+});
+
+test("own bridge: a firm price that lapsed unpaid does not keep the bridge from paying", async () => {
+  const ledger = createLedger();
+  const own = ownBridgeFake(ledger, { outboundSat: 100 });
+  const w = await world({ ledger, ownBridge: () => own });
+  try {
+    const x = bitcoinInvoice(ledger);
+    // The bridge can't pay it yet: the service's firm price.
+    const q = await w.mobile.quoteBitcoinInvoice({ request: x.request });
+    assert.equal(q.source, "service");
+    own.ownPayer = async () => ({ ready: true, outboundSat: 1_000_000 });
+    // The price lapsed, never paid, and the service let it go.
+    w.tick(126);
+    const paid = await w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: 0 });
+    assert.equal(paid.bitcoinInvoice.source, "own_bridge");
+    assert.equal(own.calls.pay, 1);
+    assert.equal(w.lnd.sends.length, 0);
+  } finally {
+    await w.close();
+  }
+});
+
 test("without the market rate nothing is paid", async () => {
   const w = await world({ reference: { down: true } });
   try {
@@ -1306,6 +1390,8 @@ test("a full record keeps the attempt just made, and any still under way", () =>
     payments[`old${i}`] = { at: T - 30 * 86400 - i, attempts: [{ state: "succeeded" }] };
   }
   payments.held = { at: T - 30 * 86400, attempts: [{ state: "paying" }] };
+  // A firm price asked a month ago and never paid: as good as ended.
+  payments.lapsed = { at: T - 30 * 86400, attempts: [{ state: "quoted", expiresAt: T - 30 * 86400 + 60 }] };
   let saved = null;
   const invoices = createBitcoinInvoices({
     read: (file) => (String(file).includes("payments") ? { payments: JSON.parse(JSON.stringify(payments)) } : null),
@@ -1318,7 +1404,9 @@ test("a full record keeps the attempt just made, and any still under way", () =>
   assert.ok(invoices.record("new"), "the attempt just added is kept");
   assert.ok(invoices.record("held"), "one still paying is kept");
   assert.equal(Object.keys(saved.payments).length, 2000);
-  assert.equal(saved.payments.old1999, undefined, "the oldest paid one went");
+  assert.equal(saved.payments.lapsed, undefined, "the lapsed quote went first");
+  assert.equal(saved.payments.old1999, undefined, "then the oldest paid ones");
+  assert.ok(saved.payments.old1997, "and no more");
 });
 
 // This node's own bridge: its SHA256 node pays from `outboundSat`. `outcome`

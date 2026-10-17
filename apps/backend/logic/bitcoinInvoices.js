@@ -34,6 +34,11 @@ const PRICE_TOLERANCE = 0.005;
 // longer than the SHA256 invoice it pays, less a few seconds, so for an
 // invoice that lives a minute this is most of what there is.
 const MIN_HOLD_SECONDS = 10;
+// How long after the service's request to pay a SHA256 invoice runs out, by
+// this node's clock, the service may still be holding it: the deadline here
+// is counted from when it was asked for, so the service's own expiry can be a
+// few seconds later, and the service ends a request about a second after.
+const QUOTE_END_SECONDS = 5;
 // The least its own expiry must be ahead of this node's clock, which LND
 // checks it against before paying anything.
 const LOCAL_EXPIRY_MARGIN_SECONDS = 5;
@@ -128,6 +133,35 @@ function holdDeadline(quoted, y) {
 // deadline once its request was read, else the quote's expiry.
 function attemptDeadline(a) {
   return Number(a.deadline) || a.expiresAt;
+}
+
+// Whether the attempt `a` is still under way at `at`: one paying always; one
+// only quoted while the service may still hold its request (an unpaid quote
+// lapses, and is then as good as ended).
+function underWay(a, at) {
+  if (!a) {
+    return false;
+  }
+  if (a.state === "paying") {
+    return true;
+  }
+  return a.state === "quoted" && Number(attemptDeadline(a)) + QUOTE_END_SECONDS > at;
+}
+
+function normalRequest(request) {
+  return String(request || "")
+    .trim()
+    .replace(/^lightning:/i, "")
+    .replace(/\s+/g, "")
+    .toLowerCase();
+}
+
+// Whether the attempt `a` (of the record `r`) was made for the SHA256 invoice
+// `request` itself, not another one with the same payment hash. An attempt
+// from before each kept its own is the record's first invoice's.
+function sameRequest(a, r, request) {
+  const own = (a && a.request) || (r && r.request) || "";
+  return Boolean(own) && normalRequest(own) === normalRequest(request);
 }
 
 function premiumValue(value) {
@@ -454,7 +488,7 @@ function createBitcoinInvoices({
   // no_amount, no_service, expired, too_small, too_large, rate,
   // reference_unavailable, unreachable, no_direction, or the service's own
   // refusal code (disabled, no_rate, ...) while it is closed.
-  async function describe({ amountMsat, expired, paymentHash }) {
+  async function describe({ amountMsat, expired, paymentHash, request }) {
     if (!amountMsat) {
       return { estimate: null, message: NO_AMOUNT, messageCode: "no_amount" };
     }
@@ -486,7 +520,7 @@ function createBitcoinInvoices({
       return { estimate: null, message: REFUSALS.no_direction[1], messageCode: "no_direction" };
     }
     let est = estimateFor(amountMsat, d);
-    const standing = standingQuoteMsat(paymentHash);
+    const standing = standingQuoteMsat(paymentHash, request);
     if (standing > est.incomingMsat) {
       est = estimateFromIncoming(amountMsat, standing, d);
     }
@@ -633,7 +667,9 @@ function createBitcoinInvoices({
   // - a price within what the user allows of the market rate;
   // - time left to pay it.
   // Throws a refusal; nothing is paid after one.
-  async function checkHold({ x, y, quoted, maxIncomingSat }) {
+  // `at`: the time its time left is counted from, when not now (a request
+  // kept from before, whose reuse was decided when the payment was asked).
+  async function checkHold({ x, y, quoted, maxIncomingSat, at = null }) {
     const s = service();
     if (!s) {
       throw refuse("no_service", NO_SERVICE);
@@ -682,7 +718,7 @@ function createBitcoinInvoices({
     // Last, since fetching the market rate can take a while over Tor. By
     // the service's own clock (holdDeadline); and LND refuses a request
     // already expired by this node's.
-    if (holdDeadline(quoted, y) - now() < MIN_HOLD_SECONDS) {
+    if (holdDeadline(quoted, y) - (at === null ? now() : at) < MIN_HOLD_SECONDS) {
       throw refuse("hold_expiring", "The service's request would expire before it could be paid, so nothing was paid. Try again.");
     }
     if (y.expiresAt - now() < LOCAL_EXPIRY_MARGIN_SECONDS) {
@@ -723,10 +759,7 @@ function createBitcoinInvoices({
       };
       const paid = (h) => (all[h].attempts || []).some((a) => a.state === "succeeded" || a.state === "lost");
       const holdSeconds = MAX_HOLD_BLOCKS * MINUTES_PER_BLOCK * 60;
-      const settled = (h) => {
-        const l = last(h);
-        return !(l && (l.state === "quoted" || l.state === "paying")) && now() - (all[h].at || 0) > holdSeconds;
-      };
+      const settled = (h) => !underWay(last(h), now()) && now() - (all[h].at || 0) > holdSeconds;
       hashes
         .filter(settled)
         .sort((a, b) => Number(paid(a)) - Number(paid(b)) || (all[a].at || 0) - (all[b].at || 0))
@@ -746,10 +779,14 @@ function createBitcoinInvoices({
   }
 
   // What the service last asked for this invoice, in msat, while that
-  // price may still be offered again; 0 when there is none.
-  function standingQuoteMsat(paymentHash) {
+  // price may still be offered again; 0 when there is none, or when it was
+  // asked for another invoice with the same payment hash.
+  function standingQuoteMsat(paymentHash, request) {
     const last = paymentHash ? lastAttempt(paymentHash) : null;
     if (!last || !last.holdInvoice || last.invalid || last.state === "succeeded") {
+      return 0;
+    }
+    if (!sameRequest(last, record(paymentHash), request)) {
       return 0;
     }
     if (!(attemptDeadline(last) - now() >= MIN_HOLD_SECONDS)) {
@@ -828,7 +865,8 @@ function createBitcoinInvoices({
     } else if (s && s.label) {
       r.serviceLabel = s.label;
     }
-    r.attempts.push({ at: now(), ...attempt });
+    // The invoice it is for, exactly: another may carry the same hash.
+    r.attempts.push({ at: now(), request: x.request, ...attempt });
     // A handful is plenty: only the last is ever acted on.
     r.attempts = r.attempts.slice(-10);
     all[x.paymentHash] = r;
@@ -892,8 +930,11 @@ module.exports = {
   MAX_PREMIUM,
   PRICE_TOLERANCE,
   MIN_HOLD_SECONDS,
+  QUOTE_END_SECONDS,
   holdDeadline,
   attemptDeadline,
+  underWay,
+  sameRequest,
   ENDED_STATES,
   WAITING_STATES,
   NO_SERVICE,

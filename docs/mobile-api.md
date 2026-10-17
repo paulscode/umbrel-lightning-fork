@@ -272,7 +272,10 @@ Nothing is paid. It answers
   has `minSecondsLeft` (check 6) of `secondsLeft`. Count both down from
   when the call was sent (the node's clock may not be the phone's).
 - Asked again while it stands, the answer is the same invoice with less
-  time left. Once it has too little, a new one is asked for: `in_progress`
+  time left. Whether it still has `minSecondsLeft` is decided when the
+  payment is asked, before the node asks the service anything else. It is
+  only ever paid for the very invoice it was asked for: another invoice
+  with the same payment hash is refused (`other_invoice`). Once it has too little, a new one is asked for: `in_progress`
   with `details.retryAfterSeconds` while the service still holds the old
   one.
 - Refused as paying would be (`rate`, `invalid_hold_invoice`,
@@ -327,6 +330,7 @@ after any of them except `on_its_way` (paying, held by the service) and
 | `on_its_way` | 504 | paid to the service and held until it has paid the SHA256 invoice; ask again with `resume`. `details.maxHoldHours` |
 | `already_paid` | 409 | the invoice has been paid; `details.preimage` when the service gave the proof (a repeat with `resume` gets the payment instead) |
 | `needs_operator` | 409 | the service paid the SHA256 invoice and did not collect the payment, which comes back; nothing for the user to do. `details.preimage` when known |
+| `other_invoice` | 409 | the service's standing request for this payment hash was made for another invoice with the same hash; it is never paid for this one, and the service is not asked while it stands |
 | `in_progress` | 409 | the service is still busy with an earlier attempt, or still holding its last price; `details.retryAfterSeconds` when it can say |
 | `limit` | 429 | too many payments waiting at the service |
 | `price_changed` | 409 | the service asks more than `maxIncomingSat`; `/decode` again for the new price. `details: {incomingSat, maxIncomingSat}` |
