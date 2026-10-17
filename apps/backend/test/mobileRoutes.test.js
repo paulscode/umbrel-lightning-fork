@@ -25,6 +25,7 @@ stub("logic/devices.js", { serverId: () => "srv" });
 const { ValidationError } = require("models/errors.js");
 stub("logic/mobile.js", {
   node: async () => ({ alias: "lf" }),
+  quoteBitcoinInvoice: async ({ request }) => ({ source: "service", request, maxIncomingSat: 31000, secondsLeft: 35, minSecondsLeft: 10 }),
   decode: async () => {
     const e = new ValidationError("held", 409);
     e.refusal = "in_progress";
@@ -66,7 +67,7 @@ async function call(method, route, body) {
 test("bootstrap names what the dashboard can do and whether a service is set up", async () => {
   service = null;
   let r = await call("GET", "/bootstrap");
-  assert.deepEqual(r.body.features, ["bitcoin-invoice"]);
+  assert.deepEqual(r.body.features, ["bitcoin-invoice", "bitcoin-invoice-quote"]);
   assert.deepEqual(r.body.bitcoinInvoices, { configured: false, label: "", onion: false, premium: 0.05 });
   service = { label: "Alice's bridge", onion: true, url: "https://x.onion:8080", node: "02ab" };
   r = await call("GET", "/bootstrap");
@@ -91,6 +92,12 @@ test("an error body carries its code and details", async () => {
   assert.equal(r.status, 409);
   assert.equal(r.body.code, "in_progress");
   assert.deepEqual(r.body.details, { retryAfterSeconds: 7 });
+});
+
+test("a firm price for a SHA256 invoice is asked by its request, without a request id", async () => {
+  const r = await call("POST", "/quote/bitcoin-invoice", { request: "lnbc1" });
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body, { source: "service", request: "lnbc1", maxIncomingSat: 31000, secondsLeft: 35, minSecondsLeft: 10 });
 });
 
 test("currencies lists what a price can be given in", async () => {

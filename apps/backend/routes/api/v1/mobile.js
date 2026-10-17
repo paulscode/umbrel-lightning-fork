@@ -24,8 +24,9 @@ const x509 = require("utils/x509.js");
 
 const API_VERSION = 1;
 // What this dashboard can do beyond API version 1's calls, for a client to
-// show or hide: paying SHA256 invoices through a service.
-const FEATURES = ["bitcoin-invoice"];
+// show or hide: paying SHA256 invoices through a service, and a firm price
+// for one as soon as it is read (/quote/bitcoin-invoice).
+const FEATURES = ["bitcoin-invoice", "bitcoin-invoice-quote"];
 
 const bitcoinInvoices = () => require("logic/bitcoinInvoices.js").instance();
 
@@ -254,6 +255,15 @@ router.post(
       return mobile.payBitcoinInvoice({ request, maxIncomingSat, recheck, resume: yes(resume) });
     })
   )
+);
+
+// A firm price for a SHA256 invoice, asked as soon as it is read: the
+// service's request, checked and kept, which /pay/bitcoin-invoice with
+// `maxIncomingSat` at that price then pays while it has time left. Nothing
+// is paid, so no request id.
+router.post(
+  "/quote/bitcoin-invoice",
+  handle((req) => mobile.quoteBitcoinInvoice({ request: body(req).request }))
 );
 
 router.post("/receive/address", handle((req) => mobile.receiveAddress({ fresh: yes(body(req).fresh) })));

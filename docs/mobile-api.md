@@ -77,7 +77,7 @@ Every other call takes the key as `Authorization: Bearer lf_…`.
 
 | Call | Body or query | Answer |
 |---|---|---|
-| `GET /bootstrap` | | `{serverId, apiVersion, deviceId, label, node, features, bitcoinInvoices}`; `features` lists what this dashboard can do beyond version 1's calls (`bitcoin-invoice`), `bitcoinInvoices` is `{configured, label, onion, premium}` (nothing is asked of the service) |
+| `GET /bootstrap` | | `{serverId, apiVersion, deviceId, label, node, features, bitcoinInvoices}`; `features` lists what this dashboard can do beyond version 1's calls (`bitcoin-invoice`; `bitcoin-invoice-quote`, `POST /quote/bitcoin-invoice`), `bitcoinInvoices` is `{configured, label, onion, premium}` (nothing is asked of the service) |
 | `GET /bitcoin-invoices` | | `{configured, label, onion, premium, terms, error, reference, referenceError}`: the service's terms now (`{open, refusal, rate, spread, minSat, maxSat}`) and the market rate; asks the service, over Tor for an onion, so it can take a while. Set up only in the dashboard |
 | `POST /unpair` | | `{unpaired: true}`; the phone removes itself, its key stops at once |
 | `GET /endpoints` | | `{onionUrl, lanUrl, lanIp, caPem, caSha256}`, the current addresses |
@@ -88,6 +88,7 @@ Every other call takes the key as `Authorization: Bearer lf_…`.
 | `POST /onchain/send` | `{address, amountSat \| sendAll, satPerVbyte, requestId?, resume?}` | `{txid, satPerVbyte}` |
 | `POST /lightning/pay` | `{request, amountSat?, payerNote?, requestId?, resume?}` | `{status, paymentHash, preimage, amountSat, feeSat}` |
 | `POST /pay/bitcoin-invoice` | `{request, maxIncomingSat, requestId?, resume?}` | `{status, paymentHash, preimage, amountSat, feeSat, bitcoinInvoice: {amountSat, description, paymentHash}}`, see Paying SHA256 invoices |
+| `POST /quote/bitcoin-invoice` | `{request}` | a firm price for a SHA256 invoice, kept for paying it; see A firm price before paying. Only when `features` has `bitcoin-invoice-quote` |
 | `POST /receive/address` | `{fresh?}` | `{address, type, uri}`; the last unused address unless `fresh` |
 | `POST /receive/invoice` | `{amountSat?, memo?, expirySeconds?}` | `{paymentRequest, paymentHash, amountSat, memo, createdAt, expiresAt, uri}` |
 | `GET /receive/invoice/<paymentHash>` | | `{state, amountSat, amountPaidSat, settledAt, expiresAt}`; `state` is `open`, `settled`, `canceled`, `accepted` or `expired` |
@@ -183,7 +184,7 @@ bridge's node cannot pay (not ready, or not enough in its channels). See
 {"kind": "bitcoin-invoice", "request": "lnbc1500n1p…", "amountSat": 150,
  "amountEditable": false, "description": "…", "destination": "…",
  "paymentHash": "…", "createdAt": 0, "expiresAt": 0, "expired": false,
- "ours": false, "payable": true, "message": null,
+ "secondsLeft": 45, "ours": false, "payable": true, "message": null,
  "estimate": {"incomingSat": 30919, "feeSat": 307, "maxIncomingSat": 31074,
               "routingFeeLimitSat": 310, "rate": 0.0049, "spread": 0.01,
               "minSat": 100, "maxSat": 500000, "serviceLabel": "…",
@@ -194,6 +195,10 @@ bridge's node cannot pay (not ready, or not enough in its channels). See
  "referenceError": "…when there is no market rate"}
 ```
 
+- `secondsLeft` is the time the SHA256 invoice has left by the node's
+  clock (`expiresAt` is read against it; the phone's may differ). One
+  about to expire is not refused here: the service says whether it can
+  still pay it (`expires_soon`, below).
 - `amountSat` is the SHA256 invoice's amount (rounded up from msat), or
   `null` when it names none; those cannot be paid yet.
 - `estimate.incomingSat` is what the service would charge now, in BTCB2
@@ -243,6 +248,41 @@ only if, decoded by the node:
 7. it holds the payment for at most 2016 blocks of this chain (its final
    CLTV; LND's own maximum, about two weeks), the longest it can stay held
    if the service never pays.
+
+A firm price before paying (`bitcoin-invoice-quote`): `POST
+/quote/bitcoin-invoice` with `{request}` asks the service for its invoice
+right away, runs the checks above on it but 4 (the price is what the user
+is about to agree to), and keeps it as the attempt that paying the SHA256
+invoice then pays. Ask it as soon as `/decode` answers: a service's invoice
+lasts no longer than the SHA256 invoice less about ten seconds, and the
+time the user takes on the confirm screen is then not taken from it.
+Nothing is paid. It answers
+
+```json
+{"source": "service", "incomingSat": 30919, "feeSat": 307,
+ "maxIncomingSat": 30919, "routingFeeLimitSat": 310,
+ "expiresAt": 0, "secondsLeft": 35, "minSecondsLeft": 10,
+ "invoiceExpiresAt": 0, "invoiceSecondsLeft": 45, "serviceLabel": "…",
+ "reference": {"rate": 0.004875, "premium": 0.0048, "premiumAllowed": 0.0638,
+               "serviceWidening": 0, "withinLimit": true, "source": "Neoxa"}}
+```
+
+- `maxIncomingSat` is the price; pay with it as `maxIncomingSat`, and the
+  service's invoice is paid without asking the service again while it
+  has `minSecondsLeft` (check 6) of `secondsLeft`. Count both down from
+  when the call was sent (the node's clock may not be the phone's).
+- Asked again while it stands, the answer is the same invoice with less
+  time left. Once it has too little, a new one is asked for: `in_progress`
+  with `details.retryAfterSeconds` while the service still holds the old
+  one.
+- Refused as paying would be (`rate`, `invalid_hold_invoice`,
+  `hold_expiring`, `hold_too_long`, the service's codes such as
+  `expires_soon`).
+- From the node's own bridge: `{source: "own_bridge", maxIncomingSat: 0,
+  invoiceExpiresAt, invoiceSecondsLeft}`; there is no price to fix.
+
+A dashboard without the feature answers 404; pay with the estimate's
+`maxIncomingSat` as before.
 
 Success is `{status: "succeeded", paymentHash, preimage, amountSat, feeSat,
 bitcoinInvoice: {amountSat, description, paymentHash}}`: `amountSat` and
@@ -407,6 +447,7 @@ form (`{error, code?, uncertain?}`).
 | `DELETE /v1/bitcoin-invoices/service` | removes it |
 | `POST /v1/bitcoin-invoices/premium` | `{premium}`, a fraction, 0.005–0.25 |
 | `POST /v1/bitcoin-invoices/decode` | `{input}`, as `/decode` with the `bitcoin-invoice` capability |
+| `POST /v1/bitcoin-invoices/quote` | `{request}`, as `/quote/bitcoin-invoice` |
 | `POST /v1/bitcoin-invoices/pay` | as `/pay/bitcoin-invoice`, request ids and all |
 
 A service code is `lfbridge:` and the unpadded base64url of

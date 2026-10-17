@@ -768,15 +768,118 @@ test("a request too near its end to pay: how long until the service takes a new 
   }
 });
 
+test("a firm price at scan: the service's request, paid as quoted once the user agrees, with no new quote", async () => {
+  // A shop's invoice that lives a minute and a half, read with 45 s left;
+  // the service's quote lasts what the invoice has less ten seconds.
+  const w = await world({ behave: { expiresIn: 35 } });
+  try {
+    const x = bitcoinInvoice(w.ledger, { expiry: 105 });
+    const d = await w.mobile.decode(x.request, CAPABLE);
+    assert.equal(d.secondsLeft, 45, "the invoice's time left by the node's clock");
+    assert.equal(d.payable, true, "not refused here for its short life: that is the service's to say");
+    const q = await w.mobile.quoteBitcoinInvoice({ request: x.request });
+    assert.equal(q.source, "service");
+    assert.equal(q.secondsLeft, 35);
+    assert.equal(q.minSecondsLeft, 10);
+    assert.equal(q.invoiceSecondsLeft, 45);
+    assert.equal(q.maxIncomingSat, q.incomingSat, "the price is the ceiling to pay it with");
+    assert.equal(q.incomingSat, Math.ceil(estimateFor(150000, { rate: 0.0049, spread: 0.01 }).incomingMsat / 1000));
+    assert.ok(q.feeSat > 0 && q.feeSat < q.incomingSat);
+    assert.equal(q.routingFeeLimitSat, Math.ceil(q.incomingSat * 0.01));
+    assert.equal(q.serviceLabel, "Test service");
+    assert.equal(q.reference.withinLimit, true);
+    assert.equal(w.service.calls.quote, 1);
+    assert.equal(w.lnd.sends.length, 0, "nothing is paid for a price");
+
+    // Asking again while it stands is the same request.
+    w.tick(16);
+    const again = await w.mobile.quoteBitcoinInvoice({ request: x.request });
+    assert.equal(again.incomingSat, q.incomingSat);
+    assert.equal(again.secondsLeft, 19);
+    assert.equal(w.service.calls.quote, 1);
+
+    // Ten seconds left on it is enough to pay it, at its price.
+    w.tick(9);
+    const paid = await w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: q.maxIncomingSat });
+    assert.equal(paid.status, "succeeded");
+    assert.equal(paid.preimage, x.preimage);
+    assert.equal(w.service.calls.quote, 1, "the request quoted at scan is the one paid");
+    assert.equal(w.lnd.sends.length, 1);
+  } finally {
+    await w.close();
+  }
+});
+
+test("a firm price is checked as a payment would be, and refused the same way", async () => {
+  const w = await world({ behave: { rate: 0.004 } });
+  try {
+    const x = bitcoinInvoice(w.ledger);
+    await assert.rejects(() => w.mobile.quoteBitcoinInvoice({ request: x.request }), (e) => e.refusal === "rate" && /above the market rate/.test(e.message));
+    assert.equal(w.lnd.sends.length, 0);
+  } finally {
+    await w.close();
+  }
+  const hostile = await world({ behave: { payee: "02" + "99".repeat(32) } });
+  try {
+    const x = bitcoinInvoice(hostile.ledger);
+    await assert.rejects(() => hostile.mobile.quoteBitcoinInvoice({ request: x.request }), (e) => e.refusal === "invalid_hold_invoice");
+    assert.equal(hostile.invoices.lastAttempt(x.hash).invalid, true, "never offered again");
+  } finally {
+    await hostile.close();
+  }
+});
+
+test("a firm price that ran out: the service is asked again once it has ended it, and says how long that takes", async () => {
+  const w = await world({ behave: { expiresIn: 60 } });
+  try {
+    const x = bitcoinInvoice(w.ledger);
+    const first = await w.mobile.quoteBitcoinInvoice({ request: x.request });
+    // Five seconds left: too few to pay, and the service still holds it.
+    w.tick(55);
+    await assert.rejects(
+      () => w.mobile.quoteBitcoinInvoice({ request: x.request }),
+      (e) => e.refusal === "in_progress" && e.statusCode === 409 && e.details.retryAfterSeconds === 10 && /Try again in 10 seconds/.test(e.message)
+    );
+    // Run out by this node's clock, not yet ended by the service.
+    w.tick(7);
+    await assert.rejects(
+      () => w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: first.maxIncomingSat }),
+      (e) => e.refusal === "in_progress" && e.details.retryAfterSeconds === 3 && /still holding its last price/.test(e.message)
+    );
+    assert.equal(w.lnd.sends.length, 0);
+    // Ended there: a new price.
+    w.ledger.swaps.get(x.hash).state = "expired";
+    const second = await w.mobile.quoteBitcoinInvoice({ request: x.request });
+    assert.equal(second.secondsLeft, 60);
+    assert.notEqual(w.invoices.lastAttempt(x.hash).holdInvoice, w.invoices.record(x.hash).attempts[0].holdInvoice);
+    const paid = await w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: second.maxIncomingSat });
+    assert.equal(paid.status, "succeeded");
+  } finally {
+    await w.close();
+  }
+});
+
 test("an invoice too near its end for the service says to ask for a new one", async () => {
   const w = await world({ behave: { quoteError: [400, "expires_soon", "the invoice has 29s left, less than the 20s a quote needs"] } });
   try {
     const x = bitcoinInvoice(w.ledger);
-    await assert.rejects(
-      () => w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: 1000 }),
-      (e) => e.refusal === "expires_soon" && e.statusCode === 400 && /expires too soon to pay through the service\. Ask for a new invoice and pay it right away\./.test(e.message)
-    );
+    for (const attempt of [() => w.mobile.quoteBitcoinInvoice({ request: x.request }), () => w.mobile.payBitcoinInvoice({ request: x.request, maxIncomingSat: 1000 })]) {
+      await assert.rejects(attempt, (e) => e.refusal === "expires_soon" && e.statusCode === 400 && /expires too soon to pay through the service\. Ask for a new invoice and pay it right away\./.test(e.message));
+    }
     assert.equal(w.lnd.sends.length, 0);
+  } finally {
+    await w.close();
+  }
+});
+
+test("own bridge: a firm price is nothing to ask for", async () => {
+  const ledger = createLedger();
+  const w = await world({ ledger, ownBridge: () => ownBridgeFake(ledger) });
+  try {
+    const x = bitcoinInvoice(ledger, { expiry: 105 });
+    const q = await w.mobile.quoteBitcoinInvoice({ request: x.request });
+    assert.deepEqual(q, { source: "own_bridge", maxIncomingSat: 0, invoiceExpiresAt: NOW + 45, invoiceSecondsLeft: 45 });
+    assert.equal(w.service.calls.quote, 0);
   } finally {
     await w.close();
   }

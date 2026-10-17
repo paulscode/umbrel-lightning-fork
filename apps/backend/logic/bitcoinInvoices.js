@@ -691,7 +691,7 @@ function createBitcoinInvoices({
         "The service's request has already expired by this node's clock, which disagrees with the service's, so nothing was paid. Check this node's clock."
       );
     }
-    return { reference: ref, effective };
+    return { reference: ref, effective, widening, allowed: allowance(ref, premium(), widening) };
   }
 
   // The market rate, or a refusal: asked before the service is, so that

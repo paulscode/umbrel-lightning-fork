@@ -42,6 +42,9 @@ router.post(
   handle((req) => mobile.decode(body(req).input, { capabilities: [mobile.BITCOIN_INVOICE_CAPABILITY] }))
 );
 
+// As the mobile API's /quote/bitcoin-invoice.
+router.post("/quote", handle((req) => mobile.quoteBitcoinInvoice({ request: body(req).request })));
+
 // As the mobile API's /pay/bitcoin-invoice, request ids and all; the page
 // is one client, so they are kept apart from the phones' by scope alone.
 router.post(

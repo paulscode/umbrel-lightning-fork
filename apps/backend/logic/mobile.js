@@ -549,6 +549,9 @@ function createMobile({
       createdAt: created,
       expiresAt,
       expired,
+      // The time it has left by this node's clock, which the invoice's
+      // expiry is read against: a phone's clock may not agree.
+      secondsLeft: Math.max(0, expiresAt - now()),
       ours: false,
       ...described,
       payable: !described.message,
@@ -1194,6 +1197,55 @@ function createMobile({
     return withHashLock(x.paymentHash, () => payBitcoinLocked(x, max, again));
   }
 
+  // A firm price for a SHA256 invoice, asked for as soon as it is read, so
+  // that the time the user takes to look at it is not taken from the time
+  // the service's request has: the service's request now, checked as for
+  // paying it (all but the ceiling, which this price is), and kept as the
+  // attempt that paying the invoice pays while it has MIN_HOLD_SECONDS left.
+  // Asking again while it stands answers with the same request. Nothing is
+  // paid.
+  //
+  // {source: "service", incomingSat, feeSat, maxIncomingSat, routingFeeLimitSat,
+  // expiresAt, secondsLeft, minSecondsLeft, invoiceExpiresAt,
+  // invoiceSecondsLeft, serviceLabel, reference}: `maxIncomingSat` is the
+  // price, to pay it with; `secondsLeft` its time left by this node's clock,
+  // and paying it needs `minSecondsLeft` of it. From the node's own bridge,
+  // {source: "own_bridge", maxIncomingSat: 0, invoice...}: nothing to price.
+  async function quoteBitcoinInvoice({ request }) {
+    const x = await readBitcoinInvoice(request);
+    return withHashLock(x.paymentHash, async () => {
+      const invoice = { invoiceExpiresAt: x.expiresAt, invoiceSecondsLeft: Math.max(0, x.expiresAt - now()) };
+      if (await ownBridgeRoute(x, false)) {
+        return { source: OWN_BRIDGE, maxIncomingSat: 0, ...invoice };
+      }
+      const { quoted, y, checked } = await serviceRequest(x, null, false, { quoteOnly: true });
+      const incomingSat = Math.ceil(y.amountMsat / 1000);
+      const atRateSat = quoted.rate > 0 ? x.amountMsat / quoted.rate / 1000 : null;
+      const deadline = holdDeadline(quoted, y);
+      const ref = checked.reference;
+      return {
+        source: "service",
+        incomingSat,
+        feeSat: atRateSat === null ? null : Math.max(0, Math.ceil(incomingSat - atRateSat - 1e-9)),
+        maxIncomingSat: incomingSat,
+        routingFeeLimitSat: routingFeeLimit(incomingSat),
+        expiresAt: deadline,
+        secondsLeft: Math.max(0, deadline - now()),
+        minSecondsLeft: MIN_HOLD_SECONDS,
+        ...invoice,
+        serviceLabel: (bitcoinInvoices().get().service || {}).label || "",
+        reference: {
+          rate: ref.rate,
+          premium: ref.rate / checked.effective - 1,
+          premiumAllowed: checked.allowed,
+          serviceWidening: checked.widening,
+          withinLimit: true,
+          source: ref.source,
+        },
+      };
+    });
+  }
+
   // Whether this invoice is paid from the node's own bridge: once an
   // attempt has gone that way, always; else when the bridge's SHA256 node
   // can pay it now and no payment through a service is under way. Throws the
@@ -1379,11 +1431,13 @@ function createMobile({
     }
   }
 
-  async function payBitcoinLocked(x, max, again) {
-    const route = await ownBridgeRoute(x, again);
-    if (route) {
-      return payOwnLocked(x, again, route);
-    }
+  // The service's request to pay for `x`, checked and ready to pay: {quoted,
+  // y}, or {done: <the outcome>} when asking again finds a payment that
+  // already has one. The standing request when the service still waits on it
+  // with time left, else a new one once the last attempt has ended.
+  // `quoteOnly`: for a price to show before the user agrees to one (see
+  // quoteBitcoinInvoice), so without a ceiling.
+  async function serviceRequest(x, max, again, { quoteOnly = false } = {}) {
     const hash = x.paymentHash;
     const service = bitcoinInvoices();
     // Being paid by this dashboard right now: the service holds it.
@@ -1404,7 +1458,7 @@ function createMobile({
         service.updateAttempt(hash, { state: "succeeded", outcome: found.result });
       }
       if (again) {
-        return bitcoinPaid(found.result, x);
+        return { done: bitcoinPaid(found.result, x) };
       }
       throw alreadyPaid();
     }
@@ -1418,7 +1472,7 @@ function createMobile({
     if (last && last.state === "succeeded" && last.outcome) {
       // Paid, and older than the node's list of payments.
       if (again) {
-        return bitcoinPaid(last.outcome, x);
+        return { done: bitcoinPaid(last.outcome, x) };
       }
       throw alreadyPaid();
     }
@@ -1453,16 +1507,18 @@ function createMobile({
       }
       // Paid, by a payment the node's list no longer shows.
       if (again) {
-        return bitcoinPaid(
-          {
-            status: "succeeded",
-            paymentHash: hash,
-            preimage: proof,
-            amountSat: last ? Math.ceil(num(last.amountMsat) / 1000) : 0,
-            feeSat: 0,
-          },
-          x
-        );
+        return {
+          done: bitcoinPaid(
+            {
+              status: "succeeded",
+              paymentHash: hash,
+              preimage: proof,
+              amountSat: last ? Math.ceil(num(last.amountMsat) / 1000) : 0,
+              feeSat: 0,
+            },
+            x
+          ),
+        };
       }
       throw alreadyPaid(proof);
     }
@@ -1511,7 +1567,7 @@ function createMobile({
     }
     // Only a new payment needs the ceiling: what came before (paid, on its
     // way, ended) is answered without one.
-    if (!max) {
+    if (!max && !quoteOnly) {
       throw bad("Say the most you agree to pay for this invoice.");
     }
 
@@ -1533,6 +1589,7 @@ function createMobile({
         sentAt: last.sentAt || null,
         hash: last.hash || "",
         spread: last.spread || 0,
+        rate: last.rate || null,
       };
     } else if (last && theirs && !ended && !waiting) {
       throw refuse(
@@ -1549,7 +1606,7 @@ function createMobile({
         if (error.refusal === "already_paid") {
           const mine = await lookPayment(hash).catch(() => null);
           if (again && mine && mine.state === "succeeded") {
-            return bitcoinPaid(mine.result, x);
+            return { done: bitcoinPaid(mine.result, x) };
           }
           throw alreadyPaid();
         }
@@ -1586,7 +1643,8 @@ function createMobile({
       // When it stops being payable on this node's clock, for asking
       // again (see holdDeadline).
       service.updateAttempt(hash, { deadline: holdDeadline(quoted, y) });
-      await service.checkHold({ x, y, quoted, maxIncomingSat: max });
+      const checked = await service.checkHold({ x, y, quoted, maxIncomingSat: quoteOnly ? Infinity : max });
+      return { quoted, y, checked };
     } catch (error) {
       if (error.refusal) {
         service.updateAttempt(hash, {
@@ -1597,6 +1655,20 @@ function createMobile({
       }
       throw error;
     }
+  }
+
+  async function payBitcoinLocked(x, max, again) {
+    const route = await ownBridgeRoute(x, again);
+    if (route) {
+      return payOwnLocked(x, again, route);
+    }
+    const ready = await serviceRequest(x, max, again);
+    if (ready.done) {
+      return ready.done;
+    }
+    const { y } = ready;
+    const hash = x.paymentHash;
+    const service = bitcoinInvoices();
 
     const amountSat = Math.ceil(y.amountMsat / 1000);
     service.updateAttempt(hash, {
@@ -1903,6 +1975,7 @@ function createMobile({
     sendOnchain,
     payLightning,
     payBitcoinInvoice,
+    quoteBitcoinInvoice,
     receiveAddress,
     createInvoice,
     invoiceStatus,
