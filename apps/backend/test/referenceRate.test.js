@@ -7,6 +7,9 @@ const ref = require("../logic/referenceRate.js");
 
 const ticker = require(path.join(__dirname, "fixtures", "neoxa-btcb2-btc-ticker.json"));
 const candles = require(path.join(__dirname, "fixtures", "neoxa-btcb2-btc-candles.json"));
+const nonKYC = require(path.join(__dirname, "fixtures", "nonkyc-btcb2-usdt-ticker.json"));
+const coinGecko = require(path.join(__dirname, "fixtures", "coingecko-exchange-rates.json"));
+const mempool = require(path.join(__dirname, "fixtures", "mempool-prices.json"));
 
 test("the live ticker yields the last trade's rate", () => {
   const rate = ref.tickerRate(ticker);
@@ -60,8 +63,9 @@ test("the rate is cached; with Neoxa down there is none, and that is an error", 
   });
   const first = await r.get();
   assert.equal(first.rate, ticker.ticker.lastPrice);
+  const fetched = calls;
   await r.get();
-  assert.equal(calls, 2, "one ticker and one candles fetch for both");
+  assert.equal(calls, fetched, "one set of fetches for both");
   down = true;
   t += ref.TTL_MS;
   await assert.rejects(() => r.get(), (e) => e.statusCode === 503 && e.refusal === "reference_unavailable" && /nothing was paid/.test(e.message));
@@ -90,4 +94,86 @@ test("one trade far from the book does not move the rate", () => {
   // No usable book: the last trade.
   assert.equal(ref.tickerRate(book(0.0048, 0, 0)), 0.0048);
   assert.equal(ref.tickerRate(book(0.0048, 0.005, 0.004)), 0.0048);
+});
+
+test("NonKYC's live ticker and both BTC/USD sources are read", () => {
+  assert.equal(ref.nonKYCRate(nonKYC), Number(nonKYC.last_price));
+  assert.equal(ref.nonKYCRate({ ticker_id: "XYZ_USDT", last_price: "1" }), null);
+  assert.equal(ref.nonKYCRate({ ticker_id: "BTCB2_USDT", last_price: "x" }), null);
+  assert.equal(ref.nonKYCRate(null), null);
+  assert.equal(ref.usdOf(coinGecko), coinGecko.rates.usd.value);
+  assert.equal(ref.usdOf(mempool), mempool.USD);
+  assert.equal(ref.usdOf({ rates: {} }), null);
+  assert.equal(ref.usdOf("<html>"), null);
+});
+
+test("the worse venue for the payer, down to the bridge's bound under Neoxa", () => {
+  assert.deepEqual(ref.worseVenue(0.006, null), { rate: 0.006, source: "Neoxa" });
+  assert.deepEqual(ref.worseVenue(0.006, 0.0062), { rate: 0.006, source: "Neoxa" });
+  assert.deepEqual(ref.worseVenue(0.006, 0.00582), { rate: 0.00582, source: "NonKYC" });
+  // 10% under: no further than 4%.
+  const far = ref.worseVenue(0.006, 0.0054);
+  assert.ok(Math.abs(far.rate - 0.006 * (1 - ref.MAX_VENUE_GAP)) < 1e-15 && far.source === "NonKYC");
+});
+
+// A fake market: Neoxa's ticker at `neoxa`, NonKYC's at `usdt` dollars, and
+// BTC/USD from whichever sources are up.
+function venues({ neoxa = 0.006, usdt = null, coinGeckoUsd = 85000, mempoolUsd = null } = {}) {
+  const asked = {};
+  const fetchJson = async (url) => {
+    asked[url] = (asked[url] || 0) + 1;
+    if (url === ref.TICKER_URL) {
+      return { success: true, pair: "BTCB2_BTC", ticker: { lastPrice: neoxa } };
+    }
+    if (url === ref.NONKYC_TICKER_URL && usdt) {
+      return { ticker_id: "BTCB2_USDT", last_price: String(usdt), bid: String(usdt), ask: String(usdt) };
+    }
+    if (url === ref.COINGECKO_RATES_URL && coinGeckoUsd) {
+      return { rates: { btc: { value: 1 }, usd: { value: coinGeckoUsd } } };
+    }
+    if (url === ref.MEMPOOL_PRICES_URL && mempoolUsd) {
+      return { time: 1, USD: mempoolUsd };
+    }
+    if (url === ref.CANDLES_URL) {
+      return { success: true, candles: [] };
+    }
+    throw new Error("connect ECONNREFUSED");
+  };
+  return { asked, fetchJson };
+}
+
+test("NonKYC lower than Neoxa is the rate a payer is checked against", async () => {
+  // 0.00582: 3% under.
+  const v = venues({ usdt: 0.00582 * 85000 });
+  const r = ref.createReferenceRate({ fetchJson: v.fetchJson, log: () => {} });
+  const got = await r.get();
+  assert.ok(Math.abs(got.rate - 0.00582) < 1e-12);
+  assert.equal(got.source, "NonKYC");
+
+  // NonKYC higher, or not answering: Neoxa.
+  for (const usdt of [0.0062 * 85000, null]) {
+    const w = venues({ usdt });
+    const g = await ref.createReferenceRate({ fetchJson: w.fetchJson, log: () => {} }).get();
+    assert.equal(g.rate, 0.006);
+    assert.equal(g.source, "Neoxa");
+  }
+
+  // Without any BTC/USD, NonKYC cannot be compared: Neoxa.
+  const noUsd = venues({ usdt: 0.00582 * 85000, coinGeckoUsd: null });
+  assert.equal((await ref.createReferenceRate({ fetchJson: noUsd.fetchJson, log: () => {} }).get()).rate, 0.006);
+});
+
+test("BTC/USD is CoinGecko's at most every five minutes, else mempool.space's", async () => {
+  let t = 0;
+  const v = venues({ usdt: 0.00582 * 85000, coinGeckoUsd: null, mempoolUsd: 85000 });
+  const r = ref.createReferenceRate({ fetchJson: v.fetchJson, now: () => t, log: () => {} });
+  assert.ok(Math.abs((await r.get()).rate - 0.00582) < 1e-12, "mempool.space's price serves");
+  for (let i = 0; i < 9; i++) {
+    t += ref.TTL_MS;
+    await r.get();
+  }
+  // Ten reference reads over nine minutes: BTC/USD asked twice.
+  assert.equal(v.asked[ref.TICKER_URL], 10);
+  assert.equal(v.asked[ref.COINGECKO_RATES_URL], 2);
+  assert.equal(v.asked[ref.MEMPOOL_PRICES_URL], 2);
 });
