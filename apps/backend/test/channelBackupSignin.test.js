@@ -102,3 +102,27 @@ test("the agent's signin and nocreds records read as sentences", () => {
   fs.writeFileSync(stateFile, JSON.stringify({failures: [{target: "gdrive", code: "signin", detail: ""}]}));
   assert.match(cb.readState().failures[0].message, /^Google Drive: Google refused the saved sign-in/);
 });
+
+test("a new sign-in is not refused by the record of the old one, but a later refusal counts", async () => {
+  fs.writeFileSync(stateFile, JSON.stringify({attempt: 7, lastSuccess: null, failures: [{target: "gdrive", code: "signin", detail: ""}]}));
+  assert.equal(cb.publicConfig().gdrive.signinRefused, true);
+  answer = {access_token: "at6", refresh_token: "rt6", expires_in: 3599};
+  const r = await cb.saveProvider("gdrive", {enabled: true, clientId: "cid", clientSecret: "", authCode: "code-6"});
+  assert.equal(r.authorizeUrl, null);
+  assert.match(r.message, /will be copied to Google Drive/);
+  assert.equal(r.config.gdrive.signinRefused, false, "the save's own config");
+  assert.equal(cb.publicConfig().gdrive.signinRefused, false);
+  assert.deepEqual(cb.status().targets.find(t => t.provider === "gdrive"), {provider: "gdrive", ready: true});
+
+  // The agent's next run, with the new sign-in, is refused too.
+  fs.writeFileSync(stateFile, JSON.stringify({attempt: 8, lastSuccess: null, failures: [{target: "gdrive", code: "signin", detail: ""}]}));
+  assert.equal(cb.publicConfig().gdrive.signinRefused, true);
+  assert.deepEqual(cb.status().targets.find(t => t.provider === "gdrive"), {provider: "gdrive", ready: false});
+});
+
+test("only Google Drive and Dropbox have a sign-in to be refused", async () => {
+  await cb.saveProvider("nextcloud", {enabled: true, url: "https://cloud.example.com", user: "u", pass: "p"});
+  fs.writeFileSync(stateFile, JSON.stringify({attempt: 9, failures: [{target: "nextcloud", code: "signin", detail: ""}]}));
+  assert.equal(cb.signinRefused("nextcloud"), false);
+  assert.deepEqual(cb.status().targets.find(t => t.provider === "nextcloud"), {provider: "nextcloud", ready: true});
+});

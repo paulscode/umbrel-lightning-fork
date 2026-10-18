@@ -42,6 +42,9 @@ const backupPath = () => constants.CHANNEL_BACKUP_FILE || path.join(lndDir(), "d
 const sha256Dir = () => process.env.SHA256_LND_DIR || path.join(lndDir(), "sha256-node");
 const sha256BackupPath = () => path.join(sha256Dir(), "data/chain/bitcoin", process.env.LND_NETWORK || "mainnet", "channel.backup");
 const sha256StatePath = () => path.join(lndDir(), ".channel-backup-sha256-state.json");
+// The agent's attempt count when each sign-in was last renewed here; the
+// dashboard's own file, which the agent does not read.
+const renewalsPath = () => path.join(lndDir(), ".channel-backup-signins.json");
 
 const LABELS = {sftp: "SFTP", nextcloud: "Nextcloud", dropbox: "Dropbox", gdrive: "Google Drive", agent: "Channel backup"};
 const labelOf = provider => LABELS[provider] || provider;
@@ -203,11 +206,36 @@ function publicConfig(cfg = readConfig()) {
   return out;
 }
 
-// Whether the provider refused the saved sign-in when LND's agent last tried
-// it. The bridge node's agent uses the same sign-in, but its record can be
-// left over from before the bridge was turned off, so it is not consulted.
+// Whether Google Drive or Dropbox refused the saved sign-in when LND's agent
+// last tried it. A refusal recorded no later than the attempt a new sign-in
+// was saved at was the old sign-in's. The bridge node's agent uses the same
+// sign-in, but its record can be left over from before the bridge was
+// turned off, so it is not consulted.
 function signinRefused(provider, state = readState()) {
+  if (provider !== "gdrive" && provider !== "dropbox") {
+    return false;
+  }
+  const renewedAt = readRenewals()[provider];
+  if (Number.isInteger(renewedAt) && state.attempt <= renewedAt) {
+    return false;
+  }
   return state.failures.some(f => f.target === provider && f.code === "signin");
+}
+
+function readRenewals() {
+  try {
+    const r = JSON.parse(fs.readFileSync(renewalsPath(), "utf8"));
+    return r && typeof r === "object" && !Array.isArray(r) ? r : {};
+  } catch (error) {
+    return {};
+  }
+}
+
+function recordRenewal(provider) {
+  const file = renewalsPath();
+  const tmp = `${file}.tmp.${crypto.randomBytes(6).toString("hex")}`;
+  fs.writeFileSync(tmp, JSON.stringify({...readRenewals(), [provider]: readState().attempt}) + "\n", {mode: 0o600});
+  fs.renameSync(tmp, file);
 }
 
 // ---------- validation
@@ -601,6 +629,9 @@ async function saveProviderNow(provider, input) {
 
   cfg[provider] = next;
   writeConfig(cfg);
+  if (renewed) {
+    recordRenewal(provider);
+  }
 
   // A sign-in the provider refused needs a new one: the link again, and a
   // new code pasted back.
@@ -741,7 +772,8 @@ function readState(file = statePath()) {
 function status() {
   const cfg = readConfig();
   const state = readState();
-  // A sign-in the provider refused is not ready until a new one.
+  // A sign-in the provider refused is not ready until a new one (signinRefused
+  // is false for targets without a sign-in).
   const targets = PROVIDERS.filter(p => cfg[p] && cfg[p].enabled).map(p => ({provider: p, ready: ready(p, cfg[p]) && !signinRefused(p, state)}));
   let backupMtime = null;
   try {
