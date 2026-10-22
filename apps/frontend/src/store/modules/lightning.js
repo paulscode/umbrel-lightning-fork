@@ -495,6 +495,11 @@ const actions = {
         //example - in case of a keysend tx there is no payment request
         continue;
       }
+      // A BOLT 12 payment's request is the lni1 invoice it paid, which the
+      // BOLT 11 decoder behind this endpoint can't read.
+      if (tx.paymentRequest.toLowerCase().startsWith("lni")) {
+        continue;
+      }
 
       try {
         const invoiceDetails = await API.get(
