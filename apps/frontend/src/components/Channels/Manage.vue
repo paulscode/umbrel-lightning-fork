@@ -157,7 +157,7 @@
           <span class="text-muted">Remote Peer Alias</span>
           <div class="w-75 text-right">
             <span class="font-bold" style="overflow-wrap: break-word;">{{
-              channel.remoteAlias
+              channel.remoteAlias || "Not announced yet"
             }}</span>
           </div>
         </div>

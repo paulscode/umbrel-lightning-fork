@@ -13,12 +13,7 @@
             <span v-if="resizeChip" class="resize-chip ml-1">{{ resizeChip }}</span>
           </div>
           <div>
-            <span v-if="channel.remoteAlias">{{ channel.remoteAlias }}</span>
-            <span
-              class="loading-placeholder loading-placeholder-sm block"
-              style="width:80%; margin-top: 8px;"
-              v-else
-            ></span>
+            <span :title="channel.remotePubkey">{{ peerName }}</span>
           </div>
         </div>
 
@@ -35,7 +30,7 @@
             <span v-if="resizeChip" class="resize-chip ml-1">{{ resizeChip }}</span>
           </div>
           <div>
-            <small>{{ channel.remoteAlias }}</small>
+            <small :title="channel.remotePubkey">{{ peerName }}</small>
           </div>
         </div>
       </b-col>
@@ -76,11 +71,15 @@
 <script>
 import Status from "@/components/Utility/Status";
 import Bar from "@/components/Channels/Bar";
+import peerName from "@/helpers/peer-name";
 
 export default {
   computed: {
     unit() {
       return this.$store.state.system.unit;
+    },
+    peerName() {
+      return peerName(this.channel);
     },
     pendingLocalDelta() {
       const p = this.channel.pendingSplice;

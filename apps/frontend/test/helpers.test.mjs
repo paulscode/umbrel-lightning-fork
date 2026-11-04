@@ -161,3 +161,14 @@ test("Advanced Settings refuses a fraction or a too-large number where lnd reads
     "Maximum Payment Lock-up Time must be at least the Timelock Delta.",
   ]);
 });
+
+test("a peer with no alias is named by its public key, not left loading", async () => {
+  const { default: peerName, shortPubkey } = await load("peer-name");
+  const key = "025996f9dd411c833a5ff4c434966b274662f1a454417888086e28fe798c15c928";
+  assert.equal(peerName({ remoteAlias: "ACINQ", remotePubkey: key }), "ACINQ");
+  assert.equal(peerName({ remoteAlias: "", remotePubkey: key }), "025996f9…15c928");
+  assert.equal(peerName({ remoteAlias: "  ", remotePubkey: key }), "025996f9…15c928");
+  assert.equal(peerName({ remotePubkey: "" }), "");
+  assert.equal(peerName(undefined), "");
+  assert.equal(shortPubkey("02abcd"), "02abcd");
+});
