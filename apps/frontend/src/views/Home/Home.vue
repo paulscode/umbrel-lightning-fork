@@ -489,7 +489,7 @@ export default {
         return `Copied to ${names} ${moment(status.state.lastSuccess * 1000).fromNow()}.`;
       }
       if (!status.hasBackup) {
-        return `Will copy to ${names} once your first channel opens.`;
+        return `Will copy to ${names} once LND has started and caught up with the chain.`;
       }
       return `Waiting to copy to ${names}.`;
     },

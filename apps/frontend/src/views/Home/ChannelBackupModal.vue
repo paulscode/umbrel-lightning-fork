@@ -217,7 +217,7 @@ export default {
         return `Last copied to ${names} ${moment(status.state.lastSuccess * 1000).fromNow()}.`;
       }
       if (!status.hasBackup) {
-        return `Ready. LND writes channel.backup when your first channel opens; it is copied to ${names} from then on.`;
+        return `Ready. LND writes channel.backup each time it starts, once it has caught up with the chain; it is copied to ${names} from then on.`;
       }
       return `Ready; waiting for the first copy to ${names}.`;
     }

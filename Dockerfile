@@ -49,9 +49,9 @@ ARG TARGETARCH
 # Both downloads are checked against pinned SHA-256 sums (rclone's from its
 # release SHA256SUMS; the agent's from the pinned commit), so a version pin
 # is an artifact pin. curl and unzip leave with the layer.
-ARG RCLONE_VERSION=v1.68.2
-ARG RCLONE_SHA256_AMD64=0e6fa18051e67fc600d803a2dcb10ddedb092247fc6eee61be97f64ec080a13c
-ARG RCLONE_SHA256_ARM64=c6e9d4cf9c88b279f6ad80cd5675daebc068e404890fa7e191412c1bc7a4ac5f
+ARG RCLONE_VERSION=v1.75.2
+ARG RCLONE_SHA256_AMD64=349ac8fba6ff65d6247043f1750cdcb518ec5d500ef91463a10d37c0ccdf3702
+ARG RCLONE_SHA256_ARM64=7e1e8d69654941b7b7df84ee74c5f7fb09cce7d5496947fb7bf16b55ff427d10
 ARG BACKUP_AGENT_REF=edf1b4285ace1a540e998da164c8035ce37c106e
 ARG BACKUP_AGENT_SHA256=3c28e380819bc2a051cb4f71d02e36c121cbf3be76264ad0099a22a17560f07d
 RUN set -eu; \

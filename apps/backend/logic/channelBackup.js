@@ -805,7 +805,7 @@ async function backupNow() {
     case 0:
       return {ok: true, message: "channel.backup was copied to every enabled target.", state};
     case 3:
-      return {ok: true, message: "There is no channel.backup to copy yet. LND writes it when your first channel opens.", state};
+      return {ok: true, message: "There is no channel.backup to copy yet. LND writes it each time it starts, once it has caught up with the chain.", state};
     case 4:
       return {ok: false, message: "No backup target is enabled. Configure one first.", state};
     case 5:
