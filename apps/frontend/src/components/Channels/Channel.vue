@@ -13,7 +13,7 @@
             <span v-if="resizeChip" class="resize-chip ml-1">{{ resizeChip }}</span>
           </div>
           <div>
-            <span :title="channel.remotePubkey">{{ peerName }}</span>
+            <span :title="channel.remotePubkey" :class="{ 'peer-key': !peerHasAlias }">{{ peerName }}</span>
           </div>
         </div>
 
@@ -30,7 +30,7 @@
             <span v-if="resizeChip" class="resize-chip ml-1">{{ resizeChip }}</span>
           </div>
           <div>
-            <small :title="channel.remotePubkey">{{ peerName }}</small>
+            <small :title="channel.remotePubkey" :class="{ 'peer-key': !peerHasAlias }">{{ peerName }}</small>
           </div>
         </div>
       </b-col>
@@ -71,12 +71,15 @@
 <script>
 import Status from "@/components/Utility/Status";
 import Bar from "@/components/Channels/Bar";
-import peerName from "@/helpers/peer-name";
+import peerName, { hasAlias } from "@/helpers/peer-name";
 
 export default {
   computed: {
     unit() {
       return this.$store.state.system.unit;
+    },
+    peerHasAlias() {
+      return hasAlias(this.channel);
     },
     peerName() {
       return peerName(this.channel);
@@ -168,6 +171,9 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+.peer-key {
+  font-family: monospace;
+}
 .channel {
   transition: box-shadow 0.3s, background 0.3s ease;
   &:hover {

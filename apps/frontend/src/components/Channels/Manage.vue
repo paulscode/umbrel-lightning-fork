@@ -384,6 +384,7 @@ import InputCopy from "@/components/Utility/InputCopy";
 import API from "@/helpers/api";
 import getErrorMessage from "@/helpers/error-message";
 import { statusText, pendingText, lastText } from "@/helpers/resize";
+import peerName from "@/helpers/peer-name";
 
 export default {
   props: {
@@ -443,12 +444,12 @@ export default {
     },
     pendingSummary() {
       return pendingText(this.pendingSplice, {
-        peerName: this.channel.remoteAlias,
+        peerName: peerName(this.channel),
         blockMinutes: this.pendingSplice && this.pendingSplice.blockMinutes,
       });
     },
     lastSpliceSummary() {
-      return lastText(this.channel.lastSplice, { peerName: this.channel.remoteAlias });
+      return lastText(this.channel.lastSplice, { peerName: peerName(this.channel) });
     },
     spliceConfirmationsLeft() {
       if (!this.pendingSplice) {

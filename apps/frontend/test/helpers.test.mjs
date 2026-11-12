@@ -163,12 +163,19 @@ test("Advanced Settings refuses a fraction or a too-large number where lnd reads
 });
 
 test("a peer with no alias is named by its public key, not left loading", async () => {
-  const { default: peerName, shortPubkey } = await load("peer-name");
+  const { default: peerName, shortPubkey, hasAlias } = await load("peer-name");
   const key = "025996f9dd411c833a5ff4c434966b274662f1a454417888086e28fe798c15c928";
   assert.equal(peerName({ remoteAlias: "ACINQ", remotePubkey: key }), "ACINQ");
   assert.equal(peerName({ remoteAlias: "", remotePubkey: key }), "025996f9…15c928");
   assert.equal(peerName({ remoteAlias: "  ", remotePubkey: key }), "025996f9…15c928");
   assert.equal(peerName({ remotePubkey: "" }), "");
+
+  // Controls, bidi overrides and separators are taken out of an alias.
+  assert.equal(peerName({ remoteAlias: "AC\u202EQNI", remotePubkey: key }), "ACQNI");
+  assert.equal(peerName({ remoteAlias: "a\u0007b\u2028c", remotePubkey: key }), "abc");
+  assert.equal(peerName({ remoteAlias: "\u200B\u202E", remotePubkey: key }), "025996f9…15c928");
+  assert.equal(hasAlias({ remoteAlias: "\u202E" }), false);
+  assert.equal(hasAlias({ remoteAlias: "ACINQ" }), true);
   assert.equal(peerName(undefined), "");
   assert.equal(shortPubkey("02abcd"), "02abcd");
 });

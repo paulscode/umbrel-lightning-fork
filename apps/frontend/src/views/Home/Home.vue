@@ -387,6 +387,7 @@ import { mapState } from "vuex";
 import moment from "moment";
 
 import API from "@/helpers/api";
+import peerName from "@/helpers/peer-name";
 
 import CardWidget from "@/components/CardWidget";
 import Stat from "@/components/Utility/Stat";
@@ -629,7 +630,8 @@ export default {
           channel.lastSplice.outcome === "locked"
         ) {
           const size = Number(channel.capacity).toLocaleString();
-          const peer = channel.remoteAlias ? ` with ${channel.remoteAlias}` : "";
+          const name = peerName(channel);
+          const peer = name ? ` with ${name}` : "";
           this.$bvToast.toast(`Your channel${peer} is now ${size} sats.`, {
             title: "Channel resized",
             autoHideDelay: 5000,

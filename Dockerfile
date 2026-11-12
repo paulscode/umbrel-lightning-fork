@@ -59,12 +59,12 @@ RUN set -eu; \
     case "$arch" in amd64) sum="$RCLONE_SHA256_AMD64" ;; arm64) sum="$RCLONE_SHA256_ARM64" ;; *) echo "no rclone checksum for $arch" >&2; exit 1 ;; esac; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl unzip jq openssh-client util-linux; \
-    curl -fsSL "https://downloads.rclone.org/${RCLONE_VERSION}/rclone-${RCLONE_VERSION}-linux-${arch}.zip" -o /tmp/rclone.zip; \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 "https://downloads.rclone.org/${RCLONE_VERSION}/rclone-${RCLONE_VERSION}-linux-${arch}.zip" -o /tmp/rclone.zip; \
     echo "$sum  /tmp/rclone.zip" | sha256sum -c -; \
     unzip -j /tmp/rclone.zip '*/rclone' -d /usr/local/bin; \
     chmod 755 /usr/local/bin/rclone; \
     rm -f /tmp/rclone.zip; \
-    curl -fsSL "https://raw.githubusercontent.com/paulscode/lightning-fork-startos/${BACKUP_AGENT_REF}/backup-agent.sh" -o /usr/local/bin/backup-agent.sh; \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 "https://raw.githubusercontent.com/paulscode/lightning-fork-startos/${BACKUP_AGENT_REF}/backup-agent.sh" -o /usr/local/bin/backup-agent.sh; \
     echo "$BACKUP_AGENT_SHA256  /usr/local/bin/backup-agent.sh" | sha256sum -c -; \
     chmod 755 /usr/local/bin/backup-agent.sh; \
     sh -n /usr/local/bin/backup-agent.sh; \
